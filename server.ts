@@ -2557,7 +2557,7 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
 
         if (db.owners.includes(userId)) {
            return ctx.reply(
-             "👑 DASHBOARD KASIR E4 STORESelamat datang bosku! Mau kelola apa hari ini?",
+             "👑 DASHBOARD E4 STORE\nSelamat datang bosku! Mau kelola apa hari ini?",
              {
                reply_markup: {
                  keyboard: [
@@ -2751,7 +2751,7 @@ Oke kak! Langkah pertama, kasih tau Chuna Username yang kakak mau dong.`);
       
       bot.hears("🔙 Kembali ke Menu Owner", async (ctx) => {
           delete userStates[ctx.from.id];
-          await ctx.reply("👑 DASHBOARD KASIR E4 STORESelamat datang bosku! Mau kelola apa hari ini?", {
+          await ctx.reply("👑 DASHBOARD E4 STORE\nSelamat datang bosku! Mau kelola apa hari ini?", {
               reply_markup: {
                   keyboard: [
                       [{ text: "📒 Cek Utang Member" }],
@@ -3498,7 +3498,23 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                 case 'AWAITING_DOWNLOAD': {
                     if (text === '❌ Batal') {
                         delete userStates[userId];
-                        await ctx.reply("❌ Download dibatalkan.", { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true } });
+                        
+                    let returnMarkup;
+                    if (db.owners.includes(userId)) {
+                        returnMarkup = {
+                            keyboard: [
+                                [{ text: "📒 Cek Utang Member" }],
+                                [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
+                                [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
+                                [{ text: "📢 Pengumuman WA" }],
+                                [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]
+                            ],
+                            resize_keyboard: true
+                        };
+                    } else {
+                        returnMarkup = { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true };
+                    }
+await ctx.reply("❌ Download dibatalkan.", { reply_markup: returnMarkup });
                         return;
                     }
                     const url = text.trim();
@@ -3522,7 +3538,23 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                 case 'AWAITING_DOWNLOAD_FORMAT': {
                     if (text === '❌ Batal') {
                         delete userStates[userId];
-                        await ctx.reply("❌ Download dibatalkan.", { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true } });
+                        
+                    let returnMarkup;
+                    if (db.owners.includes(userId)) {
+                        returnMarkup = {
+                            keyboard: [
+                                [{ text: "📒 Cek Utang Member" }],
+                                [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
+                                [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
+                                [{ text: "📢 Pengumuman WA" }],
+                                [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]
+                            ],
+                            resize_keyboard: true
+                        };
+                    } else {
+                        returnMarkup = { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true };
+                    }
+await ctx.reply("❌ Download dibatalkan.", { reply_markup: returnMarkup });
                         return;
                     }
                     
@@ -3615,14 +3647,46 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                     }
                     
                     delete userStates[userId];
-                    await ctx.reply("Menu Utama", { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true } });
+                    
+                    let returnMarkup;
+                    if (db.owners.includes(userId)) {
+                        returnMarkup = {
+                            keyboard: [
+                                [{ text: "📒 Cek Utang Member" }],
+                                [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
+                                [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
+                                [{ text: "📢 Pengumuman WA" }],
+                                [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]
+                            ],
+                            resize_keyboard: true
+                        };
+                    } else {
+                        returnMarkup = { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true };
+                    }
+await ctx.reply("Menu Utama", { reply_markup: returnMarkup });
                     return;
                 }
 
                 case 'AWAITING_LIRIK': {
                     if (text === '❌ Batal') {
                         delete userStates[userId];
-                        await ctx.reply("❌ Pencarian dibatalkan.", { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true } });
+                        
+                    let returnMarkup;
+                    if (db.owners.includes(userId)) {
+                        returnMarkup = {
+                            keyboard: [
+                                [{ text: "📒 Cek Utang Member" }],
+                                [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
+                                [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
+                                [{ text: "📢 Pengumuman WA" }],
+                                [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]
+                            ],
+                            resize_keyboard: true
+                        };
+                    } else {
+                        returnMarkup = { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true };
+                    }
+await ctx.reply("❌ Pencarian dibatalkan.", { reply_markup: returnMarkup });
                         return;
                     }
                     const query = text.trim();
@@ -3699,7 +3763,23 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                         await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: { keyboard: [[{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true } });
                     } else {
                         delete userStates[userId];
-                        await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true } });
+                        
+                        let returnMarkup;
+                        if (db.owners.includes(userId)) {
+                            returnMarkup = {
+                                keyboard: [
+                                    [{ text: "📒 Cek Utang Member" }],
+                                    [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
+                                    [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
+                                    [{ text: "📢 Pengumuman WA" }],
+                                    [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]
+                                ],
+                                resize_keyboard: true
+                            };
+                        } else {
+                            returnMarkup = { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true };
+                        }
+await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: returnMarkup });
                     }
                     return;
                 }
@@ -3812,7 +3892,23 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                         await ctx.reply("❌ Pengecekan dibatalkan.", { reply_markup: { keyboard: [[{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true } });
                     } else {
                         delete userStates[userId];
-                        await ctx.reply("❌ Pengecekan dibatalkan.", { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true } });
+                        
+                        let returnMarkup;
+                        if (db.owners.includes(userId)) {
+                            returnMarkup = {
+                                keyboard: [
+                                    [{ text: "📒 Cek Utang Member" }],
+                                    [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
+                                    [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
+                                    [{ text: "📢 Pengumuman WA" }],
+                                    [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]
+                                ],
+                                resize_keyboard: true
+                            };
+                        } else {
+                            returnMarkup = { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true };
+                        }
+await ctx.reply("❌ Pengecekan dibatalkan.", { reply_markup: returnMarkup });
                     }
                     return;
                 }
@@ -3958,7 +4054,23 @@ Tagihan kamu udah muncul nih, jangan sampai kelewat ya~
                         await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: { keyboard: [[{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true } });
                     } else {
                         delete userStates[userId];
-                        await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true } });
+                        
+                        let returnMarkup;
+                        if (db.owners.includes(userId)) {
+                            returnMarkup = {
+                                keyboard: [
+                                    [{ text: "📒 Cek Utang Member" }],
+                                    [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
+                                    [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
+                                    [{ text: "📢 Pengumuman WA" }],
+                                    [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]
+                                ],
+                                resize_keyboard: true
+                            };
+                        } else {
+                            returnMarkup = { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true };
+                        }
+await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: returnMarkup });
                     }
                     return;
                 }
@@ -4073,7 +4185,23 @@ Dengan ini menyatakan bahwa:
                         await ctx.reply("❌ Pembayaran dibatalkan.", { reply_markup: { keyboard: [[{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true } });
                     } else {
                         delete userStates[userId];
-                        await ctx.reply("❌ Pembayaran dibatalkan.", { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true } });
+                        
+                        let returnMarkup;
+                        if (db.owners.includes(userId)) {
+                            returnMarkup = {
+                                keyboard: [
+                                    [{ text: "📒 Cek Utang Member" }],
+                                    [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
+                                    [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
+                                    [{ text: "📢 Pengumuman WA" }],
+                                    [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]
+                                ],
+                                resize_keyboard: true
+                            };
+                        } else {
+                            returnMarkup = { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true };
+                        }
+await ctx.reply("❌ Pembayaran dibatalkan.", { reply_markup: returnMarkup });
                     }
                     return;
                 }
