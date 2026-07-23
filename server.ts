@@ -2525,8 +2525,8 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
         let voicePayload: any = null;
         let welcomeVoiceFileId: string | null = db.welcomeVoiceFileId || null;
         
-        const opusPath = require('path').join(process.cwd(), "welcome.opus");
-        if (require('fs').existsSync(opusPath)) {
+        const opusPath = path.join(process.cwd(), "welcome.opus");
+        if (fs.existsSync(opusPath)) {
             if (welcomeVoiceFileId) {
                 voicePayload = welcomeVoiceFileId;
                 voiceExists = true;
@@ -3278,80 +3278,89 @@ await ctx.reply("❌ Download dibatalkan.", { reply_markup: returnMarkup });
                     await ctx.reply("⏳ Tunggu sebentar ya, Chuna sedang mendownload media...");
                     
                     try {
-                        const btch = (await import('btch-downloader')).default || await import('btch-downloader');
-                        let result;
-                        if (url.includes('tiktok.com')) result = await btch.ttdl(url);
-                        else if (url.includes('instagram.com')) result = await btch.igdl(url);
-                        else if (url.includes('youtube.com') || url.includes('youtu.be')) result = await btch.youtube(url);
-                        else if (url.includes('facebook.com') || url.includes('fb.watch')) result = await btch.fbdown(url);
-                        else if (url.includes('twitter.com') || url.includes('x.com')) result = await btch.twitter(url);
-                        else result = await btch.aio(url);
-
                         const isVideo = format === "🎥 Video";
                         const isAudio = format === "🎵 Audio / MP3";
                         const isImage = format === "📸 Gambar";
                         
-                        // Helper to find URL recursively or in array
-                        const extractUrls = (res: any): string[] => {
-                            if (!res) return [];
-                            if (typeof res === 'string' && res.startsWith('http')) return [res];
-                            if (Array.isArray(res)) return res.map(r => extractUrls(r)).flat();
-                            
-                            let urls: string[] = [];
-                            if (res.url) urls.push(res.url);
-                            if (res.video) urls.push(...extractUrls(res.video));
-                            if (res.audio) urls.push(...extractUrls(res.audio));
-                            if (res.image) urls.push(...extractUrls(res.image));
-                            if (res.mp4) urls.push(...extractUrls(res.mp4));
-                            if (res.mp3) urls.push(...extractUrls(res.mp3));
-                            if (res.thumbnail) urls.push(...extractUrls(res.thumbnail));
-                            return urls.flat();
-                        };
+                        const axios = (await import('axios')).default || await import('axios');
+                        let targetUrl = null;
                         
-                        let allUrls = extractUrls(result);
-                        
-                        // Filter by extension roughly
-                        let targetUrls = allUrls.filter(u => {
-                            const lu = u.toLowerCase();
-                            if (isAudio && (lu.includes('.mp3') || lu.includes('audio') || result?.mp3 === u || (result?.audio && JSON.stringify(result.audio).includes(u)))) return true;
-                            if (isVideo && (lu.includes('.mp4') || lu.includes('video') || result?.mp4 === u || (result?.video && JSON.stringify(result.video).includes(u)))) return true;
-                            if (isImage && (lu.includes('.jpg') || lu.includes('.jpeg') || lu.includes('.png') || lu.includes('image') || result?.thumbnail === u)) return true;
-                            return false;
-                        });
-                        
-                        if (targetUrls.length === 0) {
-                            // fallback, if nothing specific matched, maybe just use the first few if we can guess
-                            if (isVideo && result?.mp4) targetUrls = [result.mp4];
-                            else if (isAudio && result?.mp3) targetUrls = [result.mp3];
-                            else if (isImage && result?.thumbnail) targetUrls = [result.thumbnail];
-                            else {
-                                // If still nothing, just give whatever we got based on what the API usually returns
-                                if (isVideo) targetUrls = allUrls.filter(u => !u.includes('.jpg') && !u.includes('.mp3'));
-                                if (isAudio) targetUrls = allUrls.filter(u => !u.includes('.jpg') && !u.includes('.mp4'));
+                        if (url.includes('tiktok.com') || url.includes('vt.tiktok.com')) {
+                            const res = await axios.get('https://tikwm.com/api/', { params: { url } });
+                            if (res.data && res.data.data) {
+                                if (isVideo) targetUrl = res.data.data.play;
+                                else if (isAudio) targetUrl = res.data.data.music;
+                                else if (isImage) targetUrl = res.data.data.cover;
                             }
                         }
                         
-                        // Remove duplicates
-                        targetUrls = [...new Set(targetUrls)];
+                        if (!targetUrl) {
+                            // Fallback to btch-downloader
+                            const btch = (await import('btch-downloader')).default || await import('btch-downloader');
+                            let result;
+                            if (url.includes('tiktok.com')) result = await btch.ttdl(url);
+                            else if (url.includes('instagram.com')) result = await btch.igdl(url);
+                            else if (url.includes('youtube.com') || url.includes('youtu.be')) result = await btch.youtube(url);
+                            else if (url.includes('facebook.com') || url.includes('fb.watch')) result = await btch.fbdown(url);
+                            else if (url.includes('twitter.com') || url.includes('x.com')) result = await btch.twitter(url);
+                            else result = await btch.aio(url);
+                            
+                            const extractUrls = (res: any): string[] => {
+                                if (!res) return [];
+                                if (typeof res === 'string' && res.startsWith('http')) return [res];
+                                if (Array.isArray(res)) return res.map(r => extractUrls(r)).flat();
+                                let urls: string[] = [];
+                                if (res.url) urls.push(res.url);
+                                if (res.video) urls.push(...extractUrls(res.video));
+                                if (res.audio) urls.push(...extractUrls(res.audio));
+                                if (res.image) urls.push(...extractUrls(res.image));
+                                if (res.mp4) urls.push(...extractUrls(res.mp4));
+                                if (res.mp3) urls.push(...extractUrls(res.mp3));
+                                if (res.thumbnail) urls.push(...extractUrls(res.thumbnail));
+                                return urls.flat();
+                            };
+                            
+                            let allUrls = extractUrls(result);
+                            let targetUrls = allUrls.filter(u => {
+                                const lu = u.toLowerCase();
+                                if (isAudio && (lu.includes('.mp3') || lu.includes('audio') || result?.mp3 === u || (result?.audio && JSON.stringify(result.audio).includes(u)))) return true;
+                                if (isVideo && (lu.includes('.mp4') || lu.includes('video') || result?.mp4 === u || (result?.video && JSON.stringify(result.video).includes(u)))) return true;
+                                if (isImage && (lu.includes('.jpg') || lu.includes('.jpeg') || lu.includes('.png') || lu.includes('image') || result?.thumbnail === u)) return true;
+                                return false;
+                            });
+                            
+                            if (targetUrls.length === 0) {
+                                if (isVideo && result?.mp4) targetUrls = [result.mp4];
+                                else if (isAudio && result?.mp3) targetUrls = [result.mp3];
+                                else if (isImage && result?.thumbnail) targetUrls = [result.thumbnail];
+                                else {
+                                    if (isVideo) targetUrls = allUrls.filter(u => !u.includes('.jpg') && !u.includes('.mp3'));
+                                    if (isAudio) targetUrls = allUrls.filter(u => !u.includes('.jpg') && !u.includes('.mp4'));
+                                }
+                            }
+                            targetUrl = targetUrls[0];
+                        }
                         
-                        if (targetUrls.length > 0) {
-                            for (const mediaUrl of targetUrls) {
-                                try {
-                                    if (isVideo) {
-                                        await ctx.replyWithVideo(mediaUrl, { caption: "✅ Video berhasil di-download!" });
-                                        break; // Only send the first video to avoid spamming multiple qualities
-                                    } else if (isAudio) {
-                                        await ctx.replyWithAudio(mediaUrl, { caption: "✅ Audio berhasil di-download!" });
-                                        break;
-                                    } else {
-                                        await ctx.replyWithPhoto(mediaUrl, { caption: "✅ Gambar berhasil di-download!" });
-                                    }
-                                } catch(e) {}
+                        if (targetUrl) {
+                            try {
+                                const fileRes = await axios.get(targetUrl, { responseType: 'arraybuffer' });
+                                const buffer = Buffer.from(fileRes.data);
+                                if (isVideo) {
+                                    await ctx.replyWithVideo({ source: buffer }, { caption: "✅ Video berhasil di-download!" });
+                                } else if (isAudio) {
+                                    await ctx.replyWithAudio({ source: buffer }, { caption: "✅ Audio berhasil di-download!" });
+                                } else {
+                                    await ctx.replyWithPhoto({ source: buffer }, { caption: "✅ Gambar berhasil di-download!" });
+                                }
+                            } catch(downloadErr: any) {
+                                // Direct URL try if buffer fails
+                                if (isVideo) await ctx.replyWithVideo(targetUrl, { caption: "✅ Video berhasil di-download!" });
+                                else if (isAudio) await ctx.replyWithAudio(targetUrl, { caption: "✅ Audio berhasil di-download!" });
+                                else await ctx.replyWithPhoto(targetUrl, { caption: "✅ Gambar berhasil di-download!" });
                             }
                         } else {
                              await ctx.reply("❌ Gagal mendapatkan format " + format + " dari link tersebut.");
                         }
-
                     } catch (e: any) {
                         await ctx.reply("❌ Terjadi kesalahan saat mendownload media. " + e.message);
                     }
