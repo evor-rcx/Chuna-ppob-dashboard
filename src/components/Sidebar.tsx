@@ -2,7 +2,6 @@ import { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getHolidayInfo } from '../utils/holidays';
 import { Store } from "lucide-react";
-import logoVideo from '../logo.mp4';
 import { playPowerDown, playTerminalBlip } from '../utils/audio';
 
 
@@ -105,7 +104,7 @@ export function Sidebar() {
       <aside className="w-full md:w-72 border-r border-slate-800 bg-[#0f172a]/50 p-6 flex flex-col gap-6 md:min-h-screen">
         <div className="flex items-center gap-3 mb-2">
           <div className="w-16 h-16 flex items-center justify-center relative">
-            <video src={logoVideo} autoPlay loop muted playsInline className="w-full h-full object-contain" />
+            <video src="/logo.mp4" autoPlay loop muted playsInline className="w-full h-full object-contain" />
           </div>
           <h1 className="text-3xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-sky-400 via-indigo-400 to-purple-500 drop-shadow-md">STORE</h1>
         </div>
