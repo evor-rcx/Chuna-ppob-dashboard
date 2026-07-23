@@ -35,7 +35,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
           >
             <div className="text-center mb-8">
               <div className="w-20 h-20 flex items-center justify-center mx-auto mb-4 relative">
-                <img src="./logo.gif?v=3" alt="Logo" className="w-full h-full object-contain" />
+                <video src="/logo.mp4" autoPlay loop muted playsInline className="w-full h-full object-contain" />
               </div>
               <h1 className="text-2xl font-bold text-white">E4 STORE</h1>
               <p className="text-slate-400 text-sm mt-2">Silakan login untuk melanjutkan</p>

@@ -1,0 +1,158 @@
+            const payJson = await res.json();
+            
+            if (payJson.data) {
+                const status = payJson.data.status || 'Gagal';
+                const digiflazzPrice = payJson.data.price || 0;
+                const cuan = total - digiflazzPrice;
+                
+                let paymentInfo = "";
+                if (method === 'saldo') {
+                    paymentInfo = `    💰 SALDO  : "Cusss! Saldo langsung kepotong,                 beres dalam sekejap! Kamu jago                 banget pake saldo, Chuna salut! 💰✨"`;
+                } else if (method === 'cash') {
+                    paymentInfo = `    💵 CASH   : "Duitnya Chuna terima dengan senyum                 lebar! Bayar tunai tetap berkesan!                 Makasih udah main ke E4 Store! 🫳🌸"`;
+                } else {
+                    paymentInfo = `    📝 JANJI   : "Chuna percaya 100% sama kamu! 😍     BAYAR      Kamu pasti bayar tepat waktu karena    TEPAT       Chuna tahu kamu pelanggan baik hati.    WAKTU       Nanti kalau sudah transfer, chat                 Chuna aja, nanti Chuna proses dengan                 senyum manis! Makasih udah jujur! 💖🤗"`;
+                }
+                
+                let msg = "";
+                let tgMsgId: number | undefined;
+                let waMsgKey: any | undefined;
+                let waJid: string | undefined;
+                let notaBuffer: Buffer | null = null;
+
+                if (status === 'Pending') {
+                    msg = `⏳ Hai Kak!
+
+Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa saat, nanti akan kami kabari setelah selesai.
+
+📦 Produk  : ${product.product_name}
+🎯 Tujuan   : ${targetDisplay} (${member.name || "-"})
+
+Untuk cek status atau bertanya, langsung chat Chuna di Bot Telegram, ya!
+👉 https://t.me/ChunaChanbot
+
+Chuna menunggu kabar baik dari Kakak! 😊`;
+                    const tgMsg = await ctx.reply(msg);
+                    tgMsgId = tgMsg.message_id;
+                } else if (status === 'Sukses') {
+                    const sn = payJson.data.sn || "-";
+                    const now = new Date();
+                    const months = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+                    const dateStr = `${now.getDate().toString().padStart(2, '0')} ${months[now.getMonth()]} ${now.getFullYear()} WITA`;
+                    let displaySn = sn;
+                    let displayDaya = "";
+                    if (sn.includes('/')) {
+                        const parts = sn.split('/');
+                        displaySn = parts[0];
+                        if (parts.length > 1) {
+                            displayDaya = `
+Daya         : ${parts.slice(1).join(' / ')}`;
+                        }
+                    }
+                    msg = `🎉 Horee! Sukses, Kak!
+
+Pesanan sudah diproses otomatis oleh E4 Store. ${product.product_name} sudah masuk ke akun ${member.name || targetDisplay} dan siap digunakan! 💪🔥
+
+Terima kasih telah berbelanja di E4 Store! 🐾
+
+Chuna ~ Asisten Imutmu siap bantu 24 jam!
+Kalau mau tanya-tanya atau order lagi, langsung chat Chuna di Bot Telegram:
+👉 https://t.me/ChunaChanbot
+
+Chuna tunggu chat dari Kakak! 😊💖`;
+                    const appUrl = "http://localhost:3000";
+                    if (pay_ref_id) notaBuffer = await generateCanvasReceipt("nota", { id: pay_ref_id, memberId: member.id, type: "prepaid", product: product.product_name, sku: product.buyer_sku_code, target: targetDisplay, price: total, modal: digiflazzPrice, cuan: cuan > 0 ? cuan : 0, status: status, method: method, sn: payJson.data?.sn || "-", date: new Date().toISOString() });
+                    let tgMsg;
+                    if (notaBuffer) {
+                        tgMsg = await ctx.replyWithPhoto({ source: notaBuffer }, { caption: msg, parse_mode: 'Markdown' });
+                    } else {
+                        tgMsg = await ctx.reply(msg, { parse_mode: 'Markdown' });
+                    }
+                    tgMsgId = tgMsg.message_id;
+                } else {
+                    if (!isOwnerSelf && method === 'saldo') {
+                        member.balance += total;
+                        db.members = members;
+                        writeDB(db);
+                    }
+                    let refundMsg = method === 'saldo' ? '✅ Saldo sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (method === 'utang' ? '✅ Utang sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + total.toLocaleString('id-ID') + ' kepada pelanggan.');
+                    msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.
+
+Kemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan${(payJson.data.message || '').toLowerCase().includes('ip') ? ' lebih lanjut' : ''}.
+
+Keterangan : ${payJson.data.message || 'Transaksi Gagal'}
+📦 Produk  : ${product.product_name}
+🎯 Tujuan   : ${targetDisplay} (${member.name || "-"})
+
+${refundMsg}
+
+${(payJson.data.message || '').toLowerCase().includes('ip') ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Tenang saja, Kakak bisa mencoba ulang kapan pun.'}
+
+Butuh bantuan? ${(payJson.data.message || '').toLowerCase().includes('ip') ? `Langsung chat Chuna di Bot Telegram:\n👉 https://t.me/ChunaChanbot\n\nChuna siap membantu dengan senyum! 😊💪` : `Chat Chuna di Bot Telegram:\n👉 https://t.me/ChunaChanbot\n\nChuna siap bantu! 😊💪`}`;
+                    
+                    if (payJson.data.message && payJson.data.message.toLowerCase().includes("harga seller lebih besar dari ketentuan harga buyer")) {
+                        const ownerMsg = `🚨 *INFO PENTING DARI CHUNA!* 🚨
+
+Harga modal produk tersebut di Digiflazz saat ini sedang naik dan lebih mahal daripada "Batas Harga (Max Price)" yang Kakak atur di akun Digiflazz Kakak.
+
+Coba lihat angka: *${product.product_name}* saat ini mungkin sudah naik, melebihi batas maksimalmu. Padahal chuna sudah jelas menunjukkan kenaikan. Masih mau mempertahankan batas harga yang sudah usang? Segera cek dan sesuaikan di dashboard Digiflazz ya Kak! 💸📈`;
+                        for (const ownerId of db.owners) {
+                            try {
+                                await bot.telegram.sendMessage(ownerId, ownerMsg, { parse_mode: 'Markdown' });
+                            } catch(e) {
+                                console.error("Failed to notify owner", e);
+                            }
+                        }
+                    }
+                    const tgMsg = await ctx.reply(msg);
+                    tgMsgId = tgMsg.message_id;
+                }
+                
+                let waImageSent = false;
+                if (msg && waSocket && member.whatsapp) {
+                    let cleanWa = member.whatsapp.replace(/\D/g, "");
+                    if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
+                    const jid = cleanWa + "@s.whatsapp.net";
+                    waJid = jid;
+                    try {
+                        await waSocket.presenceSubscribe(jid);
+                        await waSocket.sendPresenceUpdate('composing', jid);
+                        await new Promise(r => setTimeout(r, 1200));
+                        await waSocket.sendPresenceUpdate('paused', jid);
+                        let waMsg;
+                        if (typeof notaBuffer !== 'undefined' && notaBuffer) {
+                            waMsg = await waSocket.sendMessage(jid, { image: notaBuffer, caption: msg });
+                            waImageSent = true;
+                        } else {
+                            waMsg = await waSocket.sendMessage(jid, { text: msg });
+                        }
+                        if (waMsg) waMsgKey = waMsg.key;
+                    } catch (err) {
+                        console.error("Failed to send WA message:", err);
+                    }
+                }
+                
+                // ALWAYS save to transaction history so it can be seen
+                transactions.unshift({
+                    id: pay_ref_id,
+                    memberId: member.id,
+                    type: "prepaid",
+                    product: product.product_name,
+                    sku: product.buyer_sku_code,
+                    target: targetDisplay,
+                    price: total,
+                    modal: digiflazzPrice,
+                    cuan: cuan > 0 ? cuan : 0,
+                    status: status,
+                    method: method,
+                    sn: payJson.data?.sn || "-",
+                    date: new Date().toISOString(),
+                    waReceiptSent: status === 'Sukses' ? waImageSent : false,
+                    tgMsgId,
+                    waMsgKey,
+                    tgChatId: ctx.chat?.id,
+                    waJid
+                });
+                db.transactions = transactions;
+                writeDB(db);
+                

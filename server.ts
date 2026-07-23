@@ -331,8 +331,9 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
             ctx.fillStyle = '#333333';
             ctx.font = '18px Arial, sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText('Chuna - Asisten Imutmu siap bantu 24 jam!', width / 2, y + 50);
-            ctx.fillText('Terimakasih telah berbelanja di E4 Store!', width / 2, y + 90);
+            const shortCode = `#${(data.id || 'E4').substring(0,6).toUpperCase()}`;
+            ctx.fillText(`📅 Cetak: ${formattedDate} | Kode: ${shortCode}`, width / 2, y + 50);
+            ctx.fillText(`✨ ${calendarInfo}`, width / 2, y + 90);
             y += 150;
         } else {
             ctx.fillStyle = '#fdf2f8';
@@ -368,12 +369,9 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
         ctx.textAlign = 'center';
         ctx.fillText('◻  ◻  ◻  ◻  ◻', width / 2, y);
         y += 30;
-        ctx.fillText('Terima kasih telah berbelanja di E4 Store!', width / 2, y);
+        ctx.fillText('Chuna - Asisten Imutmu siap bantu 24 jam!', width / 2, y);
         y += 25;
-        const shortCode = `#${(data.id || 'E4').substring(0,6).toUpperCase()}`;
-        ctx.fillText(`📅 Cetak: ${formattedDate} | Kode: ${shortCode}`, width / 2, y);
-        y += 25;
-        ctx.fillText(`✨ ${calendarInfo}`, width / 2, y);
+        ctx.fillText('Terimakasih telah berbelanja di E4 Store!', width / 2, y);
         
         return canvas.toBuffer('image/png');
     } catch (e: any) {
@@ -938,25 +936,17 @@ Kalau mau tanya-tanya atau order lagi, langsung chat Chuna di Bot Telegram:
 Chuna tunggu chat dari Kakak! 😊💖`;
                 } else if (status === 'Gagal') {
                     let refundMsg = tx.method === 'saldo' ? '✅ Saldo sebesar Rp ' + tx.price.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (tx.method === 'utang' ? '✅ Utang sebesar Rp ' + tx.price.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + tx.price.toLocaleString('id-ID') + ' kepada pelanggan.');
-                    msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.
-
-Kemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan${(data.message || '').toLowerCase().includes('ip') ? ' lebih lanjut' : ''}.
-
-Keterangan : ${data.message || 'Transaksi Gagal'}
-📦 Produk  : ${tx.product}
-🎯 Tujuan   : ${tx.target} (${nama})
-
-${refundMsg}
-
-${(data.message || '').toLowerCase().includes('ip') ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Tenang saja, Kakak bisa mencoba ulang kapan pun.'}
-
-Butuh bantuan? ${(data.message || '').toLowerCase().includes('ip') ? `Langsung chat Chuna di Bot Telegram:
-👉 https://t.me/ChunaChanbot
-
-Chuna siap membantu dengan senyum! 😊💪` : `Chat Chuna di Bot Telegram:
-👉 https://t.me/ChunaChanbot
-
-Chuna siap bantu! 😊💪`}`;
+                    if ((data.message || '').toLowerCase().includes('ip')) {
+                        msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.\n\nSistem pusat E4 Store saat ini sedang mengalami gangguan koneksi. Mohon tunggu beberapa saat dan coba lagi nanti.\n\nKeterangan : Server sedang gangguan\n📦 Produk  : ${tx.product}\n🎯 Tujuan   : ${tx.target} (${nama})\n\n${refundMsg}\n\nJangan khawatir, Kakak bisa mencoba ulang nanti.\n\nButuh bantuan? Chat Chuna di Bot Telegram:\n👉 https://t.me/ChunaChanbot\n\nChuna siap bantu! 😊💪`;
+                        const ownerMsg = `🚨 *INFO PENTING DARI CHUNA!* 🚨\n\nTransaksi dari Kak *${nama}* gagal karena masalah IP!\n\nKeterangan dari Digiflazz: _${data.message}_\n\nSegera cek dan daftarkan IP server terbaru di dashboard Digiflazz ya Kak! 🌐`;
+                        for (const ownerId of db.owners) {
+                            try {
+                                await bot.telegram.sendMessage(ownerId, ownerMsg, { parse_mode: 'Markdown' });
+                            } catch(e) {}
+                        }
+                    } else {
+                        msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.\n\nKemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan.\n\nKeterangan : ${data.message || 'Transaksi Gagal'}\n📦 Produk  : ${tx.product}\n🎯 Tujuan   : ${tx.target} (${nama})\n\n${refundMsg}\n\nTenang saja, Kakak bisa mencoba ulang kapan pun.\n\nButuh bantuan? Chat Chuna di Bot Telegram:\n👉 https://t.me/ChunaChanbot\n\nChuna siap bantu! 😊💪`;
+                    }
                     
                     if (data.message && data.message.toLowerCase().includes("harga seller lebih besar dari ketentuan harga buyer")) {
                         const ownerMsg = `🚨 *INFO PENTING DARI CHUNA!* 🚨
@@ -1043,6 +1033,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                                     } catch (e) { }
                                 }
                                 
+                                let waImageSent = false;
                                 if (status === 'Sukses') {
                                     const buffer = await generateCanvasReceipt("nota", tx);
                                     if (buffer) {
@@ -1052,6 +1043,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                                         await new Promise(r => setTimeout(r, 1200));
                                         await waSocket.sendPresenceUpdate("paused", jid);
                                         await waSocket.sendMessage(jid, { image: buffer, caption: "✅ *Transaksi Berhasil!* Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰" });
+                                        waImageSent = true;
                                     } else if (!edited) {
                                         await waSocket.sendMessage(jid, { text: msg });
                                     }
@@ -1059,7 +1051,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                                     await waSocket.sendMessage(jid, { text: msg });
                                 }
                                 
-                                if (status === 'Sukses' || status === 'Gagal') {
+                                if ((status === 'Sukses' && waImageSent) || status === 'Gagal') {
                                     const tIndex = db.transactions.findIndex((t: any) => t.id === tx.id);
                                     if (tIndex >= 0) {
                                         db.transactions[tIndex].waReceiptSent = true;
@@ -2039,6 +2031,13 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca") {
                 let waMsgKey: any | undefined;
                 let waJid: string | undefined;
                 let notaBuffer: Buffer | null = null;
+                
+                let returnMarkup;
+                if (stateData.memberId) {
+                    returnMarkup = { keyboard: [[{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true };
+                } else {
+                    returnMarkup = { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }]], resize_keyboard: true };
+                }
 
                 if (status === 'Pending') {
                     msg = `⏳ Hai Kak!
@@ -2052,7 +2051,7 @@ Untuk cek status atau bertanya, langsung chat Chuna di Bot Telegram, ya!
 👉 https://t.me/ChunaChanbot
 
 Chuna menunggu kabar baik dari Kakak! 😊`;
-                    const tgMsg = await ctx.reply(msg);
+                    const tgMsg = await ctx.reply(msg, { reply_markup: returnMarkup });
                     tgMsgId = tgMsg.message_id;
                 } else if (status === 'Sukses') {
                     const sn = payJson.data.sn || "-";
@@ -2084,17 +2083,12 @@ Chuna tunggu chat dari Kakak! 😊💖`;
                     if (pay_ref_id) notaBuffer = await generateCanvasReceipt("nota", { id: pay_ref_id, memberId: member.id, type: "prepaid", product: product.product_name, sku: product.buyer_sku_code, target: targetDisplay, price: total, modal: digiflazzPrice, cuan: cuan > 0 ? cuan : 0, status: status, method: method, sn: payJson.data?.sn || "-", date: new Date().toISOString() });
                     let tgMsg;
                     if (notaBuffer) {
-                        tgMsg = await ctx.replyWithPhoto({ source: notaBuffer }, { caption: msg, parse_mode: 'Markdown' });
+                        tgMsg = await ctx.replyWithPhoto({ source: notaBuffer }, { caption: msg, parse_mode: 'Markdown', reply_markup: returnMarkup });
                     } else {
-                        tgMsg = await ctx.reply(msg, { parse_mode: 'Markdown' });
+                        tgMsg = await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: returnMarkup });
                     }
                     tgMsgId = tgMsg.message_id;
                 } else {
-                    if (!isOwnerSelf && method === 'saldo') {
-                        member.balance += total;
-                        db.members = members;
-                        writeDB(db);
-                    }
                     let refundMsg = method === 'saldo' ? '✅ Saldo sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (method === 'utang' ? '✅ Utang sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + total.toLocaleString('id-ID') + ' kepada pelanggan.');
                     msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.
 
@@ -2124,10 +2118,11 @@ Coba lihat angka: *${product.product_name}* saat ini mungkin sudah naik, melebih
                             }
                         }
                     }
-                    const tgMsg = await ctx.reply(msg);
+                    const tgMsg = await ctx.reply(msg, { reply_markup: returnMarkup });
                     tgMsgId = tgMsg.message_id;
                 }
                 
+                let waImageSent = false;
                 if (msg && waSocket && member.whatsapp) {
                     let cleanWa = member.whatsapp.replace(/\D/g, "");
                     if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
@@ -2141,6 +2136,7 @@ Coba lihat angka: *${product.product_name}* saat ini mungkin sudah naik, melebih
                         let waMsg;
                         if (typeof notaBuffer !== 'undefined' && notaBuffer) {
                             waMsg = await waSocket.sendMessage(jid, { image: notaBuffer, caption: msg });
+                            waImageSent = true;
                         } else {
                             waMsg = await waSocket.sendMessage(jid, { text: msg });
                         }
@@ -2150,28 +2146,16 @@ Coba lihat angka: *${product.product_name}* saat ini mungkin sudah naik, melebih
                     }
                 }
                 
-                // ALWAYS save to transaction history so it can be seen
-                transactions.unshift({
-                    id: pay_ref_id,
-                    memberId: member.id,
-                    type: "prepaid",
-                    product: product.product_name,
-                    sku: product.buyer_sku_code,
-                    target: targetDisplay,
-                    price: total,
-                    modal: digiflazzPrice,
-                    cuan: cuan > 0 ? cuan : 0,
-                    status: status,
-                    method: method,
-                    sn: payJson.data?.sn || "-",
-                    date: new Date().toISOString(),
-                    tgMsgId,
-                    waMsgKey,
-                    tgChatId: ctx.chat?.id,
-                    waJid
-                });
-                db.transactions = transactions;
-                writeDB(db);
+                const txIndex = transactions.findIndex(t => t.id === pay_ref_id);
+                if (txIndex >= 0) {
+                    transactions[txIndex].waReceiptSent = status === 'Sukses' ? waImageSent : false;
+                    transactions[txIndex].tgMsgId = tgMsgId;
+                    transactions[txIndex].waMsgKey = waMsgKey;
+                    transactions[txIndex].tgChatId = ctx.chat?.id;
+                    transactions[txIndex].waJid = waJid;
+                    db.transactions = transactions;
+                    writeDB(db);
+                }
                 
             } else {
                 if (!isOwnerSelf && method === 'saldo') {
@@ -2271,6 +2255,13 @@ async function processPascaPayment(ctx: any, ref_id: string, method: string, sta
                 let waMsgKey: any | undefined;
                 let waJid: string | undefined;
                 let notaBuffer: Buffer | null = null;
+                
+                let returnMarkup;
+                if (stateData.memberId) {
+                    returnMarkup = { keyboard: [[{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true };
+                } else {
+                    returnMarkup = { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }]], resize_keyboard: true };
+                }
 
                 if (status === 'Pending') {
                     msg = `⏳ Hai Kak!
@@ -2284,7 +2275,7 @@ Untuk cek status atau bertanya, langsung chat Chuna di Bot Telegram, ya!
 👉 https://t.me/ChunaChanbot
 
 Chuna menunggu kabar baik dari Kakak! 😊`;
-                    const tgMsg = await ctx.reply(msg);
+                    const tgMsg = await ctx.reply(msg, { reply_markup: returnMarkup });
                     tgMsgId = tgMsg.message_id;
                 } else if (status === 'Sukses') {
                     const sn = payJson.data.sn || "-";
@@ -2316,17 +2307,12 @@ Chuna tunggu chat dari Kakak! 😊💖`;
                     if (pay_ref_id) notaBuffer = await generateCanvasReceipt("nota", { id: pay_ref_id, memberId: member.id, type: "pasca", product: stateData.product.product_name, sku: stateData.product.buyer_sku_code, target: customerNo, price: total, modal: digiflazzPrice, cuan: cuan > 0 ? cuan : 0, tagihan: stateData.checkResult?.selling_price || 0, admin_pel: stateData.adminFee || 0, status: status, method: method, sn: payJson.data?.sn || "-", date: new Date().toISOString() });
                     let tgMsg;
                     if (notaBuffer) {
-                        tgMsg = await ctx.replyWithPhoto({ source: notaBuffer }, { caption: msg, parse_mode: 'Markdown' });
+                        tgMsg = await ctx.replyWithPhoto({ source: notaBuffer }, { caption: msg, parse_mode: 'Markdown', reply_markup: returnMarkup });
                     } else {
-                        tgMsg = await ctx.reply(msg, { parse_mode: 'Markdown' });
+                        tgMsg = await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: returnMarkup });
                     }
                     tgMsgId = tgMsg.message_id;
                 } else {
-                    if (!isOwnerSelf && method === 'saldo') {
-                        member.balance += total;
-                        db.members = members;
-                        writeDB(db);
-                    }
                     let refundMsg = method === 'saldo' ? '✅ Saldo sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (method === 'utang' ? '✅ Utang sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + total.toLocaleString('id-ID') + ' kepada pelanggan.');
                     msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.
 
@@ -2356,10 +2342,11 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
                             }
                         }
                     }
-                    const tgMsg = await ctx.reply(msg);
+                    const tgMsg = await ctx.reply(msg, { reply_markup: returnMarkup });
                     tgMsgId = tgMsg.message_id;
                 }
 
+                let waImageSent = false;
                 if (msg && waSocket && member.whatsapp) {
                     let cleanWa = member.whatsapp.replace(/\D/g, "");
                     if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
@@ -2373,6 +2360,7 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
                         let waMsg;
                         if (typeof notaBuffer !== 'undefined' && notaBuffer) {
                             waMsg = await waSocket.sendMessage(jid, { image: notaBuffer, caption: msg });
+                            waImageSent = true;
                         } else {
                             waMsg = await waSocket.sendMessage(jid, { text: msg });
                         }
@@ -2398,6 +2386,7 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
                     method: method,
                     sn: payJson.data?.sn || "-",
                     date: new Date().toISOString(),
+                    waReceiptSent: status === 'Sukses' ? waImageSent : false,
                     tgMsgId,
                     waMsgKey,
                     tgChatId: ctx.chat?.id,
@@ -2596,16 +2585,16 @@ Oke kak! Langkah pertama, kasih tau Chuna Username yang kakak mau dong.`);
 │  ▸  Tipe Akun   : ${typeCap} (siap naik)
 │  ▸  Kontak      : ${wa} [✅ Aktif]
 │
-│  💳  SALDO DOMAIN
+│  💳  SALDO ANDA
 │  ───────────────
 │  ▸  Rp ${balance} 
-│     [ ░░░░░░░░░░ ] 0% (waktunya isi cuan!)
+│     [ ░░░░░░░░░░ ] 
 │
 ├─── ✨ CHUNA · SPECIAL CALL ✨ ───
 │
 │  🎁  Promo spesial untuk "${nameOriginal}":
-│  ✔️  Free admin fee (periode terbatas)
-│  ✔️  Cara klaim: balas "AMBIL" di sini
+│  ✔️  Free admin fee 
+│  
 │
 └─── 🚀 24/7 Ready. Balas kapan saja ───`);
           } else {
@@ -2737,14 +2726,14 @@ Oke kak! Langkah pertama, kasih tau Chuna Username yang kakak mau dong.`);
       });
 
       bot.action(/^sel_off_(.+)$/, async (ctx) => {
+        await ctx.answerCbQuery();
         if (!db.owners.includes(ctx.from?.id)) return;
         const memberId = ctx.match[1];
         const member = members.find(m => m.id === memberId);
         if (!member) {
-          return ctx.answerCbQuery("Member tidak ditemukan!");
+          return ctx.reply("❌ Member tidak ditemukan!");
         }
         
-        await ctx.answerCbQuery();
         userStates[ctx.from.id] = { step: 'LOCKED_MEMBER', data: { memberId: member.id } };
         await ctx.reply(`✅ Pelanggan Terkunci: ${member.whatsapp}Silakan pilih menu transaksi di bawah:`, {
           reply_markup: {
@@ -2916,6 +2905,7 @@ Oke kak! Langkah pertama, kasih tau Chuna Username yang kakak mau dong.`);
       });
 
       bot.action(/^cek_utang_(.+)$/, async (ctx) => {
+          await ctx.answerCbQuery();
           if (!db.owners.includes(ctx.from?.id)) return;
           const memberId = ctx.match[1];
           const member = members.find(m => m.id === memberId);
@@ -2954,6 +2944,7 @@ Oke kak! Langkah pertama, kasih tau Chuna Username yang kakak mau dong.`);
       });
 
       bot.action(/^bayar_utang_(.+)$/, async (ctx) => {
+          await ctx.answerCbQuery();
           if (!db.owners.includes(ctx.from?.id)) return;
           const memberId = ctx.match[1];
           
@@ -2962,6 +2953,7 @@ Oke kak! Langkah pertama, kasih tau Chuna Username yang kakak mau dong.`);
       });
       
       bot.action('batal_utang', async (ctx) => {
+          await ctx.answerCbQuery();
           if (!db.owners.includes(ctx.from?.id)) return;
           delete userStates[ctx.from.id];
           await ctx.editMessageText("❌ Aksi dibatalkan.");
@@ -4268,6 +4260,7 @@ app.get("/api/tagihan-nota-image", async (req, res) => {
     const txDate = new Date(tx.date || new Date());
     const dateStr = txDate.toLocaleString('en-GB', { timeZone: 'Asia/Makassar', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).replace(',', '');
     const formattedDate = `${dateStr} WITA`;
+    const calendarInfo = getCalendarInfo(txDate);
     
     let memberName = tx.username || '-';
     try {
@@ -4340,11 +4333,11 @@ app.get("/api/tagihan-nota-image", async (req, res) => {
             <div class="box-val">Rp ${(tx.price || 0).toLocaleString('id-ID')}</div>
         </div>
         <div class="footer">
-            Chuna - Asisten Imutmu siap bantu 24 jam!<br/>Terimakasih telah berbelanja di E4 Store!
+            Cetak: ${formattedDate} | Kode: #${tx.id}<br/>✨ ${calendarInfo}
         </div>
         <div class="divider"></div>
         <div class="footer-small">
-            Terima kasih telah berbelanja di E4 Store!<br/>Cetak: ${formattedDate} | Kode: #${tx.id}
+            Chuna - Asisten Imutmu siap bantu 24 jam!<br/>Terimakasih telah berbelanja di E4 Store!
         </div>
     </div>
 </body>
