@@ -1,33 +1,16 @@
 const fs = require('fs');
 let code = fs.readFileSync('server.ts', 'utf8');
 
-const target = `        res.json({ success: true });
-    } catch(e) {
-        console.error("Webhook route error", e);
-        res.status(500).send("Error");
-    }
-  });`;
+// I will write a simple parser to fix the IIFEs around line 1000-1100
 
-const replacement = `        return { success: true };
-    } catch(e) {
-        console.error("processDigiflazzWebhookData error", e);
-        return { success: false };
-    }
-  }
+// 1. Remove the trailing })(); around line 1045
+code = code.replace(/\} catch \(err\) \{\}\n                    \}\n                    \}\)\(\);\n                \} else if \(bot/g, `} catch (err) {}\n                    }\n                } else if (bot`);
 
-  app.post("/api/bot/webhook", async (req, res) => {
-    try {
-        const payload = req.body;
-        if (payload.data) {
-            await processDigiflazzWebhookData(payload.data);
-        }
-        res.json({ success: true });
-    } catch(e) {
-        console.error("Webhook route error", e);
-        res.status(500).send("Error");
-    }
-  });`;
+// 2. Remove the IIFE in the else if block
+code = code.replace(/else if \(bot && member && member\.telegram && member\.telegram\.length > 0\) \{\n                    \(\async \(\) => \{\n                    try \{/g, `else if (bot && member && member.telegram && member.telegram.length > 0) {\n                    try {`);
 
-code = code.replace(target, replacement);
+// 3. Remove the trailing })(); in the else if block
+code = code.replace(/writeDB\(db\);\n                        \}\n                    \} catch \(e\) \{\n                    \}\n                \}/g, `writeDB(db);\n                        }\n                    } catch (e) {\n                    }\n                }`);
+
 fs.writeFileSync('server.ts', code);
-console.log("Fixed syntax!");
+console.log("Fixed syntax");
