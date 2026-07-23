@@ -6,7 +6,7 @@ export function Transaksi({ onBack }: { onBack: () => void }) {
   const [transactions, setTransactions] = useState<any[]>([]);
 
   useEffect(() => {
-    fetch("/api/transactions")
+    fetch(`/api/transactions?t=${Date.now()}`)
       .then(res => res.json())
       .then(data => setTransactions(data.transactions || []))
       .catch(() => {});
