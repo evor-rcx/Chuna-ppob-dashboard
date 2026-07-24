@@ -1,16 +1,10 @@
 const fs = require('fs');
 let code = fs.readFileSync('server.ts', 'utf8');
 
-// I will write a simple parser to fix the IIFEs around line 1000-1100
+// Replace the broken template string
+const brokenString = 'Kirimkan teks, gambar, atau video (dengan caption) yang ingin dikirimkan ke target *${target}*:\\n\\n(Bisa multi-baris)\\n\\n💡 *TIPS OTOMATIS HARGA:*\\nKamu bisa pakai kode seperti ini agar harga update otomatis sesuai setting produk & Digiflazz:\\n`{{KODE_SKU:REGULER}}` -> Harga Biasa\\n`{{KODE_SKU:VIP}}` -> Harga VIP\\n`{{KODE_SKU:STATUS}}` -> 🟢 NORMAL / 🔴 CLOSE\\n`{{KODE_SKU:HEMAT}}` -> Selisih Harga\\n\\nContoh:\\n💎 ML 170DM: `{{ML170:REGULER}}`\\n⭐ VIP Cuma: `{{ML170:VIP}}`';
+const fixedString = 'Kirimkan teks, gambar, atau video (dengan caption) yang ingin dikirimkan ke target *${target}*:\\n\\n(Bisa multi-baris)\\n\\n💡 *TIPS OTOMATIS HARGA:*\\nKamu bisa pakai kode seperti ini agar harga update otomatis sesuai setting produk & Digiflazz:\\n\\`{{KODE_SKU:REGULER}}\\` -> Harga Biasa\\n\\`{{KODE_SKU:VIP}}\\` -> Harga VIP\\n\\`{{KODE_SKU:STATUS}}\\` -> 🟢 NORMAL / 🔴 CLOSE\\n\\`{{KODE_SKU:HEMAT}}\\` -> Selisih Harga\\n\\nContoh:\\n💎 ML 170DM: \\`{{ML170:REGULER}}\\`\\n⭐ VIP Cuma: \\`{{ML170:VIP}}\\`';
 
-// 1. Remove the trailing })(); around line 1045
-code = code.replace(/\} catch \(err\) \{\}\n                    \}\n                    \}\)\(\);\n                \} else if \(bot/g, `} catch (err) {}\n                    }\n                } else if (bot`);
-
-// 2. Remove the IIFE in the else if block
-code = code.replace(/else if \(bot && member && member\.telegram && member\.telegram\.length > 0\) \{\n                    \(\async \(\) => \{\n                    try \{/g, `else if (bot && member && member.telegram && member.telegram.length > 0) {\n                    try {`);
-
-// 3. Remove the trailing })(); in the else if block
-code = code.replace(/writeDB\(db\);\n                        \}\n                    \} catch \(e\) \{\n                    \}\n                \}/g, `writeDB(db);\n                        }\n                    } catch (e) {\n                    }\n                }`);
+code = code.replace(brokenString, fixedString);
 
 fs.writeFileSync('server.ts', code);
-console.log("Fixed syntax");

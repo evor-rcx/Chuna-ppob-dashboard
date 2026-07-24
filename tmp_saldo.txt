@@ -1,0 +1,46 @@
+      bot.command("saldo", async (ctx) => {
+        if (digiflazzStatus.includes("Connected")) {
+          ctx.reply(`💰 Saldo Digiflazz saat ini: Rp ${digiflazzBalance.toLocaleString('id-ID')}`);
+        } else {
+          ctx.reply("❌ Sistem pembayaran belum terhubung.");
+        }
+      });
+
+      bot.command("harga", (ctx) => {
+        ctx.reply("🛒 *Menu Produk*\nSilakan gunakan tombol menu untuk melihat produk yang tersedia dari server.", { parse_mode: "Markdown" });
+      });
+
+      bot.action("cek_saldo", async (ctx) => {
+        try {
+          await ctx.answerCbQuery();
+          if (digiflazzStatus.includes("Connected")) {
+            await ctx.reply(`💰 Saldo Digiflazz saat ini: Rp ${digiflazzBalance.toLocaleString('id-ID')}`);
+          } else {
+            await ctx.reply("❌ Sistem belum terhubung ke Digiflazz.");
+          }
+        } catch (e) {
+          console.error("Failed to answer callback query:", e);
+        }
+      });
+
+      bot.action("cek_tagihan", async (ctx) => {
+        try {
+          await ctx.answerCbQuery();
+          await ctx.reply("🧾 Fitur tagihan sedang dalam tahap integrasi PPOB.");
+        } catch (e) {
+          console.error("Failed to answer callback query:", e);
+        }
+      });
+
+      bot.action("menu_produk", async (ctx) => {
+        try {
+          await ctx.answerCbQuery();
+          if (digiflazzStatus.includes("Connected")) {
+            await ctx.reply("🛒 Mengambil daftar produk dari Digiflazz...");
+          } else {
+            await ctx.reply("❌ Sistem belum terhubung ke Digiflazz.");
+          }
+        } catch (e) {
+          console.error("Failed to answer callback query:", e);
+        }
+      });

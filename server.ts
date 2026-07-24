@@ -331,9 +331,8 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
             ctx.fillStyle = '#333333';
             ctx.font = '18px Arial, sans-serif';
             ctx.textAlign = 'center';
-            const shortCode = `#${(data.id || 'E4').substring(0,6).toUpperCase()}`;
-            ctx.fillText(`📅 Cetak: ${formattedDate} | Kode: ${shortCode}`, width / 2, y + 50);
-            ctx.fillText(`✨ ${calendarInfo}`, width / 2, y + 90);
+            ctx.fillText('Chuna - Asisten Imutmu siap bantu 24 jam!', width / 2, y + 50);
+            ctx.fillText('Terimakasih telah berbelanja di E4 Store!', width / 2, y + 90);
             y += 150;
         } else {
             ctx.fillStyle = '#fdf2f8';
@@ -369,9 +368,12 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
         ctx.textAlign = 'center';
         ctx.fillText('◻  ◻  ◻  ◻  ◻', width / 2, y);
         y += 30;
-        ctx.fillText('Chuna - Asisten Imutmu siap bantu 24 jam!', width / 2, y);
+        ctx.fillText('Terima kasih telah berbelanja di E4 Store!', width / 2, y);
         y += 25;
-        ctx.fillText('Terimakasih telah berbelanja di E4 Store!', width / 2, y);
+        const shortCode = `#${(data.id || 'E4').substring(0,6).toUpperCase()}`;
+        ctx.fillText(`📅 Cetak: ${formattedDate} | Kode: ${shortCode}`, width / 2, y);
+        y += 25;
+        ctx.fillText(`✨ ${calendarInfo}`, width / 2, y);
         
         return canvas.toBuffer('image/png');
     } catch (e: any) {
@@ -596,47 +598,9 @@ async function startServer() {
               }
           }
           
-          // Retry sending TG receipts for successful/failed transactions that failed to send TG msg
-          if (bot) {
-              const unsentTgTxs = transactions.filter((t: any) => (t.status === 'Sukses' || t.status === 'Gagal') && t.tgReceiptSent === false && t.tgChatId);
-              for (const tx of unsentTgTxs) {
-                  try {
-                      await bot.telegram.sendChatAction(tx.tgChatId, "typing");
-                      await new Promise(r => setTimeout(r, 1500));
-                      let msg = "";
-                      let buffer = null;
-                      if (tx.status === 'Sukses') {
-                          msg = `🎉 Horee! Sukses, Kak!\nPesanan sudah diproses otomatis oleh E4 Store. ${tx.product} sudah masuk ke akun ${tx.target} dan siap digunakan! 💪🔥\n\nTerima kasih telah berbelanja di E4 Store! 🐾\nChuna ~ Asisten Imutmu siap bantu 24 jam!\n\nKalau mau tanya-tanya atau order lagi, langsung chat Chuna di Bot Telegram:\n👉 https://t.me/ChunaChanbot\n\nChuna tunggu chat dari Kakak! 😊💖`;
-                          buffer = await generateCanvasReceipt("nota", tx);
-                      } else {
-                          let refundMsg = tx.method === 'saldo' ? '✅ Saldo sebesar Rp ' + (tx.price||0).toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (tx.method === 'utang' ? '✅ Utang sebesar Rp ' + (tx.price||0).toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + (tx.price||0).toLocaleString('id-ID') + ' kepada pelanggan.');
-                          msg = `❌ *Transaksi Gagal!*\n\nMaaf Kak, pembayaran untuk pesanan Anda (${tx.product}) gagal diproses.\n\n${refundMsg}\n\nTenang saja, Kakak bisa mencoba ulang kapan pun.`;
-                      }
-                      
-                      if (buffer) {
-                          try { await bot.telegram.deleteMessage(tx.tgChatId, tx.tgMsgId); } catch(e) {}
-                          await bot.telegram.sendPhoto(tx.tgChatId, { source: buffer }, { caption: msg, parse_mode: "Markdown" });
-                      } else {
-                          try { 
-                              await bot.telegram.editMessageText(tx.tgChatId, tx.tgMsgId, undefined, msg, { parse_mode: "Markdown" }); 
-                          } catch (e) { 
-                              try { await bot.telegram.sendMessage(tx.tgChatId, msg, { parse_mode: "Markdown" }); } catch(err) {}
-                          }
-                      }
-                      const tIndex = db.transactions.findIndex((t: any) => t.id === tx.id);
-                      if (tIndex >= 0) {
-                          db.transactions[tIndex].tgReceiptSent = true;
-                          writeDB(db);
-                      }
-                  } catch (e) {
-                      console.error("Failed to retry TG receipt for", tx.id, e);
-                  }
-              }
-          }
-
-          // Retry sending WA receipts for successful/failed transactions that failed to send WA msg
+          // Retry sending WA receipts for successful transactions that failed to send WA msg
           if (waSocket) {
-              const unsentTxs = transactions.filter((t: any) => (t.status === 'Sukses' || t.status === 'Gagal') && t.waReceiptSent !== true);
+              const unsentTxs = transactions.filter((t: any) => t.status === 'Sukses' && t.waReceiptSent === false);
               for (const tx of unsentTxs) {
                   const member = members.find((m: any) => m.id === tx.memberId);
                   let jid = tx.waJid;
@@ -647,29 +611,18 @@ async function startServer() {
                   }
                   if (jid) {
                       try {
-                          let buffer = null;
-                          let caption = "";
-                          if (tx.status === 'Sukses') {
-                              buffer = await generateCanvasReceipt("nota", tx);
-                              caption = "✅ *Transaksi Berhasil!* Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰";
-                          } else {
-                              let refundMsg = tx.method === 'saldo' ? '✅ Saldo sebesar Rp ' + tx.price.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (tx.method === 'utang' ? '✅ Utang sebesar Rp ' + tx.price.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + tx.price.toLocaleString('id-ID') + ' kepada pelanggan.');
-                              caption = `❌ *Transaksi Gagal!*\n\nMaaf Kak, pembayaran untuk pesanan Anda (${tx.product}) gagal diproses.\n\n${refundMsg}\n\nTenang saja, Kakak bisa mencoba ulang kapan pun.`;
-                          }
-                          
-                          await waSocket.sendPresenceUpdate("composing", jid);
-                          await new Promise(r => setTimeout(r, 1200));
-                          await waSocket.sendPresenceUpdate("paused", jid);
+                          const buffer = await generateCanvasReceipt("nota", tx);
                           if (buffer) {
-                              await waSocket.sendMessage(jid, { image: buffer, caption: caption });
-                          } else {
-                              await waSocket.sendMessage(jid, { text: caption });
-                          }
-                          
-                          const tIndex = db.transactions.findIndex((t: any) => t.id === tx.id);
-                          if (tIndex >= 0) {
-                              db.transactions[tIndex].waReceiptSent = true;
-                              writeDB(db);
+                              await waSocket.sendPresenceUpdate("composing", jid);
+                              await new Promise(r => setTimeout(r, 1200));
+                              await waSocket.sendPresenceUpdate("paused", jid);
+                              await waSocket.sendMessage(jid, { image: buffer, caption: "✅ *Transaksi Berhasil!* Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰" });
+                              
+                              const tIndex = db.transactions.findIndex((t: any) => t.id === tx.id);
+                              if (tIndex >= 0) {
+                                  db.transactions[tIndex].waReceiptSent = true;
+                                  writeDB(db);
+                              }
                           }
                       } catch (e) {
                           console.log("Retry WA delivery error:", e);
@@ -950,7 +903,6 @@ const app = express();
                 
                 // Initialize waReceiptSent to false when first moving from Pending
                 tx.waReceiptSent = false;
-                tx.tgReceiptSent = false;
                 
                 db.transactions = transactions;
                 db.members = members;
@@ -986,17 +938,25 @@ Kalau mau tanya-tanya atau order lagi, langsung chat Chuna di Bot Telegram:
 Chuna tunggu chat dari Kakak! 😊💖`;
                 } else if (status === 'Gagal') {
                     let refundMsg = tx.method === 'saldo' ? '✅ Saldo sebesar Rp ' + tx.price.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (tx.method === 'utang' ? '✅ Utang sebesar Rp ' + tx.price.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + tx.price.toLocaleString('id-ID') + ' kepada pelanggan.');
-                    if ((data.message || '').toLowerCase().includes('ip')) {
-                        msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.\n\nSistem pusat E4 Store saat ini sedang mengalami gangguan koneksi. Mohon tunggu beberapa saat dan coba lagi nanti.\n\nKeterangan : Server sedang gangguan\n📦 Produk  : ${tx.product}\n🎯 Tujuan   : ${tx.target} (${nama})\n\n${refundMsg}\n\nJangan khawatir, Kakak bisa mencoba ulang nanti.\n\nButuh bantuan? Chat Chuna di Bot Telegram:\n👉 https://t.me/ChunaChanbot\n\nChuna siap bantu! 😊💪`;
-                        const ownerMsg = `🚨 *INFO PENTING DARI CHUNA!* 🚨\n\nTransaksi dari Kak *${nama}* gagal karena masalah IP!\n\nKeterangan dari Digiflazz: _${data.message}_\n\nSegera cek dan daftarkan IP server terbaru di dashboard Digiflazz ya Kak! 🌐`;
-                        for (const ownerId of db.owners) {
-                            try {
-                                await bot.telegram.sendMessage(ownerId, ownerMsg, { parse_mode: 'Markdown' });
-                            } catch(e) {}
-                        }
-                    } else {
-                        msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.\n\nKemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan.\n\nKeterangan : ${data.message || 'Transaksi Gagal'}\n📦 Produk  : ${tx.product}\n🎯 Tujuan   : ${tx.target} (${nama})\n\n${refundMsg}\n\nTenang saja, Kakak bisa mencoba ulang kapan pun.\n\nButuh bantuan? Chat Chuna di Bot Telegram:\n👉 https://t.me/ChunaChanbot\n\nChuna siap bantu! 😊💪`;
-                    }
+                    msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.
+
+Kemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan${(data.message || '').toLowerCase().includes('ip') ? ' lebih lanjut' : ''}.
+
+Keterangan : ${data.message || 'Transaksi Gagal'}
+📦 Produk  : ${tx.product}
+🎯 Tujuan   : ${tx.target} (${nama})
+
+${refundMsg}
+
+${(data.message || '').toLowerCase().includes('ip') ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Tenang saja, Kakak bisa mencoba ulang kapan pun.'}
+
+Butuh bantuan? ${(data.message || '').toLowerCase().includes('ip') ? `Langsung chat Chuna di Bot Telegram:
+👉 https://t.me/ChunaChanbot
+
+Chuna siap membantu dengan senyum! 😊💪` : `Chat Chuna di Bot Telegram:
+👉 https://t.me/ChunaChanbot
+
+Chuna siap bantu! 😊💪`}`;
                     
                     if (data.message && data.message.toLowerCase().includes("harga seller lebih besar dari ketentuan harga buyer")) {
                         const ownerMsg = `🚨 *INFO PENTING DARI CHUNA!* 🚨
@@ -1015,6 +975,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                 }
                 
                 if (bot && tx.tgChatId && tx.tgMsgId) {
+                    (async () => {
                     try {
                         await bot.telegram.sendChatAction(tx.tgChatId, "typing");
                         await new Promise(r => setTimeout(r, 1500));
@@ -1035,21 +996,17 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                                 try { await bot.telegram.sendMessage(tx.tgChatId, msg, { parse_mode: "Markdown" }); } catch(err) {}
                             }
                         }
-                        
-                        const tIndex = db.transactions.findIndex((t: any) => t.id === tx.id);
-                        if (tIndex >= 0) {
-                            db.transactions[tIndex].tgReceiptSent = true;
-                            writeDB(db);
-                        }
                     } catch (e) {
                         try { await bot.telegram.sendMessage(tx.tgChatId, msg, { parse_mode: "Markdown" }); } catch(err) {}
                     }
-
+                    })();
                 } else if (bot && member && member.telegram && member.telegram.length > 0) {
+                    (async () => {
                     try {
                         const tgId = Array.isArray(member.telegram) ? member.telegram[0] : member.telegram.replace(/\D/g, '');
                         let tgPhotoSent = false;
                         if (status === 'Sukses') {
+                            const appUrl = "http://localhost:3000";
                             const buffer = await generateCanvasReceipt("nota", tx);
                             if (buffer) {
                                 await bot.telegram.sendPhoto(tgId, { source: buffer }, { caption: msg, parse_mode: "Markdown" });
@@ -1059,70 +1016,79 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                         if (!tgPhotoSent) {
                             await bot.telegram.sendMessage(tgId, msg, { parse_mode: "Markdown" });
                         }
-                        const tIndex = db.transactions.findIndex((t: any) => t.id === tx.id);
-                        if (tIndex >= 0) {
-                            db.transactions[tIndex].tgReceiptSent = true;
-                            writeDB(db);
-                        }
-                    } catch (e) {
-                    }
+                    } catch (e: any) { console.error("Error in prepaidBrands check:", e.message); }
+                    })();
                 }
-                
-                if (waSocket && member && member.whatsapp) {
-                    try {
-                        let cleanWa = member.whatsapp.replace(/\D/g, "");
-                        if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
-                        const jid = cleanWa + "@s.whatsapp.net";
-                        
-                        let caption = "";
-                        let buffer = null;
-                        if (status === 'Sukses') {
-                            buffer = await generateCanvasReceipt("nota", tx);
-                            caption = "✅ *Transaksi Berhasil!* Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰";
-                        } else if (status === 'Gagal') {
-                            let refundMsg = tx.method === 'saldo' ? '✅ Saldo sebesar Rp ' + (tx.price||0).toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (tx.method === 'utang' ? '✅ Utang sebesar Rp ' + (tx.price||0).toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + (tx.price||0).toLocaleString('id-ID') + ' kepada pelanggan.');
-                            caption = `❌ *Transaksi Gagal!*\n\nMaaf Kak, pembayaran untuk pesanan Anda (${tx.product}) gagal diproses.\n\n${refundMsg}\n\nTenang saja, Kakak bisa mencoba ulang kapan pun.`;
+                if (waSocket) {
+                    (async () => {
+                        let jid = tx.waJid;
+                        if (!jid && member && member.whatsapp) {
+                            let cleanWa = member.whatsapp.replace(/\D/g, "");
+                            if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
+                            jid = cleanWa + "@s.whatsapp.net";
                         }
                         
-                        await waSocket.sendPresenceUpdate("composing", jid);
-                        await new Promise(r => setTimeout(r, 1200));
-                        await waSocket.sendPresenceUpdate("paused", jid);
-                        
-                        if (buffer) {
-                            await waSocket.sendMessage(jid, { image: buffer, caption: caption });
-                        } else {
-                            if (tx.waMsgKey) {
-                                try { await waSocket.sendMessage(jid, { text: caption, edit: tx.waMsgKey }); } catch(e) {
-                                    await waSocket.sendMessage(jid, { text: caption });
+                        if (jid) {
+                            try {
+                                await waSocket.presenceSubscribe(jid);
+                                await waSocket.sendPresenceUpdate("composing", jid);
+                                await new Promise(r => setTimeout(r, 1200));
+                                await waSocket.sendPresenceUpdate("paused", jid);
+                                
+                                let edited = false;
+                                if (tx.waMsgKey) {
+                                    try {
+                                        await waSocket.sendMessage(jid, { text: msg, edit: tx.waMsgKey });
+                                        edited = true;
+                                    } catch (e) { }
                                 }
-                            } else {
-                                await waSocket.sendMessage(jid, { text: caption });
+                                
+                                if (status === 'Sukses') {
+                                    const buffer = await generateCanvasReceipt("nota", tx);
+                                    if (buffer) {
+                                        // Wait a little bit for realistic flow
+                                        await new Promise(r => setTimeout(r, 1000));
+                                        await waSocket.sendPresenceUpdate("composing", jid);
+                                        await new Promise(r => setTimeout(r, 1200));
+                                        await waSocket.sendPresenceUpdate("paused", jid);
+                                        await waSocket.sendMessage(jid, { image: buffer, caption: "✅ *Transaksi Berhasil!* Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰" });
+                                    } else if (!edited) {
+                                        await waSocket.sendMessage(jid, { text: msg });
+                                    }
+                                } else if (!edited) {
+                                    await waSocket.sendMessage(jid, { text: msg });
+                                }
+                                
+                                if (status === 'Sukses' || status === 'Gagal') {
+                                    const tIndex = db.transactions.findIndex((t: any) => t.id === tx.id);
+                                    if (tIndex >= 0) {
+                                        db.transactions[tIndex].waReceiptSent = true;
+                                        writeDB(db);
+                                    }
+                                }
+                            } catch (e: any) {
+                                console.log("WA delivery error:", e.message);
                             }
                         }
-                        
-                        const tIndex = db.transactions.findIndex((t: any) => t.id === tx.id);
-                        if (tIndex >= 0) {
-                            db.transactions[tIndex].waReceiptSent = true;
-                            writeDB(db);
-                        }
-                    } catch (e) {
-                    }
+                    })();
                 }
             }
         }
-        return { success: true };
+        
     } catch(e) {
-        console.error("processDigiflazzWebhookData error", e);
-        return { success: false };
+        console.error("Webhook error", e);
     }
   }
 
-  app.post("/api/bot/webhook", async (req, res) => {
+
+  // Auto-check pending transactions every 30 seconds
+
+
+  app.post(["/api/digiflazz-webhook", "/webhook"], express.json(), async (req, res) => {
     try {
         const payload = req.body;
-        if (payload.data) {
-            await processDigiflazzWebhookData(payload.data);
-        }
+        if (!payload || !payload.data) return res.json({ success: false, msg: "No payload" });
+        await processDigiflazzWebhookData(payload.data);
         res.json({ success: true });
     } catch(e) {
         console.error("Webhook route error", e);
@@ -2068,39 +2034,10 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca") {
                     paymentInfo = `    📝 JANJI   : "Chuna percaya 100% sama kamu! 😍     BAYAR      Kamu pasti bayar tepat waktu karena    TEPAT       Chuna tahu kamu pelanggan baik hati.    WAKTU       Nanti kalau sudah transfer, chat                 Chuna aja, nanti Chuna proses dengan                 senyum manis! Makasih udah jujur! 💖🤗"`;
                 }
                 
-                // PRE-REGISTER TRANSACTION
-                transactions.unshift({
-                    id: pay_ref_id,
-                    memberId: member.id,
-                    type: "prepaid",
-                    product: product.product_name,
-                    sku: product.buyer_sku_code,
-                    target: targetDisplay,
-                    price: total,
-                    modal: digiflazzPrice,
-                    cuan: cuan > 0 ? cuan : 0,
-                    status: status,
-                    method: method,
-                    sn: payJson.data?.sn || "-",
-                    date: new Date().toISOString(),
-                    waReceiptSent: false,
-                    tgReceiptSent: false
-                });
-                db.transactions = transactions;
-                writeDB(db);
-                
                 let msg = "";
                 let tgMsgId: number | undefined;
                 let waMsgKey: any | undefined;
                 let waJid: string | undefined;
-                let notaBuffer: Buffer | null = null;
-                
-                let returnMarkup;
-                if (stateData.memberId) {
-                    returnMarkup = { keyboard: [[{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true };
-                } else {
-                    returnMarkup = { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true };
-                }
 
                 if (status === 'Pending') {
                     msg = `⏳ Hai Kak!
@@ -2114,7 +2051,7 @@ Untuk cek status atau bertanya, langsung chat Chuna di Bot Telegram, ya!
 👉 https://t.me/ChunaChanbot
 
 Chuna menunggu kabar baik dari Kakak! 😊`;
-                    const tgMsg = await ctx.reply(msg, { reply_markup: returnMarkup });
+                    const tgMsg = await ctx.reply(msg);
                     tgMsgId = tgMsg.message_id;
                 } else if (status === 'Sukses') {
                     const sn = payJson.data.sn || "-";
@@ -2143,15 +2080,21 @@ Kalau mau tanya-tanya atau order lagi, langsung chat Chuna di Bot Telegram:
 
 Chuna tunggu chat dari Kakak! 😊💖`;
                     const appUrl = "http://localhost:3000";
+                    let notaBuffer = null;
                     if (pay_ref_id) notaBuffer = await generateCanvasReceipt("nota", { id: pay_ref_id, memberId: member.id, type: "prepaid", product: product.product_name, sku: product.buyer_sku_code, target: targetDisplay, price: total, modal: digiflazzPrice, cuan: cuan > 0 ? cuan : 0, status: status, method: method, sn: payJson.data?.sn || "-", date: new Date().toISOString() });
                     let tgMsg;
                     if (notaBuffer) {
-                        tgMsg = await ctx.replyWithPhoto({ source: notaBuffer }, { caption: msg, parse_mode: 'Markdown', reply_markup: returnMarkup });
+                        tgMsg = await ctx.replyWithPhoto({ source: notaBuffer }, { caption: msg, parse_mode: 'Markdown' });
                     } else {
-                        tgMsg = await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: returnMarkup });
+                        tgMsg = await ctx.reply(msg, { parse_mode: 'Markdown' });
                     }
                     tgMsgId = tgMsg.message_id;
                 } else {
+                    if (!isOwnerSelf && method === 'saldo') {
+                        member.balance += total;
+                        db.members = members;
+                        writeDB(db);
+                    }
                     let refundMsg = method === 'saldo' ? '✅ Saldo sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (method === 'utang' ? '✅ Utang sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + total.toLocaleString('id-ID') + ' kepada pelanggan.');
                     msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.
 
@@ -2181,11 +2124,10 @@ Coba lihat angka: *${product.product_name}* saat ini mungkin sudah naik, melebih
                             }
                         }
                     }
-                    const tgMsg = await ctx.reply(msg, { reply_markup: returnMarkup });
+                    const tgMsg = await ctx.reply(msg);
                     tgMsgId = tgMsg.message_id;
                 }
                 
-                let waImageSent = false;
                 if (msg && waSocket && member.whatsapp) {
                     let cleanWa = member.whatsapp.replace(/\D/g, "");
                     if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
@@ -2199,7 +2141,6 @@ Coba lihat angka: *${product.product_name}* saat ini mungkin sudah naik, melebih
                         let waMsg;
                         if (typeof notaBuffer !== 'undefined' && notaBuffer) {
                             waMsg = await waSocket.sendMessage(jid, { image: notaBuffer, caption: msg });
-                            waImageSent = true;
                         } else {
                             waMsg = await waSocket.sendMessage(jid, { text: msg });
                         }
@@ -2209,17 +2150,28 @@ Coba lihat angka: *${product.product_name}* saat ini mungkin sudah naik, melebih
                     }
                 }
                 
-                const txIndex = transactions.findIndex(t => t.id === pay_ref_id);
-                if (txIndex >= 0) {
-                    transactions[txIndex].waReceiptSent = true;
-                    transactions[txIndex].tgReceiptSent = true;
-                    transactions[txIndex].tgMsgId = tgMsgId;
-                    transactions[txIndex].waMsgKey = waMsgKey;
-                    transactions[txIndex].tgChatId = ctx.chat?.id;
-                    transactions[txIndex].waJid = waJid;
-                    db.transactions = transactions;
-                    writeDB(db);
-                }
+                // ALWAYS save to transaction history so it can be seen
+                transactions.unshift({
+                    id: pay_ref_id,
+                    memberId: member.id,
+                    type: "prepaid",
+                    product: product.product_name,
+                    sku: product.buyer_sku_code,
+                    target: targetDisplay,
+                    price: total,
+                    modal: digiflazzPrice,
+                    cuan: cuan > 0 ? cuan : 0,
+                    status: status,
+                    method: method,
+                    sn: payJson.data?.sn || "-",
+                    date: new Date().toISOString(),
+                    tgMsgId,
+                    waMsgKey,
+                    tgChatId: ctx.chat?.id,
+                    waJid
+                });
+                db.transactions = transactions;
+                writeDB(db);
                 
             } else {
                 if (!isOwnerSelf && method === 'saldo') {
@@ -2314,38 +2266,10 @@ async function processPascaPayment(ctx: any, ref_id: string, method: string, sta
                     paymentInfo = `    📝 JANJI   : "Chuna percaya 100% sama kamu! 😍     BAYAR      Kamu pasti bayar tepat waktu karena    TEPAT       Chuna tahu kamu pelanggan baik hati.    WAKTU       Nanti kalau sudah transfer, chat                 Chuna aja, nanti Chuna proses dengan                 senyum manis! Makasih udah jujur! 💖🤗"`;
                 }
                 
-                // PRE-REGISTER TRANSACTION
-                transactions.unshift({
-                    id: pay_ref_id,
-                    memberId: member.id,
-                    type: "pasca",
-                    product: stateData.product.product_name,
-                    sku: stateData.product.buyer_sku_code,
-                    target: customerNo,
-                    price: total,
-                    modal: digiflazzPrice,
-                    cuan: cuan > 0 ? cuan : 0,
-                    status: status,
-                    method: method,
-                    sn: payJson.data?.sn || "-",
-                    date: new Date().toISOString(),
-                    waReceiptSent: false
-                });
-                db.transactions = transactions;
-                writeDB(db);
-                
                 let msg = "";
                 let tgMsgId: number | undefined;
                 let waMsgKey: any | undefined;
                 let waJid: string | undefined;
-                let notaBuffer: Buffer | null = null;
-                
-                let returnMarkup;
-                if (stateData.memberId) {
-                    returnMarkup = { keyboard: [[{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true };
-                } else {
-                    returnMarkup = { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true };
-                }
 
                 if (status === 'Pending') {
                     msg = `⏳ Hai Kak!
@@ -2359,7 +2283,7 @@ Untuk cek status atau bertanya, langsung chat Chuna di Bot Telegram, ya!
 👉 https://t.me/ChunaChanbot
 
 Chuna menunggu kabar baik dari Kakak! 😊`;
-                    const tgMsg = await ctx.reply(msg, { reply_markup: returnMarkup });
+                    const tgMsg = await ctx.reply(msg);
                     tgMsgId = tgMsg.message_id;
                 } else if (status === 'Sukses') {
                     const sn = payJson.data.sn || "-";
@@ -2388,15 +2312,21 @@ Kalau mau tanya-tanya atau order lagi, langsung chat Chuna di Bot Telegram:
 
 Chuna tunggu chat dari Kakak! 😊💖`;
                     const appUrl = "http://localhost:3000";
+                    let notaBuffer = null;
                     if (pay_ref_id) notaBuffer = await generateCanvasReceipt("nota", { id: pay_ref_id, memberId: member.id, type: "pasca", product: stateData.product.product_name, sku: stateData.product.buyer_sku_code, target: customerNo, price: total, modal: digiflazzPrice, cuan: cuan > 0 ? cuan : 0, tagihan: stateData.checkResult?.selling_price || 0, admin_pel: stateData.adminFee || 0, status: status, method: method, sn: payJson.data?.sn || "-", date: new Date().toISOString() });
                     let tgMsg;
                     if (notaBuffer) {
-                        tgMsg = await ctx.replyWithPhoto({ source: notaBuffer }, { caption: msg, parse_mode: 'Markdown', reply_markup: returnMarkup });
+                        tgMsg = await ctx.replyWithPhoto({ source: notaBuffer }, { caption: msg, parse_mode: 'Markdown' });
                     } else {
-                        tgMsg = await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: returnMarkup });
+                        tgMsg = await ctx.reply(msg, { parse_mode: 'Markdown' });
                     }
                     tgMsgId = tgMsg.message_id;
                 } else {
+                    if (!isOwnerSelf && method === 'saldo') {
+                        member.balance += total;
+                        db.members = members;
+                        writeDB(db);
+                    }
                     let refundMsg = method === 'saldo' ? '✅ Saldo sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (method === 'utang' ? '✅ Utang sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + total.toLocaleString('id-ID') + ' kepada pelanggan.');
                     msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.
 
@@ -2426,11 +2356,10 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
                             }
                         }
                     }
-                    const tgMsg = await ctx.reply(msg, { reply_markup: returnMarkup });
+                    const tgMsg = await ctx.reply(msg);
                     tgMsgId = tgMsg.message_id;
                 }
 
-                let waImageSent = false;
                 if (msg && waSocket && member.whatsapp) {
                     let cleanWa = member.whatsapp.replace(/\D/g, "");
                     if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
@@ -2444,7 +2373,6 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
                         let waMsg;
                         if (typeof notaBuffer !== 'undefined' && notaBuffer) {
                             waMsg = await waSocket.sendMessage(jid, { image: notaBuffer, caption: msg });
-                            waImageSent = true;
                         } else {
                             waMsg = await waSocket.sendMessage(jid, { text: msg });
                         }
@@ -2454,15 +2382,27 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
                     }
                 }
                 
-                const txIndex = transactions.findIndex(t => t.id === pay_ref_id);
-                if (txIndex >= 0) {
-                    transactions[txIndex].waReceiptSent = true;
-                    transactions[txIndex].tgReceiptSent = true;
-                    transactions[txIndex].tgMsgId = tgMsgId;
-                    transactions[txIndex].waMsgKey = waMsgKey;
-                    transactions[txIndex].tgChatId = ctx.chat?.id;
-                    transactions[txIndex].waJid = waJid;
-                }
+                transactions.unshift({
+                    id: pay_ref_id,
+                    memberId: member.id,
+                    type: "pasca",
+                    product: stateData.product.product_name,
+                    sku: stateData.product.buyer_sku_code,
+                    target: customerNo,
+                    price: total,
+                    modal: digiflazzPrice,
+                    cuan: cuan > 0 ? cuan : 0,
+                    tagihan: stateData.checkResult?.selling_price || 0,
+                    admin_pel: stateData.adminFee || 0,
+                    status: status,
+                    method: method,
+                    sn: payJson.data?.sn || "-",
+                    date: new Date().toISOString(),
+                    tgMsgId,
+                    waMsgKey,
+                    tgChatId: ctx.chat?.id,
+                    waJid
+                });
                 db.transactions = transactions;
                 writeDB(db);
                 
@@ -2541,15 +2481,14 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
 
         if (db.owners.includes(userId)) {
            return ctx.reply(
-             "👑 DASHBOARD E4 STORE\nSelamat datang bosku! Mau kelola apa hari ini?",
+             "👑 DASHBOARD KASIR E4 STORESelamat datang bosku! Mau kelola apa hari ini?",
              {
                reply_markup: {
                  keyboard: [
                    [{ text: "📒 Cek Utang Member" }],
                    [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
                    [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
-                   [{ text: "📢 Pengumuman WA" }],
-                   [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]
+                      [{ text: "📢 Pengumuman WA" }]
                  ],
                  resize_keyboard: true
                }
@@ -2569,8 +2508,7 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
                 keyboard: [
                   [{ text: "💵 Cek Saldo" }],
                   [{ text: "🧾 Cek Tagihan" }],
-                  [{ text: "📋 Menu Produk" }],
-                  [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]
+                  [{ text: "📋 Menu Produk" }]
                 ],
                 resize_keyboard: true
               }
@@ -2658,16 +2596,16 @@ Oke kak! Langkah pertama, kasih tau Chuna Username yang kakak mau dong.`);
 │  ▸  Tipe Akun   : ${typeCap} (siap naik)
 │  ▸  Kontak      : ${wa} [✅ Aktif]
 │
-│  💳  SALDO ANDA
+│  💳  SALDO DOMAIN
 │  ───────────────
 │  ▸  Rp ${balance} 
-│     [ ░░░░░░░░░░ ] 
+│     [ ░░░░░░░░░░ ] 0% (waktunya isi cuan!)
 │
 ├─── ✨ CHUNA · SPECIAL CALL ✨ ───
 │
 │  🎁  Promo spesial untuk "${nameOriginal}":
-│  ✔️  Free admin fee 
-│  
+│  ✔️  Free admin fee (periode terbatas)
+│  ✔️  Cara klaim: balas "AMBIL" di sini
 │
 └─── 🚀 24/7 Ready. Balas kapan saja ───`);
           } else {
@@ -2735,47 +2673,20 @@ Oke kak! Langkah pertama, kasih tau Chuna Username yang kakak mau dong.`);
       
       bot.hears("🔙 Kembali ke Menu Owner", async (ctx) => {
           delete userStates[ctx.from.id];
-          await ctx.reply("👑 DASHBOARD E4 STORE\nSelamat datang bosku! Mau kelola apa hari ini?", {
+          await ctx.reply("👑 DASHBOARD KASIR E4 STORESelamat datang bosku! Mau kelola apa hari ini?", {
               reply_markup: {
                   keyboard: [
                       [{ text: "📒 Cek Utang Member" }],
                       [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
                       [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
-                      [{ text: "📢 Pengumuman WA" }],
-                      [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]
+                      [{ text: "📢 Pengumuman WA" }]
                   ],
                   resize_keyboard: true
               }
           });
       });
 
-            
-      bot.hears("📥 Download", async (ctx) => {
-        userStates[ctx.from.id] = { step: 'AWAITING_DOWNLOAD', data: {} };
-        const info = `*Fitur Download 📥*
-
-Halo kak! Silakan kirimkan link video/audio yang ingin didownload.
-Chuna mendukung download dari:
-🎵 TikTok
-📸 Instagram
-🎬 YouTube
-📘 Facebook
-🐦 Twitter
-
-Kirim linknya sekarang ya! 🥰`;
-        await ctx.reply(info, { parse_mode: 'Markdown' });
-      });
-
-      bot.hears("🎵 Lirik Lagu", async (ctx) => {
-        userStates[ctx.from.id] = { step: 'AWAITING_LIRIK', data: {} };
-        const info = `*Fitur Lirik & Pencarian Musik 🎵*
-
-Halo kak! Silakan kirimkan judul lagu yang ingin dicari (contoh: *Matahariku Agnez Mo*).
-Chuna akan mencarikan lagu beserta liriknya! 🥰`;
-        await ctx.reply(info, { parse_mode: 'Markdown' });
-      });
-
-      bot.hears("🔙 Kembali", async (ctx) => {
+            bot.hears("🔙 Kembali", async (ctx) => {
           const state = userStates[ctx.from.id];
           if (state && state.data && state.data.memberId) {
               userStates[ctx.from.id] = { step: 'LOCKED_MEMBER', data: { memberId: state.data.memberId } };
@@ -2797,8 +2708,7 @@ Chuna akan mencarikan lagu beserta liriknya! 🥰`;
                   keyboard: [
                       [{ text: "💵 Cek Saldo" }],
                       [{ text: "🧾 Cek Tagihan" }],
-                      [{ text: "📋 Menu Produk" }],
-                      [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]
+                      [{ text: "📋 Menu Produk" }]
                   ],
                   resize_keyboard: true
               }
@@ -2827,14 +2737,14 @@ Chuna akan mencarikan lagu beserta liriknya! 🥰`;
       });
 
       bot.action(/^sel_off_(.+)$/, async (ctx) => {
-        await ctx.answerCbQuery();
         if (!db.owners.includes(ctx.from?.id)) return;
         const memberId = ctx.match[1];
         const member = members.find(m => m.id === memberId);
         if (!member) {
-          return ctx.reply("❌ Member tidak ditemukan!");
+          return ctx.answerCbQuery("Member tidak ditemukan!");
         }
         
+        await ctx.answerCbQuery();
         userStates[ctx.from.id] = { step: 'LOCKED_MEMBER', data: { memberId: member.id } };
         await ctx.reply(`✅ Pelanggan Terkunci: ${member.whatsapp}Silakan pilih menu transaksi di bawah:`, {
           reply_markup: {
@@ -3006,7 +2916,6 @@ Chuna akan mencarikan lagu beserta liriknya! 🥰`;
       });
 
       bot.action(/^cek_utang_(.+)$/, async (ctx) => {
-          await ctx.answerCbQuery();
           if (!db.owners.includes(ctx.from?.id)) return;
           const memberId = ctx.match[1];
           const member = members.find(m => m.id === memberId);
@@ -3045,7 +2954,6 @@ Chuna akan mencarikan lagu beserta liriknya! 🥰`;
       });
 
       bot.action(/^bayar_utang_(.+)$/, async (ctx) => {
-          await ctx.answerCbQuery();
           if (!db.owners.includes(ctx.from?.id)) return;
           const memberId = ctx.match[1];
           
@@ -3054,7 +2962,6 @@ Chuna akan mencarikan lagu beserta liriknya! 🥰`;
       });
       
       bot.action('batal_utang', async (ctx) => {
-          await ctx.answerCbQuery();
           if (!db.owners.includes(ctx.from?.id)) return;
           delete userStates[ctx.from.id];
           await ctx.editMessageText("❌ Aksi dibatalkan.");
@@ -3299,175 +3206,6 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
         
         if (text.startsWith('/')) { return next(); }
         if (text === "🔙 Kembali") { return next(); }
-
-        // COMMANDS DARI FILE
-        if (text.startsWith('.tt ') || text.startsWith('.tiktok ')) {
-            const url = text.split(' ')[1];
-            if (!url) return ctx.reply("❌ Link TikTok-nya mana kak?");
-            await ctx.reply("⏳ Tunggu sebentar ya, Chuna sedang mendownload TikTok...");
-            try {
-                const btch = (await import('btch-downloader')).default || await import('btch-downloader');
-                const result = await btch.ttdl(url);
-                if (result && result.video) {
-                    await ctx.replyWithVideo(result.video, { caption: "✅ Berhasil di-download oleh Chuna!" });
-                } else if (result && result.audio) {
-                    await ctx.replyWithVideo(result.audio[0] || result.audio, { caption: "✅ Berhasil di-download oleh Chuna!" }).catch(async () => {
-                        await ctx.replyWithAudio(result.audio[0] || result.audio);
-                    });
-                } else {
-                    await ctx.reply("❌ Gagal mendownload.");
-                }
-            } catch (e: any) { await ctx.reply("❌ Error: " + e.message); }
-            return;
-        }
-
-        if (text.startsWith('.ig ') || text.startsWith('.instagram ')) {
-            const url = text.split(' ')[1];
-            if (!url) return ctx.reply("❌ Link Instagram-nya mana kak?");
-            await ctx.reply("⏳ Tunggu sebentar ya, Chuna sedang mendownload IG...");
-            try {
-                const btch = (await import('btch-downloader')).default || await import('btch-downloader');
-                const result = await btch.igdl(url);
-                if (result && Array.isArray(result) && result.length > 0) {
-                    for (const media of result) {
-                        if (media.url) {
-                            if (media.url.includes('.mp4')) await ctx.replyWithVideo(media.url, { caption: "✅ Berhasil!" });
-                            else await ctx.replyWithPhoto(media.url, { caption: "✅ Berhasil!" });
-                        }
-                    }
-                } else {
-                    await ctx.reply("❌ Gagal mendownload.");
-                }
-            } catch (e: any) { await ctx.reply("❌ Error: " + e.message); }
-            return;
-        }
-
-        if (text.startsWith('.ytmp4 ')) {
-            const url = text.split(' ')[1];
-            if (!url) return ctx.reply("❌ Link YouTube-nya mana kak?");
-            await ctx.reply("⏳ Tunggu sebentar ya, Chuna sedang mendownload YT MP4...");
-            try {
-                const btch = (await import('btch-downloader')).default || await import('btch-downloader');
-                const result = await btch.youtube(url);
-                if (result && result.video) {
-                    await ctx.replyWithVideo(result.video, { caption: "✅ Berhasil!" });
-                } else { await ctx.reply("❌ Gagal mendownload."); }
-            } catch (e: any) { await ctx.reply("❌ Error: " + e.message); }
-            return;
-        }
-
-        if (text.startsWith('.ytmp3 ')) {
-            const url = text.split(' ')[1];
-            if (!url) return ctx.reply("❌ Link YouTube-nya mana kak?");
-            await ctx.reply("⏳ Tunggu sebentar ya, Chuna sedang mendownload YT MP3...");
-            try {
-                const btch = (await import('btch-downloader')).default || await import('btch-downloader');
-                const result = await btch.youtube(url);
-                if (result && result.audio) {
-                    await ctx.replyWithAudio(result.audio, { caption: "✅ Berhasil!" });
-                } else { await ctx.reply("❌ Gagal mendownload."); }
-            } catch (e: any) { await ctx.reply("❌ Error: " + e.message); }
-            return;
-        }
-
-        if (text.startsWith('.fb ')) {
-            const url = text.split(' ')[1];
-            if (!url) return ctx.reply("❌ Link Facebook-nya mana kak?");
-            await ctx.reply("⏳ Tunggu sebentar ya, Chuna sedang mendownload FB...");
-            try {
-                const btch = (await import('btch-downloader')).default || await import('btch-downloader');
-                const result = await btch.fbdown(url);
-                if (result && result.video) {
-                    await ctx.replyWithVideo(result.video, { caption: "✅ Berhasil!" });
-                } else if (result && result.Normal_video) {
-                    await ctx.replyWithVideo(result.Normal_video, { caption: "✅ Berhasil!" });
-                } else { await ctx.reply("❌ Gagal mendownload."); }
-            } catch (e: any) { await ctx.reply("❌ Error: " + e.message); }
-            return;
-        }
-
-        if (text.startsWith('.tw ') || text.startsWith('.twitter ')) {
-            const url = text.split(' ')[1];
-            if (!url) return ctx.reply("❌ Link Twitter-nya mana kak?");
-            await ctx.reply("⏳ Tunggu sebentar ya, Chuna sedang mendownload Twitter...");
-            try {
-                const btch = (await import('btch-downloader')).default || await import('btch-downloader');
-                const result = await btch.twitter(url);
-                if (result && result.url) {
-                    if (result.url[0] && result.url[0].hd) {
-                        await ctx.replyWithVideo(result.url[0].hd, { caption: "✅ Berhasil!" });
-                    } else {
-                        await ctx.reply("❌ Gagal mendownload.");
-                    }
-                } else { await ctx.reply("❌ Gagal mendownload."); }
-            } catch (e: any) { await ctx.reply("❌ Error: " + e.message); }
-            return;
-        }
-
-        if (text.startsWith('.spotify ')) {
-            const url = text.split(' ')[1];
-            if (!url) return ctx.reply("❌ Link Spotify-nya mana kak?");
-            await ctx.reply("⏳ Tunggu sebentar ya, Chuna sedang mendownload Spotify...");
-            try {
-                const btch = (await import('btch-downloader')).default || await import('btch-downloader');
-                const result = await btch.spotify(url);
-                if (result && result.audio) {
-                    await ctx.replyWithAudio(result.audio, { caption: `✅ ${result.title || 'Berhasil!'}` });
-                } else { await ctx.reply("❌ Gagal mendownload."); }
-            } catch (e: any) { await ctx.reply("❌ Error: " + e.message); }
-            return;
-        }
-
-        if (text.startsWith('.pinterest ') || text.startsWith('.pin ')) {
-            const url = text.split(' ')[1];
-            if (!url) return ctx.reply("❌ Link Pinterest-nya mana kak?");
-            await ctx.reply("⏳ Tunggu sebentar ya, Chuna sedang mendownload Pinterest...");
-            try {
-                const btch = (await import('btch-downloader')).default || await import('btch-downloader');
-                const result = await btch.pinterest(url);
-                if (result && Array.isArray(result) && result.length > 0) {
-                    for (const url of result) {
-                        await ctx.replyWithPhoto(url);
-                    }
-                } else if (result) {
-                    await ctx.replyWithPhoto(result);
-                } else { await ctx.reply("❌ Gagal mendownload."); }
-            } catch (e: any) { await ctx.reply("❌ Error: " + e.message); }
-            return;
-        }
-
-        if (text.startsWith('.lirik ') || text.startsWith('.play ')) {
-            const query = text.substring(text.indexOf(' ') + 1).trim();
-            if (!query) return ctx.reply("❌ Judul lagunya apa kak?");
-            await ctx.reply("⏳ Chuna sedang mencari '" + query + "'...");
-            try {
-                const ytSearch = (await import('yt-search')).default || await import('yt-search');
-                const searchResult = await ytSearch(query);
-                let msg = "🎵 *Hasil Pencarian YouTube* 🎵\n\n";
-                if (searchResult && searchResult.videos.length > 0) {
-                    const top = searchResult.videos.slice(0, 3);
-                    top.forEach((v: any, i: number) => {
-                        msg += `*${i+1}. ${v.title}*\n⏱️ ${v.timestamp} | 👁️ ${v.views}\n🔗 ${v.url}\n\n`;
-                    });
-                    const photoUrl = top[0].thumbnail;
-                    
-                    try {
-                        const axios = (await import('axios')).default || await import('axios');
-                        const lyricsRes = await axios.get(`https://some-random-api.com/lyrics?title=${encodeURIComponent(query)}`);
-                        if (lyricsRes.data && lyricsRes.data.lyrics) {
-                            msg += `\n*Lirik Lagu:*\n\n${lyricsRes.data.lyrics.substring(0, 2000)}`;
-                        }
-                    } catch (e) {}
-                    
-                    await ctx.replyWithPhoto(photoUrl, { caption: msg.substring(0, 1024), parse_mode: 'Markdown' });
-                    if (msg.length > 1024) await ctx.reply(msg, { parse_mode: 'Markdown' });
-                } else {
-                    await ctx.reply("❌ Lagu tidak ditemukan.");
-                }
-            } catch (e: any) { await ctx.reply("❌ Error: " + e.message); }
-            return;
-        }
-
         
         const ownerMenu = ["📒 Cek Utang Member", "📝 Tambah Member", "👑 List Member", "💳 Saldo Pusat", "⚙️ Pengaturan", "📢 Pengumuman WA", "📸 Buat Story WA"];
         if (ownerMenu.includes(text) && db.owners.includes(userId)) {
@@ -3478,239 +3216,6 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
         const state = userStates[userId];
         if (state) {
             switch (state.step) {
-
-                case 'AWAITING_DOWNLOAD': {
-                    if (text === '❌ Batal') {
-                        delete userStates[userId];
-                        
-                    let returnMarkup;
-                    if (db.owners.includes(userId)) {
-                        returnMarkup = {
-                            keyboard: [
-                                [{ text: "📒 Cek Utang Member" }],
-                                [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
-                                [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
-                                [{ text: "📢 Pengumuman WA" }],
-                                [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]
-                            ],
-                            resize_keyboard: true
-                        };
-                    } else {
-                        returnMarkup = { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true };
-                    }
-await ctx.reply("❌ Download dibatalkan.", { reply_markup: returnMarkup });
-                        return;
-                    }
-                    const url = text.trim();
-                    if (!url.startsWith('http')) {
-                        await ctx.reply("❌ Mohon kirimkan link (URL) yang valid!");
-                        return;
-                    }
-                    userStates[userId] = { step: 'AWAITING_DOWNLOAD_FORMAT', url };
-                    await ctx.reply("Pilih format yang ingin didownload 👇", {
-                        reply_markup: {
-                            keyboard: [
-                                [{ text: "🎥 Video" }, { text: "🎵 Audio / MP3" }],
-                                [{ text: "📸 Gambar" }, { text: "❌ Batal" }]
-                            ],
-                            resize_keyboard: true
-                        }
-                    });
-                    return;
-                }
-                
-                case 'AWAITING_DOWNLOAD_FORMAT': {
-                    if (text === '❌ Batal') {
-                        delete userStates[userId];
-                        
-                    let returnMarkup;
-                    if (db.owners.includes(userId)) {
-                        returnMarkup = {
-                            keyboard: [
-                                [{ text: "📒 Cek Utang Member" }],
-                                [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
-                                [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
-                                [{ text: "📢 Pengumuman WA" }],
-                                [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]
-                            ],
-                            resize_keyboard: true
-                        };
-                    } else {
-                        returnMarkup = { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true };
-                    }
-await ctx.reply("❌ Download dibatalkan.", { reply_markup: returnMarkup });
-                        return;
-                    }
-                    
-                    const format = text;
-                    if (!["🎥 Video", "🎵 Audio / MP3", "📸 Gambar"].includes(format)) {
-                        await ctx.reply("❌ Silakan pilih format menggunakan tombol di bawah.");
-                        return;
-                    }
-                    
-                    const url = state.url;
-                    await ctx.reply("⏳ Tunggu sebentar ya, Chuna sedang mendownload media...");
-                    
-                    try {
-                        const btch = (await import('btch-downloader')).default || await import('btch-downloader');
-                        let result;
-                        if (url.includes('tiktok.com')) result = await btch.ttdl(url);
-                        else if (url.includes('instagram.com')) result = await btch.igdl(url);
-                        else if (url.includes('youtube.com') || url.includes('youtu.be')) result = await btch.youtube(url);
-                        else if (url.includes('facebook.com') || url.includes('fb.watch')) result = await btch.fbdown(url);
-                        else if (url.includes('twitter.com') || url.includes('x.com')) result = await btch.twitter(url);
-                        else result = await btch.aio(url);
-
-                        const isVideo = format === "🎥 Video";
-                        const isAudio = format === "🎵 Audio / MP3";
-                        const isImage = format === "📸 Gambar";
-                        
-                        // Helper to find URL recursively or in array
-                        const extractUrls = (res: any): string[] => {
-                            if (!res) return [];
-                            if (typeof res === 'string' && res.startsWith('http')) return [res];
-                            if (Array.isArray(res)) return res.map(r => extractUrls(r)).flat();
-                            
-                            let urls: string[] = [];
-                            if (res.url) urls.push(res.url);
-                            if (res.video) urls.push(...extractUrls(res.video));
-                            if (res.audio) urls.push(...extractUrls(res.audio));
-                            if (res.image) urls.push(...extractUrls(res.image));
-                            if (res.mp4) urls.push(...extractUrls(res.mp4));
-                            if (res.mp3) urls.push(...extractUrls(res.mp3));
-                            if (res.thumbnail) urls.push(...extractUrls(res.thumbnail));
-                            return urls.flat();
-                        };
-                        
-                        let allUrls = extractUrls(result);
-                        
-                        // Filter by extension roughly
-                        let targetUrls = allUrls.filter(u => {
-                            const lu = u.toLowerCase();
-                            if (isAudio && (lu.includes('.mp3') || lu.includes('audio') || result?.mp3 === u || (result?.audio && JSON.stringify(result.audio).includes(u)))) return true;
-                            if (isVideo && (lu.includes('.mp4') || lu.includes('video') || result?.mp4 === u || (result?.video && JSON.stringify(result.video).includes(u)))) return true;
-                            if (isImage && (lu.includes('.jpg') || lu.includes('.jpeg') || lu.includes('.png') || lu.includes('image') || result?.thumbnail === u)) return true;
-                            return false;
-                        });
-                        
-                        if (targetUrls.length === 0) {
-                            // fallback, if nothing specific matched, maybe just use the first few if we can guess
-                            if (isVideo && result?.mp4) targetUrls = [result.mp4];
-                            else if (isAudio && result?.mp3) targetUrls = [result.mp3];
-                            else if (isImage && result?.thumbnail) targetUrls = [result.thumbnail];
-                            else {
-                                // If still nothing, just give whatever we got based on what the API usually returns
-                                if (isVideo) targetUrls = allUrls.filter(u => !u.includes('.jpg') && !u.includes('.mp3'));
-                                if (isAudio) targetUrls = allUrls.filter(u => !u.includes('.jpg') && !u.includes('.mp4'));
-                            }
-                        }
-                        
-                        // Remove duplicates
-                        targetUrls = [...new Set(targetUrls)];
-                        
-                        if (targetUrls.length > 0) {
-                            for (const mediaUrl of targetUrls) {
-                                try {
-                                    if (isVideo) {
-                                        await ctx.replyWithVideo(mediaUrl, { caption: "✅ Video berhasil di-download!" });
-                                        break; // Only send the first video to avoid spamming multiple qualities
-                                    } else if (isAudio) {
-                                        await ctx.replyWithAudio(mediaUrl, { caption: "✅ Audio berhasil di-download!" });
-                                        break;
-                                    } else {
-                                        await ctx.replyWithPhoto(mediaUrl, { caption: "✅ Gambar berhasil di-download!" });
-                                    }
-                                } catch(e) {}
-                            }
-                        } else {
-                             await ctx.reply("❌ Gagal mendapatkan format " + format + " dari link tersebut.");
-                        }
-
-                    } catch (e: any) {
-                        await ctx.reply("❌ Terjadi kesalahan saat mendownload media. " + e.message);
-                    }
-                    
-                    delete userStates[userId];
-                    
-                    let returnMarkup;
-                    if (db.owners.includes(userId)) {
-                        returnMarkup = {
-                            keyboard: [
-                                [{ text: "📒 Cek Utang Member" }],
-                                [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
-                                [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
-                                [{ text: "📢 Pengumuman WA" }],
-                                [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]
-                            ],
-                            resize_keyboard: true
-                        };
-                    } else {
-                        returnMarkup = { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true };
-                    }
-await ctx.reply("Menu Utama", { reply_markup: returnMarkup });
-                    return;
-                }
-
-                case 'AWAITING_LIRIK': {
-                    if (text === '❌ Batal') {
-                        delete userStates[userId];
-                        
-                    let returnMarkup;
-                    if (db.owners.includes(userId)) {
-                        returnMarkup = {
-                            keyboard: [
-                                [{ text: "📒 Cek Utang Member" }],
-                                [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
-                                [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
-                                [{ text: "📢 Pengumuman WA" }],
-                                [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]
-                            ],
-                            resize_keyboard: true
-                        };
-                    } else {
-                        returnMarkup = { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true };
-                    }
-await ctx.reply("❌ Pencarian dibatalkan.", { reply_markup: returnMarkup });
-                        return;
-                    }
-                    const query = text.trim();
-                    await ctx.reply("⏳ Chuna sedang mencari lirik lagu '" + query + "'...");
-                    try {
-                        const ytSearch = (await import('yt-search')).default || await import('yt-search');
-                        const searchResult = await ytSearch(query);
-                        let msg = "🎵 *Hasil Pencarian YouTube* 🎵\n\n";
-                        if (searchResult && searchResult.videos.length > 0) {
-                            const top = searchResult.videos.slice(0, 3);
-                            top.forEach((v: any, i: number) => {
-                                msg += `*${i+1}. ${v.title}*\n⏱️ ${v.timestamp} | 👁️ ${v.views}\n🔗 ${v.url}\n\n`;
-                            });
-                            const photoUrl = top[0].thumbnail;
-                            
-                            // Let's try lyrics api
-                            try {
-                                const axios = (await import('axios')).default || await import('axios');
-                                const lyricsRes = await axios.get(`https://some-random-api.com/lyrics?title=${encodeURIComponent(query)}`);
-                                if (lyricsRes.data && lyricsRes.data.lyrics) {
-                                    msg += `\n*Lirik Lagu:*\n\n${lyricsRes.data.lyrics.substring(0, 3000)}`;
-                                }
-                            } catch (e) {
-                                msg += "\n_(Lirik lagu tidak ditemukan di database kami)_";
-                            }
-                            
-                            await ctx.replyWithPhoto(photoUrl, { caption: msg.substring(0, 1024), parse_mode: 'Markdown' });
-                            if (msg.length > 1024) {
-                                await ctx.reply(msg, { parse_mode: 'Markdown' });
-                            }
-                        } else {
-                            await ctx.reply("❌ Lagu tidak ditemukan.");
-                        }
-                    } catch (e: any) {
-                        await ctx.reply("❌ Terjadi kesalahan saat mencari lagu. " + e.message);
-                    }
-                    delete userStates[userId];
-                    return;
-                }
-
                 case 'ASK_PIN_PREPAID': {
                     const pinEntered = text.trim();
                     const regUser = registeredUsers[userId];
@@ -3747,23 +3252,7 @@ await ctx.reply("❌ Pencarian dibatalkan.", { reply_markup: returnMarkup });
                         await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: { keyboard: [[{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true } });
                     } else {
                         delete userStates[userId];
-                        
-                        let returnMarkup;
-                        if (db.owners.includes(userId)) {
-                            returnMarkup = {
-                                keyboard: [
-                                    [{ text: "📒 Cek Utang Member" }],
-                                    [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
-                                    [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
-                                    [{ text: "📢 Pengumuman WA" }],
-                                    [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]
-                                ],
-                                resize_keyboard: true
-                            };
-                        } else {
-                            returnMarkup = { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true };
-                        }
-await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: returnMarkup });
+                        await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }]], resize_keyboard: true } });
                     }
                     return;
                 }
@@ -3876,23 +3365,7 @@ await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: returnMarkup });
                         await ctx.reply("❌ Pengecekan dibatalkan.", { reply_markup: { keyboard: [[{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true } });
                     } else {
                         delete userStates[userId];
-                        
-                        let returnMarkup;
-                        if (db.owners.includes(userId)) {
-                            returnMarkup = {
-                                keyboard: [
-                                    [{ text: "📒 Cek Utang Member" }],
-                                    [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
-                                    [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
-                                    [{ text: "📢 Pengumuman WA" }],
-                                    [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]
-                                ],
-                                resize_keyboard: true
-                            };
-                        } else {
-                            returnMarkup = { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true };
-                        }
-await ctx.reply("❌ Pengecekan dibatalkan.", { reply_markup: returnMarkup });
+                        await ctx.reply("❌ Pengecekan dibatalkan.", { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }]], resize_keyboard: true } });
                     }
                     return;
                 }
@@ -4038,23 +3511,7 @@ Tagihan kamu udah muncul nih, jangan sampai kelewat ya~
                         await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: { keyboard: [[{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true } });
                     } else {
                         delete userStates[userId];
-                        
-                        let returnMarkup;
-                        if (db.owners.includes(userId)) {
-                            returnMarkup = {
-                                keyboard: [
-                                    [{ text: "📒 Cek Utang Member" }],
-                                    [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
-                                    [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
-                                    [{ text: "📢 Pengumuman WA" }],
-                                    [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]
-                                ],
-                                resize_keyboard: true
-                            };
-                        } else {
-                            returnMarkup = { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true };
-                        }
-await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: returnMarkup });
+                        await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }]], resize_keyboard: true } });
                     }
                     return;
                 }
@@ -4169,23 +3626,7 @@ Dengan ini menyatakan bahwa:
                         await ctx.reply("❌ Pembayaran dibatalkan.", { reply_markup: { keyboard: [[{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true } });
                     } else {
                         delete userStates[userId];
-                        
-                        let returnMarkup;
-                        if (db.owners.includes(userId)) {
-                            returnMarkup = {
-                                keyboard: [
-                                    [{ text: "📒 Cek Utang Member" }],
-                                    [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
-                                    [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
-                                    [{ text: "📢 Pengumuman WA" }],
-                                    [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]
-                                ],
-                                resize_keyboard: true
-                            };
-                        } else {
-                            returnMarkup = { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true };
-                        }
-await ctx.reply("❌ Pembayaran dibatalkan.", { reply_markup: returnMarkup });
+                        await ctx.reply("❌ Pembayaran dibatalkan.", { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }]], resize_keyboard: true } });
                     }
                     return;
                 }
@@ -4827,7 +4268,6 @@ app.get("/api/tagihan-nota-image", async (req, res) => {
     const txDate = new Date(tx.date || new Date());
     const dateStr = txDate.toLocaleString('en-GB', { timeZone: 'Asia/Makassar', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).replace(',', '');
     const formattedDate = `${dateStr} WITA`;
-    const calendarInfo = getCalendarInfo(txDate);
     
     let memberName = tx.username || '-';
     try {
@@ -4900,11 +4340,11 @@ app.get("/api/tagihan-nota-image", async (req, res) => {
             <div class="box-val">Rp ${(tx.price || 0).toLocaleString('id-ID')}</div>
         </div>
         <div class="footer">
-            Cetak: ${formattedDate} | Kode: #${tx.id}<br/>✨ ${calendarInfo}
+            Chuna - Asisten Imutmu siap bantu 24 jam!<br/>Terimakasih telah berbelanja di E4 Store!
         </div>
         <div class="divider"></div>
         <div class="footer-small">
-            Chuna - Asisten Imutmu siap bantu 24 jam!<br/>Terimakasih telah berbelanja di E4 Store!
+            Terima kasih telah berbelanja di E4 Store!<br/>Cetak: ${formattedDate} | Kode: #${tx.id}
         </div>
     </div>
 </body>
