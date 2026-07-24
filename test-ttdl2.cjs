@@ -1,0 +1,7 @@
+const btch = require('btch-downloader');
+
+async function test() {
+    const res = await btch.ttdl('https://www.tiktok.com/@tiktok/video/7106594312292453675');
+    console.log(JSON.stringify(res, null, 2));
+}
+test();
