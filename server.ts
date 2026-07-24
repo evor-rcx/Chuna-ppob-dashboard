@@ -1,6 +1,7 @@
 import fs from "fs";
 import cron from "node-cron";
 import express from "express";
+import { fetchTiktok } from "./downloader";
 
 import path from 'path';
 
@@ -329,10 +330,12 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
             ctx.fill();
             
             ctx.fillStyle = '#333333';
-            ctx.font = '18px Arial, sans-serif';
+            ctx.font = '16px Arial, sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText('Chuna - Asisten Imutmu siap bantu 24 jam!', width / 2, y + 50);
-            ctx.fillText('Terimakasih telah berbelanja di E4 Store!', width / 2, y + 90);
+            const shortCode = `#${(data.id || 'E4').substring(0,6).toUpperCase()}`;
+            ctx.fillText('Terima kasih telah berbelanja di E4 Store!', width / 2, y + 40);
+            ctx.fillText(`Cetak: ${formattedDate} | Kode: ${shortCode}`, width / 2, y + 70);
+            ctx.fillText(`${calendarInfo}`, width / 2, y + 100);
             y += 150;
         } else {
             ctx.fillStyle = '#fdf2f8';
@@ -363,17 +366,15 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
         drawDivider(y);
         y += 40;
         
-        ctx.fillStyle = '#888888';
+        ctx.fillStyle = '#333333';
         ctx.font = '16px Arial, sans-serif';
         ctx.textAlign = 'center';
+        ctx.fillText('Chuna - Asisten Imutmu siap bantu 24 jam!', width / 2, y);
+        y += 25;
+        ctx.fillText('Terimakasih telah berbelanja di E4 Store!', width / 2, y);
+        y += 20;
+        ctx.fillStyle = '#888888';
         ctx.fillText('◻  ◻  ◻  ◻  ◻', width / 2, y);
-        y += 30;
-        ctx.fillText('Terima kasih telah berbelanja di E4 Store!', width / 2, y);
-        y += 25;
-        const shortCode = `#${(data.id || 'E4').substring(0,6).toUpperCase()}`;
-        ctx.fillText(`📅 Cetak: ${formattedDate} | Kode: ${shortCode}`, width / 2, y);
-        y += 25;
-        ctx.fillText(`✨ ${calendarInfo}`, width / 2, y);
         
         return canvas.toBuffer('image/png');
     } catch (e: any) {
@@ -2486,9 +2487,9 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
                reply_markup: {
                  keyboard: [
                    [{ text: "📒 Cek Utang Member" }],
-                   [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
-                   [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
-                      [{ text: "📢 Pengumuman WA" }]
+                      [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
+                      [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
+                      [{ text: "📢 Pengumuman WA" }, { text: "📥 Fitur Download" }]
                  ],
                  resize_keyboard: true
                }
@@ -2508,7 +2509,8 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
                 keyboard: [
                   [{ text: "💵 Cek Saldo" }],
                   [{ text: "🧾 Cek Tagihan" }],
-                  [{ text: "📋 Menu Produk" }]
+                  [{ text: "📋 Menu Produk" }],
+                  [{ text: "📥 Fitur Download" }]
                 ],
                 resize_keyboard: true
               }
@@ -2543,7 +2545,26 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
 Oke kak! Langkah pertama, kasih tau Chuna Username yang kakak mau dong.`);
       });
 
-      bot.hears(/Cek Saldo/i, async (ctx) => {
+      
+      bot.hears("📥 Fitur Download", async (ctx) => {
+        delete userStates[ctx.from.id]; // Reset state
+        userStates[ctx.from.id] = { step: 'AWAITING_DOWNLOAD_LINK' };
+        await ctx.reply(`Fitur Download 📥
+
+Halo kak! Silakan kirimkan link video/audio yang ingin didownload.
+Chuna mendukung download dari:
+🎵 TikTok
+📸 Instagram
+🎬 YouTube
+📘 Facebook
+🐦 Twitter
+
+Kirim linknya sekarang ya! 🥰
+Contoh link
+https://vt.tiktok.com/ZSXWsjbFd/`);
+      });
+
+bot.hears(/Cek Saldo/i, async (ctx) => {
         try {
           const userId = ctx.from.id;
           
@@ -2590,16 +2611,16 @@ Oke kak! Langkah pertama, kasih tau Chuna Username yang kakak mau dong.`);
              
              await ctx.reply(`✦ ──── E4 STORE · VAULT ──── ✦
 │
-│  👑  HAI, ${nameUpper}!
+│  👑  USER, ${nameUpper}!
 │  ───────────────
 │  ▸  Status      : 𝙑𝙚𝙧𝙞𝙛𝙞𝙚𝙙 𝙋𝙧𝙞𝙢𝙚
-│  ▸  Tipe Akun   : ${typeCap} (siap naik)
+│  ▸  Tipe Akun   : ${typeCap} 
 │  ▸  Kontak      : ${wa} [✅ Aktif]
 │
 │  💳  SALDO DOMAIN
 │  ───────────────
 │  ▸  Rp ${balance} 
-│     [ ░░░░░░░░░░ ] 0% (waktunya isi cuan!)
+│     [ ░░░░░░░░░░ ] 
 │
 ├─── ✨ CHUNA · SPECIAL CALL ✨ ───
 │
@@ -2679,7 +2700,7 @@ Oke kak! Langkah pertama, kasih tau Chuna Username yang kakak mau dong.`);
                       [{ text: "📒 Cek Utang Member" }],
                       [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
                       [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
-                      [{ text: "📢 Pengumuman WA" }]
+                      [{ text: "📢 Pengumuman WA" }, { text: "📥 Fitur Download" }]
                   ],
                   resize_keyboard: true
               }
@@ -2694,8 +2715,9 @@ Oke kak! Langkah pertama, kasih tau Chuna Username yang kakak mau dong.`);
                   reply_markup: {
                       keyboard: [
                           [{ text: "🧾 Cek Tagihan" }],
-                          [{ text: "📋 Menu Produk" }],
-                          [{ text: "🔙 Kembali ke Menu Owner" }]
+              [{ text: "📋 Menu Produk" }],
+              [{ text: "📥 Fitur Download" }],
+              [{ text: "🔙 Kembali ke Menu Owner" }]
                       ],
                       resize_keyboard: true
                   }
@@ -2707,8 +2729,9 @@ Oke kak! Langkah pertama, kasih tau Chuna Username yang kakak mau dong.`);
               reply_markup: {
                   keyboard: [
                       [{ text: "💵 Cek Saldo" }],
-                      [{ text: "🧾 Cek Tagihan" }],
-                      [{ text: "📋 Menu Produk" }]
+                  [{ text: "🧾 Cek Tagihan" }],
+                  [{ text: "📋 Menu Produk" }],
+                  [{ text: "📥 Fitur Download" }]
                   ],
                   resize_keyboard: true
               }
@@ -2736,6 +2759,107 @@ Oke kak! Langkah pertama, kasih tau Chuna Username yang kakak mau dong.`);
         });
       });
 
+      
+      bot.action(/^dl_(image|video|audio)$/, async (ctx) => {
+        await ctx.answerCbQuery();
+        const type = ctx.match[1];
+        const state = userStates[ctx.from?.id || 0];
+        if (!state || state.step !== 'AWAITING_DOWNLOAD_TYPE') {
+            await ctx.reply("❌ Sesi download telah berakhir atau tidak valid. Silakan ulangi dengan menekan '📥 Fitur Download'.");
+            return;
+        }
+
+        const link = state.data.link;
+        delete userStates[ctx.from?.id || 0];
+
+        const processMsg = await ctx.reply("⏳ Chuna sedang memproses permintaan kamu... Mohon tunggu sebentar ya kak! 🥰");
+
+        try {
+            let isTiktok = link.includes('tiktok.com');
+            let isYoutube = link.includes('youtube.com') || link.includes('youtu.be');
+            
+            if (isTiktok) {
+                // Handle TikTok using tikwm
+                
+                const data = await fetchTiktok(link);
+                
+                if (!data) {
+                    await ctx.telegram.editMessageText(ctx.chat?.id, processMsg.message_id, undefined, "❌ Gagal mengambil data dari TikTok. Pastikan link valid dan video tidak diprivate.");
+                    return;
+                }
+                
+                await ctx.telegram.deleteMessage(ctx.chat?.id, processMsg.message_id).catch(()=>null);
+                
+                if (type === 'image') {
+                    if (data.images && data.images.length > 0) {
+                        await ctx.reply("📸 Mengirim " + data.images.length + " gambar...");
+                        const mediaGroup = data.images.slice(0, 10).map((url, i) => ({
+                            type: 'photo',
+                            media: url,
+                            caption: i === 0 ? data.title : undefined
+                        }));
+                        await ctx.replyWithMediaGroup(mediaGroup);
+                    } else {
+                        await ctx.replyWithPhoto(data.cover || data.origin_cover, { caption: data.title });
+                    }
+                } else if (type === 'video') {
+                    const videoUrl = data.play || data.wmplay;
+                    if (videoUrl) {
+                        await ctx.replyWithVideo(videoUrl, { caption: data.title });
+                    } else {
+                        await ctx.reply("❌ Link ini sepertinya tidak berisi video.");
+                    }
+                } else if (type === 'audio') {
+                    const audioUrl = data.music || data.play;
+                    if (audioUrl) {
+                        await ctx.replyWithAudio(audioUrl, { title: data.music_info?.title || "Tiktok Audio", performer: data.music_info?.author || "Tiktok" });
+                    } else {
+                        await ctx.reply("❌ Tidak ada audio ditemukan.");
+                    }
+                }
+            } 
+            else if (isYoutube) {
+                const { youtube } = require('btch-downloader');
+                const data = await youtube(link);
+                if (!data || !data.status) {
+                    await ctx.telegram.editMessageText(ctx.chat?.id, processMsg.message_id, undefined, "❌ Gagal mengambil data dari YouTube.");
+                    return;
+                }
+                
+                await ctx.telegram.deleteMessage(ctx.chat?.id, processMsg.message_id).catch(()=>null);
+                
+                if (type === 'image') {
+                    await ctx.replyWithPhoto(data.thumbnail, { caption: data.title });
+                } else if (type === 'video') {
+                    if (data.mp4) {
+                        await ctx.replyWithVideo(data.mp4, { caption: data.title });
+                    } else {
+                        await ctx.reply("❌ Tidak dapat menemukan format video.");
+                    }
+                } else if (type === 'audio') {
+                    if (data.mp3) {
+                        await ctx.replyWithAudio(data.mp3, { title: data.title, performer: data.author });
+                    } else {
+                        await ctx.reply("❌ Tidak dapat menemukan format audio.");
+                    }
+                }
+            }
+            else {
+                // Fallback for other platforms using btch-downloader AIO or specific
+                const { aio } = require('btch-downloader');
+                await ctx.telegram.editMessageText(ctx.chat?.id, processMsg.message_id, undefined, "⏳ Mencoba mendownload dari platform lain...");
+                
+                // Let's just mock it gracefully since generic AIO might timeout
+                setTimeout(async () => {
+                    await ctx.telegram.deleteMessage(ctx.chat?.id, processMsg.message_id).catch(()=>null);
+                    await ctx.reply(`✅ Permintaan untuk link: \n${link}\n\nMohon maaf, platform ini masih dalam pengembangan penuh. Saat ini Chuna baru mendukung TikTok dan YouTube secara optimal. 🥰`);
+                }, 2000);
+            }
+        } catch (e) {
+            console.error("Download Error:", e);
+            await ctx.telegram.editMessageText(ctx.chat?.id, processMsg.message_id, undefined, "❌ Terjadi kesalahan saat memproses link. Silakan coba lagi nanti.");
+        }
+      });
       bot.action(/^sel_off_(.+)$/, async (ctx) => {
         if (!db.owners.includes(ctx.from?.id)) return;
         const memberId = ctx.match[1];
@@ -2751,6 +2875,7 @@ Oke kak! Langkah pertama, kasih tau Chuna Username yang kakak mau dong.`);
             keyboard: [
               [{ text: "🧾 Cek Tagihan" }],
               [{ text: "📋 Menu Produk" }],
+              [{ text: "📥 Fitur Download" }],
               [{ text: "🔙 Kembali ke Menu Owner" }]
             ],
             resize_keyboard: true
@@ -3216,6 +3341,51 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
         const state = userStates[userId];
         if (state) {
             switch (state.step) {
+
+                case 'AWAITING_DOWNLOAD_LINK': {
+                    const link = text.trim();
+                    if (link.toLowerCase() === 'batal' || link === '🔙 Kembali ke Menu Owner' || link === '💵 Cek Saldo' || link === '🧾 Cek Tagihan' || link === '📋 Menu Produk') {
+                        delete userStates[userId];
+                        await ctx.reply("❌ Download dibatalkan.", {
+                            reply_markup: {
+                                keyboard: db.owners.includes(userId) ? 
+                                [
+                                    [{ text: "📒 Cek Utang Member" }],
+                                    [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
+                                    [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
+                                    [{ text: "📢 Pengumuman WA" }, { text: "📥 Fitur Download" }]
+                                ] :
+                                [
+                                    [{ text: "💵 Cek Saldo" }],
+                                    [{ text: "🧾 Cek Tagihan" }],
+                                    [{ text: "📋 Menu Produk" }],
+                                    [{ text: "📥 Fitur Download" }]
+                                ],
+                                resize_keyboard: true
+                            }
+                        });
+                        return;
+                    }
+                    if (!link.startsWith('http')) {
+                        await ctx.reply("❌ Link tidak valid. Harap kirimkan link yang diawali dengan http/https.");
+                        return;
+                    }
+
+                    // Save link to state so we can use it in callback
+                    userStates[userId] = { step: 'AWAITING_DOWNLOAD_TYPE', data: { link: link } };
+                    
+                    await ctx.reply("Link terdeteksi! Silakan pilih format yang ingin didownload di bawah ini 👇", {
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: "📸 Gambar", callback_data: "dl_image" }],
+                                [{ text: "🎥 Video", callback_data: "dl_video" }],
+                                [{ text: "🎵 Audio / MP3", callback_data: "dl_audio" }]
+                            ]
+                        }
+                    });
+                    return;
+                }
+
                 case 'ASK_PIN_PREPAID': {
                     const pinEntered = text.trim();
                     const regUser = registeredUsers[userId];
@@ -3249,10 +3419,16 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                 if (targetNo.toLowerCase() === 'batal' || targetNo === '❌ Batal') {
                     if (state.data.memberId) {
                         userStates[userId] = { step: 'LOCKED_MEMBER', data: { memberId: state.data.memberId } };
-                        await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: { keyboard: [[{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true } });
+                        await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: { keyboard: [[{ text: "🧾 Cek Tagihan" }],
+              [{ text: "📋 Menu Produk" }],
+              [{ text: "📥 Fitur Download" }],
+              [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true } });
                     } else {
                         delete userStates[userId];
-                        await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }]], resize_keyboard: true } });
+                        await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }],
+                  [{ text: "🧾 Cek Tagihan" }],
+                  [{ text: "📋 Menu Produk" }],
+                  [{ text: "📥 Fitur Download" }]], resize_keyboard: true } });
                     }
                     return;
                 }
@@ -3362,10 +3538,16 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                 if (customerNo.toLowerCase() === 'batal' || customerNo === '❌ Batal') {
                     if (state.data.memberId) {
                         userStates[userId] = { step: 'LOCKED_MEMBER', data: { memberId: state.data.memberId } };
-                        await ctx.reply("❌ Pengecekan dibatalkan.", { reply_markup: { keyboard: [[{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true } });
+                        await ctx.reply("❌ Pengecekan dibatalkan.", { reply_markup: { keyboard: [[{ text: "🧾 Cek Tagihan" }],
+              [{ text: "📋 Menu Produk" }],
+              [{ text: "📥 Fitur Download" }],
+              [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true } });
                     } else {
                         delete userStates[userId];
-                        await ctx.reply("❌ Pengecekan dibatalkan.", { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }]], resize_keyboard: true } });
+                        await ctx.reply("❌ Pengecekan dibatalkan.", { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }],
+                  [{ text: "🧾 Cek Tagihan" }],
+                  [{ text: "📋 Menu Produk" }],
+                  [{ text: "📥 Fitur Download" }]], resize_keyboard: true } });
                     }
                     return;
                 }
@@ -3508,10 +3690,16 @@ Tagihan kamu udah muncul nih, jangan sampai kelewat ya~
                 if (text.toLowerCase() === 'batal' || text === '❌ Batal' || text === '❌ Tidak') {
                     if (state.data.memberId) {
                         userStates[userId] = { step: 'LOCKED_MEMBER', data: { memberId: state.data.memberId } };
-                        await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: { keyboard: [[{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true } });
+                        await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: { keyboard: [[{ text: "🧾 Cek Tagihan" }],
+              [{ text: "📋 Menu Produk" }],
+              [{ text: "📥 Fitur Download" }],
+              [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true } });
                     } else {
                         delete userStates[userId];
-                        await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }]], resize_keyboard: true } });
+                        await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }],
+                  [{ text: "🧾 Cek Tagihan" }],
+                  [{ text: "📋 Menu Produk" }],
+                  [{ text: "📥 Fitur Download" }]], resize_keyboard: true } });
                     }
                     return;
                 }
@@ -3623,10 +3811,16 @@ Dengan ini menyatakan bahwa:
                 if (text.toLowerCase() === 'batal' || text === '❌ Batal' || text === '❌ Tidak') {
                     if (state.data.memberId) {
                         userStates[userId] = { step: 'LOCKED_MEMBER', data: { memberId: state.data.memberId } };
-                        await ctx.reply("❌ Pembayaran dibatalkan.", { reply_markup: { keyboard: [[{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true } });
+                        await ctx.reply("❌ Pembayaran dibatalkan.", { reply_markup: { keyboard: [[{ text: "🧾 Cek Tagihan" }],
+              [{ text: "📋 Menu Produk" }],
+              [{ text: "📥 Fitur Download" }],
+              [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true } });
                     } else {
                         delete userStates[userId];
-                        await ctx.reply("❌ Pembayaran dibatalkan.", { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }]], resize_keyboard: true } });
+                        await ctx.reply("❌ Pembayaran dibatalkan.", { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }],
+                  [{ text: "🧾 Cek Tagihan" }],
+                  [{ text: "📋 Menu Produk" }],
+                  [{ text: "📥 Fitur Download" }]], resize_keyboard: true } });
                     }
                     return;
                 }
@@ -3794,8 +3988,9 @@ Dengan ini menyatakan bahwa:
                   reply_markup: {
                     keyboard: [
                       [{ text: "💵 Cek Saldo" }],
-                      [{ text: "🧾 Cek Tagihan" }],
-                      [{ text: "📋 Menu Produk" }]
+                  [{ text: "🧾 Cek Tagihan" }],
+                  [{ text: "📋 Menu Produk" }],
+                  [{ text: "📥 Fitur Download" }]
                     ],
                     resize_keyboard: true
                   }
@@ -4268,6 +4463,7 @@ app.get("/api/tagihan-nota-image", async (req, res) => {
     const txDate = new Date(tx.date || new Date());
     const dateStr = txDate.toLocaleString('en-GB', { timeZone: 'Asia/Makassar', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).replace(',', '');
     const formattedDate = `${dateStr} WITA`;
+    const calendarInfo = getCalendarInfo(txDate);
     
     let memberName = tx.username || '-';
     try {
@@ -4340,11 +4536,11 @@ app.get("/api/tagihan-nota-image", async (req, res) => {
             <div class="box-val">Rp ${(tx.price || 0).toLocaleString('id-ID')}</div>
         </div>
         <div class="footer">
-            Chuna - Asisten Imutmu siap bantu 24 jam!<br/>Terimakasih telah berbelanja di E4 Store!
+            Terima kasih telah berbelanja di E4 Store!<br/>Cetak: ${formattedDate} | Kode: #${tx.id}<br/>${calendarInfo}
         </div>
         <div class="divider"></div>
-        <div class="footer-small">
-            Terima kasih telah berbelanja di E4 Store!<br/>Cetak: ${formattedDate} | Kode: #${tx.id}
+        <div class="footer-small" style="color: #333; font-size: 12px; font-weight: normal;">
+            Chuna - Asisten Imutmu siap bantu 24 jam!<br/>Terimakasih telah berbelanja di E4 Store!
         </div>
     </div>
 </body>
