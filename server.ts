@@ -2552,12 +2552,9 @@ Oke kak! Langkah pertama, kasih tau Chuna Username yang kakak mau dong.`);
         await ctx.reply(`Fitur Download 📥
 
 Halo kak! Silakan kirimkan link video/audio yang ingin didownload.
-Chuna mendukung download dari:
+Saat ini Chuna mendukung download dari:
 🎵 TikTok
-📸 Instagram
 🎬 YouTube
-📘 Facebook
-🐦 Twitter
 
 Kirim linknya sekarang ya! 🥰
 Contoh link
