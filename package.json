@@ -23,6 +23,7 @@
     "axios": "^1.18.1",
     "baileys": "^7.0.0-rc13",
     "btch-downloader": "^6.0.37",
+    "cakkatrok-instagram-downloader": "^2.0.2",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "instagram-url-direct": "^2.0.7",
@@ -36,6 +37,7 @@
     "qrcode-terminal": "^0.12.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
+    "snapsave-media-downloader": "^2.4.0",
     "telegraf": "^4.16.3",
     "vite": "^6.2.3",
     "yt-search": "^2.13.1"

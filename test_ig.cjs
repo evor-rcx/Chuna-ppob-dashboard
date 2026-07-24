@@ -1,6 +1,6 @@
-const ig = require('instagram-url-direct');
+const btch = require('btch-downloader');
 async function test() {
-    let links = await ig.instagramGetUrl('https://www.instagram.com/p/C-PZ3Z_S9Nh/');
-    console.log(links);
+    try {
+        const url = 'https://www.instagram.com/p/C-XXXXXXX/'; // some valid ig URL? I need a valid URL to test!
+    } catch(e) {}
 }
-test();

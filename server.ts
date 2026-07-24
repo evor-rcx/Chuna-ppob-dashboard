@@ -2237,12 +2237,17 @@ Chuna tunggu chat dari Kakak! 😊💖`;
                     }
                     tgMsgId = tgMsg.message_id;
                 } else {
+                    if (!isOwnerSelf && method === 'saldo') {
+                        member.balance += total;
+                        db.members = members;
+                        writeDB(db);
+                    }
                     let refundMsg = method === 'saldo' ? '✅ Saldo sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (method === 'utang' ? '✅ Utang sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + total.toLocaleString('id-ID') + ' kepada pelanggan.');
                     msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.
-
+                    
 Kemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan${(payJson.data.message || '').toLowerCase().includes('ip') ? ' lebih lanjut' : ''}.
 
-Keterangan : ${(payJson.data.message || 'Transaksi Gagal').replace(/[_*[\\]()~`>#+\\-=|{}.!]/g, '\\\\$&')}
+Keterangan : ${(payJson.data.message || 'Transaksi Gagal').replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&')}
 📦 Produk  : ${product.product_name}
 🎯 Tujuan   : ${targetDisplay} (${member.name || "-"})
 
@@ -2322,24 +2327,7 @@ Coba lihat angka: *${product.product_name}* saat ini mungkin sudah naik, melebih
                 await ctx.reply(`❌ Pembelian Gagal:${payJson.data?.message || 'Error tidak diketahui'}${refundMsg}`);
             }
         } catch (e: any) {
-            transactions.unshift({
-                id: pay_ref_id,
-                memberId: member.id,
-                type: "prepaid",
-                product: product.product_name,
-                sku: product.buyer_sku_code,
-                target: targetDisplay,
-                price: total,
-                modal: 0,
-                cuan: 0,
-                status: "Pending",
-                method: method,
-                date: new Date().toISOString()
-            });
-            db.transactions = transactions;
-            writeDB(db);
-            
-            await ctx.reply(`⏳ Transaksi Sedang Diproses (Network Error)Pesananmu sedang dikonfirmasi oleh sistem pusat meski terjadi gangguan koneksi.Mohon tunggu update otomatis dari Chuna atau hubungi Admin.Pesan Error: ${e.message}`);
+            await ctx.reply(`⏳ Transaksi Sedang Diproses (Network Error)\nPesananmu sedang dikonfirmasi oleh sistem pusat meski terjadi gangguan koneksi.\nMohon tunggu update otomatis dari Chuna atau hubungi Admin.\nPesan Error: ${e.message}`);
         }
         
         if (stateData.memberId) {
@@ -2517,12 +2505,17 @@ Chuna tunggu chat dari Kakak! 😊💖`;
                     }
                     tgMsgId = tgMsg.message_id;
                 } else {
+                    if (!isOwnerSelf && method === 'saldo') {
+                        member.balance += total;
+                        db.members = members;
+                        writeDB(db);
+                    }
                     let refundMsg = method === 'saldo' ? '✅ Saldo sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (method === 'utang' ? '✅ Utang sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + total.toLocaleString('id-ID') + ' kepada pelanggan.');
                     msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.
 
 Kemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan${(payJson.data.message || '').toLowerCase().includes('ip') ? ' lebih lanjut' : ''}.
 
-Keterangan : ${(payJson.data.message || 'Transaksi Gagal').replace(/[_*[\\]()~`>#+\\-=|{}.!]/g, '\\\\$&')}
+Keterangan : ${(payJson.data.message || 'Transaksi Gagal').replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&')}
 📦 Tagihan : ${stateData.product.product_name}
 🎯 Tujuan   : ${customerNo} (${payJson.data?.customer_name || checkResult?.customer_name || "-"})
 
@@ -2602,26 +2595,7 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
                 await ctx.reply(`❌ Pembelian Gagal:${payJson.data?.message || 'Error tidak diketahui'}${refundMsg}`);
             }
         } catch (e: any) {
-            transactions.unshift({
-                id: pay_ref_id,
-                memberId: member.id,
-                type: "pasca",
-                product: stateData.product.product_name,
-                sku: stateData.product.buyer_sku_code,
-                target: customerNo,
-                price: total,
-                modal: 0,
-                cuan: 0,
-                tagihan: stateData.checkResult?.selling_price || 0,
-                admin_pel: stateData.adminFee || 0,
-                status: "Pending",
-                method: method,
-                date: new Date().toISOString()
-            });
-            db.transactions = transactions;
-            writeDB(db);
-            
-            await ctx.reply(`⏳ Transaksi Sedang Diproses (Network Error)Pesananmu sedang dikonfirmasi oleh sistem pusat meski terjadi gangguan koneksi.Mohon tunggu update otomatis dari Chuna atau hubungi Admin.Pesan Error: ${e.message}`);
+            await ctx.reply(`⏳ Transaksi Sedang Diproses (Network Error)\nPesananmu sedang dikonfirmasi oleh sistem pusat meski terjadi gangguan koneksi.\nMohon tunggu update otomatis dari Chuna atau hubungi Admin.\nPesan Error: ${e.message}`);
         }
         
         if (stateData.memberId) {
