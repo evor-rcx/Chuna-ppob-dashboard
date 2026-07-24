@@ -1,201 +1,158 @@
-  2030	                }
-  2031	                member.balance -= total;
-  2032	                db.members = members;
-  2033	                writeDB(db);
-  2034	            }
-  2035	        }
-  2036	        
-  2037	        const methodDisplay = method === 'cash' ? '💵 Tunai (Cash)' : method === 'utang' ? '📝 Utang' : '💳 Saldo';
-  2038	        await ctx.reply(`⏳ Status: Sedang memproses pembelian ${product.product_name} ke nomor ${targetNo} melalui metode ${methodDisplay}. Mohon ditunggu.`);
-  2039	        
-  2040	        const pay_ref_id = "PRE-" + Date.now();
-  2041	        try {
-  2042	            const signText = digiflazzUsername + digiflazzApiKey + pay_ref_id;
-  2043	            const sign = crypto.createHash("md5").update(signText).digest("hex");
-  2044	            const res = await fetch("https://api.digiflazz.com/v1/transaction", {
-  2045	                method: "POST",
-  2046	                headers: { "Content-Type": "application/json" },
-  2047	                body: JSON.stringify({
-  2048	                    username: digiflazzUsername,
-  2049	                    buyer_sku_code: sku,
-  2050	                    customer_no: targetNo,
-  2051	                    ref_id: pay_ref_id,
-  2052	                    sign: sign
-  2053	                })
-  2054	            });
-  2055	            const payJson = await res.json();
-  2056	            
-  2057	            if (payJson.data) {
-  2058	                const status = payJson.data.status || 'Gagal';
-  2059	                const digiflazzPrice = payJson.data.price || 0;
-  2060	                const cuan = total - digiflazzPrice;
-  2061	                
-  2062	                let paymentInfo = "";
-  2063	                if (method === 'saldo') {
-  2064	                    paymentInfo = `    💰 SALDO  : "Cusss! Saldo langsung kepotong,                 beres dalam sekejap! Kamu jago                 banget pake saldo, Chuna salut! 💰✨"`;
-  2065	                } else if (method === 'cash') {
-  2066	                    paymentInfo = `    💵 CASH   : "Duitnya Chuna terima dengan senyum                 lebar! Bayar tunai tetap berkesan!                 Makasih udah main ke E4 Store! 🫳🌸"`;
-  2067	                } else {
-  2068	                    paymentInfo = `    📝 JANJI   : "Chuna percaya 100% sama kamu! 😍     BAYAR      Kamu pasti bayar tepat waktu karena    TEPAT       Chuna tahu kamu pelanggan baik hati.    WAKTU       Nanti kalau sudah transfer, chat                 Chuna aja, nanti Chuna proses dengan                 senyum manis! Makasih udah jujur! 💖🤗"`;
-  2069	                }
-  2070	                
-  2071	                // PRE-REGISTER TRANSACTION
-  2072	                transactions.unshift({
-  2073	                    id: pay_ref_id,
-  2074	                    memberId: member.id,
-  2075	                    type: "prepaid",
-  2076	                    product: product.product_name,
-  2077	                    sku: product.buyer_sku_code,
-  2078	                    target: targetDisplay,
-  2079	                    price: total,
-  2080	                    modal: digiflazzPrice,
-  2081	                    cuan: cuan > 0 ? cuan : 0,
-  2082	                    status: status,
-  2083	                    method: method,
-  2084	                    sn: payJson.data?.sn || "-",
-  2085	                    date: new Date().toISOString(),
-  2086	                    waReceiptSent: false,
-  2087	                    tgReceiptSent: false
-  2088	                });
-  2089	                db.transactions = transactions;
-  2090	                writeDB(db);
-  2091	                
-  2092	                let msg = "";
-  2093	                let tgMsgId: number | undefined;
-  2094	                let waMsgKey: any | undefined;
-  2095	                let waJid: string | undefined;
-  2096	                let notaBuffer: Buffer | null = null;
-  2097	                
-  2098	                let returnMarkup;
-  2099	                if (stateData.memberId) {
-  2100	                    returnMarkup = { keyboard: [[{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true };
-  2101	                } else {
-  2102	                    returnMarkup = { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true };
-  2103	                }
-  2104	
-  2105	                if (status === 'Pending') {
-  2106	                    msg = `⏳ Hai Kak!
-  2107	
-  2108	Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa saat, nanti akan kami kabari setelah selesai.
-  2109	
-  2110	📦 Produk  : ${product.product_name}
-  2111	🎯 Tujuan   : ${targetDisplay} (${member.name || "-"})
-  2112	
-  2113	Untuk cek status atau bertanya, langsung chat Chuna di Bot Telegram, ya!
-  2114	👉 https://t.me/ChunaChanbot
-  2115	
-  2116	Chuna menunggu kabar baik dari Kakak! 😊`;
-  2117	                    const tgMsg = await ctx.reply(msg, { reply_markup: returnMarkup });
-  2118	                    tgMsgId = tgMsg.message_id;
-  2119	                } else if (status === 'Sukses') {
-  2120	                    const sn = payJson.data.sn || "-";
-  2121	                    const now = new Date();
-  2122	                    const months = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
-  2123	                    const dateStr = `${now.getDate().toString().padStart(2, '0')} ${months[now.getMonth()]} ${now.getFullYear()} WITA`;
-  2124	                    let displaySn = sn;
-  2125	                    let displayDaya = "";
-  2126	                    if (sn.includes('/')) {
-  2127	                        const parts = sn.split('/');
-  2128	                        displaySn = parts[0];
-  2129	                        if (parts.length > 1) {
-  2130	                            displayDaya = `
-  2131	Daya         : ${parts.slice(1).join(' / ')}`;
-  2132	                        }
-  2133	                    }
-  2134	                    msg = `🎉 Horee! Sukses, Kak!
-  2135	
-  2136	Pesanan sudah diproses otomatis oleh E4 Store. ${product.product_name} sudah masuk ke akun ${member.name || targetDisplay} dan siap digunakan! 💪🔥
-  2137	
-  2138	Terima kasih telah berbelanja di E4 Store! 🐾
-  2139	
-  2140	Chuna ~ Asisten Imutmu siap bantu 24 jam!
-  2141	Kalau mau tanya-tanya atau order lagi, langsung chat Chuna di Bot Telegram:
-  2142	👉 https://t.me/ChunaChanbot
-  2143	
-  2144	Chuna tunggu chat dari Kakak! 😊💖`;
-  2145	                    const appUrl = "http://localhost:3000";
-  2146	                    if (pay_ref_id) notaBuffer = await generateCanvasReceipt("nota", { id: pay_ref_id, memberId: member.id, type: "prepaid", product: product.product_name, sku: product.buyer_sku_code, target: targetDisplay, price: total, modal: digiflazzPrice, cuan: cuan > 0 ? cuan : 0, status: status, method: method, sn: payJson.data?.sn || "-", date: new Date().toISOString() });
-  2147	                    let tgMsg;
-  2148	                    if (notaBuffer) {
-  2149	                        tgMsg = await ctx.replyWithPhoto({ source: notaBuffer }, { caption: msg, parse_mode: 'Markdown', reply_markup: returnMarkup });
-  2150	                    } else {
-  2151	                        tgMsg = await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: returnMarkup });
-  2152	                    }
-  2153	                    tgMsgId = tgMsg.message_id;
-  2154	                } else {
-  2155	                    let refundMsg = method === 'saldo' ? '✅ Saldo sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (method === 'utang' ? '✅ Utang sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + total.toLocaleString('id-ID') + ' kepada pelanggan.');
-  2156	                    msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.
-  2157	
-  2158	Kemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan${(payJson.data.message || '').toLowerCase().includes('ip') ? ' lebih lanjut' : ''}.
-  2159	
-  2160	Keterangan : ${payJson.data.message || 'Transaksi Gagal'}
-  2161	📦 Produk  : ${product.product_name}
-  2162	🎯 Tujuan   : ${targetDisplay} (${member.name || "-"})
-  2163	
-  2164	${refundMsg}
-  2165	
-  2166	${(payJson.data.message || '').toLowerCase().includes('ip') ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Tenang saja, Kakak bisa mencoba ulang kapan pun.'}
-  2167	
-  2168	Butuh bantuan? ${(payJson.data.message || '').toLowerCase().includes('ip') ? `Langsung chat Chuna di Bot Telegram:\n👉 https://t.me/ChunaChanbot\n\nChuna siap membantu dengan senyum! 😊💪` : `Chat Chuna di Bot Telegram:\n👉 https://t.me/ChunaChanbot\n\nChuna siap bantu! 😊💪`}`;
-  2169	                    
-  2170	                    if (payJson.data.message && payJson.data.message.toLowerCase().includes("harga seller lebih besar dari ketentuan harga buyer")) {
-  2171	                        const ownerMsg = `🚨 *INFO PENTING DARI CHUNA!* 🚨
-  2172	
-  2173	Harga modal produk tersebut di Digiflazz saat ini sedang naik dan lebih mahal daripada "Batas Harga (Max Price)" yang Kakak atur di akun Digiflazz Kakak.
-  2174	
-  2175	Coba lihat angka: *${product.product_name}* saat ini mungkin sudah naik, melebihi batas maksimalmu. Padahal chuna sudah jelas menunjukkan kenaikan. Masih mau mempertahankan batas harga yang sudah usang? Segera cek dan sesuaikan di dashboard Digiflazz ya Kak! 💸📈`;
-  2176	                        for (const ownerId of db.owners) {
-  2177	                            try {
-  2178	                                await bot.telegram.sendMessage(ownerId, ownerMsg, { parse_mode: 'Markdown' });
-  2179	                            } catch(e) {
-  2180	                                console.error("Failed to notify owner", e);
-  2181	                            }
-  2182	                        }
-  2183	                    }
-  2184	                    const tgMsg = await ctx.reply(msg, { reply_markup: returnMarkup });
-  2185	                    tgMsgId = tgMsg.message_id;
-  2186	                }
-  2187	                
-  2188	                let waImageSent = false;
-  2189	                if (msg && waSocket && member.whatsapp) {
-  2190	                    let cleanWa = member.whatsapp.replace(/\D/g, "");
-  2191	                    if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
-  2192	                    const jid = cleanWa + "@s.whatsapp.net";
-  2193	                    waJid = jid;
-  2194	                    try {
-  2195	                        await waSocket.presenceSubscribe(jid);
-  2196	                        await waSocket.sendPresenceUpdate('composing', jid);
-  2197	                        await new Promise(r => setTimeout(r, 1200));
-  2198	                        await waSocket.sendPresenceUpdate('paused', jid);
-  2199	                        let waMsg;
-  2200	                        if (typeof notaBuffer !== 'undefined' && notaBuffer) {
-  2201	                            waMsg = await waSocket.sendMessage(jid, { image: notaBuffer, caption: msg });
-  2202	                            waImageSent = true;
-  2203	                        } else {
-  2204	                            waMsg = await waSocket.sendMessage(jid, { text: msg });
-  2205	                        }
-  2206	                        if (waMsg) waMsgKey = waMsg.key;
-  2207	                    } catch (err) {
-  2208	                        console.error("Failed to send WA message:", err);
-  2209	                    }
-  2210	                }
-  2211	                
-  2212	                const txIndex = transactions.findIndex(t => t.id === pay_ref_id);
-  2213	                if (txIndex >= 0) {
-  2214	                    transactions[txIndex].waReceiptSent = true;
-  2215	                    transactions[txIndex].tgReceiptSent = true;
-  2216	                    transactions[txIndex].tgMsgId = tgMsgId;
-  2217	                    transactions[txIndex].waMsgKey = waMsgKey;
-  2218	                    transactions[txIndex].tgChatId = ctx.chat?.id;
-  2219	                    transactions[txIndex].waJid = waJid;
-  2220	                    db.transactions = transactions;
-  2221	                    writeDB(db);
-  2222	                }
-  2223	                
-  2224	            } else {
-  2225	                if (!isOwnerSelf && method === 'saldo') {
-  2226	                    member.balance += total;
-  2227	                    db.members = members;
-  2228	                    writeDB(db);
-  2229	                }
-  2230	                let refundMsg = method === 'saldo' ? 'Saldo telah dikembalikan.' : (method === 'utang' ? 'Utang telah dibatalkan.' : 'Uang Cash harap dikembalikan.');
+            const payJson = await res.json();
+            
+            if (payJson.data) {
+                const status = payJson.data.status || 'Gagal';
+                const digiflazzPrice = payJson.data.price || 0;
+                const cuan = total - digiflazzPrice;
+                
+                let paymentInfo = "";
+                if (method === 'saldo') {
+                    paymentInfo = `    💰 SALDO  : "Cusss! Saldo langsung kepotong,                 beres dalam sekejap! Kamu jago                 banget pake saldo, Chuna salut! 💰✨"`;
+                } else if (method === 'cash') {
+                    paymentInfo = `    💵 CASH   : "Duitnya Chuna terima dengan senyum                 lebar! Bayar tunai tetap berkesan!                 Makasih udah main ke E4 Store! 🫳🌸"`;
+                } else {
+                    paymentInfo = `    📝 JANJI   : "Chuna percaya 100% sama kamu! 😍     BAYAR      Kamu pasti bayar tepat waktu karena    TEPAT       Chuna tahu kamu pelanggan baik hati.    WAKTU       Nanti kalau sudah transfer, chat                 Chuna aja, nanti Chuna proses dengan                 senyum manis! Makasih udah jujur! 💖🤗"`;
+                }
+                
+                let msg = "";
+                let tgMsgId: number | undefined;
+                let waMsgKey: any | undefined;
+                let waJid: string | undefined;
+                let notaBuffer: Buffer | null = null;
+
+                if (status === 'Pending') {
+                    msg = `⏳ Hai Kak!
+
+Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa saat, nanti akan kami kabari setelah selesai.
+
+📦 Produk  : ${product.product_name}
+🎯 Tujuan   : ${targetDisplay} (${member.name || "-"})
+
+Untuk cek status atau bertanya, langsung chat Chuna di Bot Telegram, ya!
+👉 https://t.me/ChunaChanbot
+
+Chuna menunggu kabar baik dari Kakak! 😊`;
+                    const tgMsg = await ctx.reply(msg);
+                    tgMsgId = tgMsg.message_id;
+                } else if (status === 'Sukses') {
+                    const sn = payJson.data.sn || "-";
+                    const now = new Date();
+                    const months = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+                    const dateStr = `${now.getDate().toString().padStart(2, '0')} ${months[now.getMonth()]} ${now.getFullYear()} WITA`;
+                    let displaySn = sn;
+                    let displayDaya = "";
+                    if (sn.includes('/')) {
+                        const parts = sn.split('/');
+                        displaySn = parts[0];
+                        if (parts.length > 1) {
+                            displayDaya = `
+Daya         : ${parts.slice(1).join(' / ')}`;
+                        }
+                    }
+                    msg = `🎉 Horee! Sukses, Kak!
+
+Pesanan sudah diproses otomatis oleh E4 Store. ${product.product_name} sudah masuk ke akun ${member.name || targetDisplay} dan siap digunakan! 💪🔥
+
+Terima kasih telah berbelanja di E4 Store! 🐾
+
+Chuna ~ Asisten Imutmu siap bantu 24 jam!
+Kalau mau tanya-tanya atau order lagi, langsung chat Chuna di Bot Telegram:
+👉 https://t.me/ChunaChanbot
+
+Chuna tunggu chat dari Kakak! 😊💖`;
+                    const appUrl = "http://localhost:3000";
+                    if (pay_ref_id) notaBuffer = await generateCanvasReceipt("nota", { id: pay_ref_id, memberId: member.id, type: "prepaid", product: product.product_name, sku: product.buyer_sku_code, target: targetDisplay, price: total, modal: digiflazzPrice, cuan: cuan > 0 ? cuan : 0, status: status, method: method, sn: payJson.data?.sn || "-", date: new Date().toISOString() });
+                    let tgMsg;
+                    if (notaBuffer) {
+                        tgMsg = await ctx.replyWithPhoto({ source: notaBuffer }, { caption: msg, parse_mode: 'Markdown' });
+                    } else {
+                        tgMsg = await ctx.reply(msg, { parse_mode: 'Markdown' });
+                    }
+                    tgMsgId = tgMsg.message_id;
+                } else {
+                    if (!isOwnerSelf && method === 'saldo') {
+                        member.balance += total;
+                        db.members = members;
+                        writeDB(db);
+                    }
+                    let refundMsg = method === 'saldo' ? '✅ Saldo sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (method === 'utang' ? '✅ Utang sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + total.toLocaleString('id-ID') + ' kepada pelanggan.');
+                    msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.
+
+Kemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan${(payJson.data.message || '').toLowerCase().includes('ip') ? ' lebih lanjut' : ''}.
+
+Keterangan : ${payJson.data.message || 'Transaksi Gagal'}
+📦 Produk  : ${product.product_name}
+🎯 Tujuan   : ${targetDisplay} (${member.name || "-"})
+
+${refundMsg}
+
+${(payJson.data.message || '').toLowerCase().includes('ip') ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Tenang saja, Kakak bisa mencoba ulang kapan pun.'}
+
+Butuh bantuan? ${(payJson.data.message || '').toLowerCase().includes('ip') ? `Langsung chat Chuna di Bot Telegram:\n👉 https://t.me/ChunaChanbot\n\nChuna siap membantu dengan senyum! 😊💪` : `Chat Chuna di Bot Telegram:\n👉 https://t.me/ChunaChanbot\n\nChuna siap bantu! 😊💪`}`;
+                    
+                    if (payJson.data.message && payJson.data.message.toLowerCase().includes("harga seller lebih besar dari ketentuan harga buyer")) {
+                        const ownerMsg = `🚨 *INFO PENTING DARI CHUNA!* 🚨
+
+Harga modal produk tersebut di Digiflazz saat ini sedang naik dan lebih mahal daripada "Batas Harga (Max Price)" yang Kakak atur di akun Digiflazz Kakak.
+
+Coba lihat angka: *${product.product_name}* saat ini mungkin sudah naik, melebihi batas maksimalmu. Padahal chuna sudah jelas menunjukkan kenaikan. Masih mau mempertahankan batas harga yang sudah usang? Segera cek dan sesuaikan di dashboard Digiflazz ya Kak! 💸📈`;
+                        for (const ownerId of db.owners) {
+                            try {
+                                await bot.telegram.sendMessage(ownerId, ownerMsg, { parse_mode: 'Markdown' });
+                            } catch(e) {
+                                console.error("Failed to notify owner", e);
+                            }
+                        }
+                    }
+                    const tgMsg = await ctx.reply(msg);
+                    tgMsgId = tgMsg.message_id;
+                }
+                
+                let waImageSent = false;
+                if (msg && waSocket && member.whatsapp) {
+                    let cleanWa = member.whatsapp.replace(/\D/g, "");
+                    if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
+                    const jid = cleanWa + "@s.whatsapp.net";
+                    waJid = jid;
+                    try {
+                        await waSocket.presenceSubscribe(jid);
+                        await waSocket.sendPresenceUpdate('composing', jid);
+                        await new Promise(r => setTimeout(r, 1200));
+                        await waSocket.sendPresenceUpdate('paused', jid);
+                        let waMsg;
+                        if (typeof notaBuffer !== 'undefined' && notaBuffer) {
+                            waMsg = await waSocket.sendMessage(jid, { image: notaBuffer, caption: msg });
+                            waImageSent = true;
+                        } else {
+                            waMsg = await waSocket.sendMessage(jid, { text: msg });
+                        }
+                        if (waMsg) waMsgKey = waMsg.key;
+                    } catch (err) {
+                        console.error("Failed to send WA message:", err);
+                    }
+                }
+                
+                // ALWAYS save to transaction history so it can be seen
+                transactions.unshift({
+                    id: pay_ref_id,
+                    memberId: member.id,
+                    type: "prepaid",
+                    product: product.product_name,
+                    sku: product.buyer_sku_code,
+                    target: targetDisplay,
+                    price: total,
+                    modal: digiflazzPrice,
+                    cuan: cuan > 0 ? cuan : 0,
+                    status: status,
+                    method: method,
+                    sn: payJson.data?.sn || "-",
+                    date: new Date().toISOString(),
+                    waReceiptSent: status === 'Sukses' ? waImageSent : false,
+                    tgMsgId,
+                    waMsgKey,
+                    tgChatId: ctx.chat?.id,
+                    waJid
+                });
+                db.transactions = transactions;
+                writeDB(db);
+                

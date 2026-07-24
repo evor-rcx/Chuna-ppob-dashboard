@@ -620,7 +620,7 @@ async function startServer() {
                           try { 
                               await bot.telegram.editMessageText(tx.tgChatId, tx.tgMsgId, undefined, msg, { parse_mode: "Markdown" }); 
                           } catch (e) { 
-                              try { await bot.telegram.sendMessage(tx.tgChatId, msg, { parse_mode: "Markdown" }); } catch(err) {} console.error("Edit failed:", e.message);
+                              try { await bot.telegram.sendMessage(tx.tgChatId, msg, { parse_mode: "Markdown" }); } catch(err) {}
                           }
                       }
                       const tIndex = db.transactions.findIndex((t: any) => t.id === tx.id);
@@ -995,7 +995,7 @@ Chuna tunggu chat dari Kakak! 😊💖`;
                             } catch(e) {}
                         }
                     } else {
-                        msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.\n\nKemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan.\n\nKeterangan : ${(data.message || 'Transaksi Gagal').replace(/[_*[\\]()~`>#+\\-=|{}.!]/g, '\\\\$&')}\n📦 Produk  : ${tx.product}\n🎯 Tujuan   : ${tx.target} (${nama})\n\n${refundMsg}\n\nTenang saja, Kakak bisa mencoba ulang kapan pun.\n\nButuh bantuan? Chat Chuna di Bot Telegram:\n👉 https://t.me/ChunaChanbot\n\nChuna siap bantu! 😊💪`;
+                        msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.\n\nKemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan.\n\nKeterangan : ${data.message || 'Transaksi Gagal'}\n📦 Produk  : ${tx.product}\n🎯 Tujuan   : ${tx.target} (${nama})\n\n${refundMsg}\n\nTenang saja, Kakak bisa mencoba ulang kapan pun.\n\nButuh bantuan? Chat Chuna di Bot Telegram:\n👉 https://t.me/ChunaChanbot\n\nChuna siap bantu! 😊💪`;
                     }
                     
                     if (data.message && data.message.toLowerCase().includes("harga seller lebih besar dari ketentuan harga buyer")) {
@@ -1032,7 +1032,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                             try {
                                 await bot.telegram.editMessageText(tx.tgChatId, tx.tgMsgId, undefined, msg, { parse_mode: "Markdown" });
                             } catch (e) {
-                                try { await bot.telegram.sendMessage(tx.tgChatId, msg, { parse_mode: "Markdown" }); } catch(err) {} console.error("Edit failed:", e.message);
+                                try { await bot.telegram.sendMessage(tx.tgChatId, msg, { parse_mode: "Markdown" }); } catch(err) {}
                             }
                         }
                         
@@ -1042,7 +1042,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                             writeDB(db);
                         }
                     } catch (e) {
-                        try { await bot.telegram.sendMessage(tx.tgChatId, msg, { parse_mode: "Markdown" }); } catch(err) {} console.error("Edit failed:", e.message);
+                        try { await bot.telegram.sendMessage(tx.tgChatId, msg, { parse_mode: "Markdown" }); } catch(err) {}
                     }
 
                 } else if (bot && member && member.telegram && member.telegram.length > 0) {
@@ -1388,62 +1388,6 @@ app.get("/api/summary", (req, res) => {
         statusServer: digiflazzStatus
       }
     });
-
-  app.get("/api/monthly-summary", (req, res) => {
-    const dataMap = new Map();
-
-    const getMonthStr = (dateStr) => {
-        try {
-            const d = new Date(dateStr);
-            if (isNaN(d.getTime())) return null;
-            return d.toISOString().substring(0, 7); // YYYY-MM
-        } catch(e) { return null; }
-    };
-
-    const getOrInit = (month) => {
-        if (!dataMap.has(month)) {
-            dataMap.set(month, { month, digitalCuan: 0, physicalCuan: 0, expenses: 0, totalCuan: 0 });
-        }
-        return dataMap.get(month);
-    };
-
-    transactions.forEach(t => {
-        if (t.status === 'Sukses' && t.cuan && t.date) {
-            const m = getMonthStr(t.date);
-            if (m) {
-                const d = getOrInit(m);
-                d.digitalCuan += t.cuan;
-                d.totalCuan += t.cuan;
-            }
-        }
-    });
-
-    physicalTransactions.forEach(t => {
-        if (t.status === 'Sukses' && t.cuan && t.date) {
-            const m = getMonthStr(t.date);
-            if (m) {
-                const d = getOrInit(m);
-                d.physicalCuan += t.cuan;
-                d.totalCuan += t.cuan;
-            }
-        }
-    });
-
-    expenses.forEach(e => {
-        if (e.date) {
-            const m = getMonthStr(e.date);
-            if (m) {
-                const d = getOrInit(m);
-                d.expenses += e.amount;
-                d.totalCuan -= e.amount;
-            }
-        }
-    });
-
-    const data = Array.from(dataMap.values()).sort((a, b) => b.month.localeCompare(a.month));
-
-    res.json({ success: true, data });
-  });
   });
 
   
@@ -2093,46 +2037,7 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca") {
         const methodDisplay = method === 'cash' ? '💵 Tunai (Cash)' : method === 'utang' ? '📝 Utang' : '💳 Saldo';
         await ctx.reply(`⏳ Status: Sedang memproses pembelian ${product.product_name} ke nomor ${targetNo} melalui metode ${methodDisplay}. Mohon ditunggu.`);
         
-        let pendingMsg = `⏳ Hai Kak!
-
-Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa saat, nanti akan kami kabari setelah selesai.
-
-📦 Produk  : ${product.product_name}
-🎯 Tujuan   : ${targetDisplay} (${member.name || "-"})
-
-Untuk cek status atau bertanya, langsung chat Chuna di Bot Telegram, ya!
-👉 https://t.me/ChunaChanbot
-
-Chuna menunggu kabar baik dari Kakak! 😊`;
-        
-        const tgMsg = await ctx.reply(pendingMsg, { reply_markup: returnMarkup });
-        let tgMsgId = tgMsg.message_id;
-
         const pay_ref_id = "PRE-" + Date.now();
-        
-        // PRE-REGISTER TRANSACTION
-        transactions.unshift({
-            id: pay_ref_id,
-            memberId: member.id,
-            type: "prepaid",
-            product: product.product_name,
-            sku: product.buyer_sku_code,
-            target: targetDisplay,
-            price: total,
-            modal: 0,
-            cuan: 0,
-            status: "Pending",
-            method: method,
-            sn: "-",
-            date: new Date().toISOString(),
-            waReceiptSent: false,
-            tgReceiptSent: false,
-            tgMsgId: tgMsgId,
-            tgChatId: ctx.chat?.id
-        });
-        db.transactions = transactions;
-        writeDB(db);
-
         try {
             const signText = digiflazzUsername + digiflazzApiKey + pay_ref_id;
             const sign = crypto.createHash("md5").update(signText).digest("hex");
@@ -2149,16 +2054,6 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
             });
             const payJson = await res.json();
             
-            // Reload transactions
-            let currTxIndex = transactions.findIndex(t => t.id === pay_ref_id);
-            if (currTxIndex >= 0 && transactions[currTxIndex].status !== 'Pending') {
-                // Webhook already processed it! Just update modal/cuan if needed and return
-                transactions[currTxIndex].modal = payJson.data?.price || 0;
-                transactions[currTxIndex].cuan = total - (payJson.data?.price || 0);
-                writeDB(db);
-                return;
-            }
-
             if (payJson.data) {
                 const status = payJson.data.status || 'Gagal';
                 const digiflazzPrice = payJson.data.price || 0;
@@ -2166,35 +2061,61 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
                 
                 let paymentInfo = "";
                 if (method === 'saldo') {
-                    paymentInfo = `    💰 SALDO  : "Cusss! Saldo langsung kepotong,
-                 beres dalam sekejap! Kamu jago
-                 banget pake saldo, Chuna salut! 💰✨"`;
+                    paymentInfo = `    💰 SALDO  : "Cusss! Saldo langsung kepotong,                 beres dalam sekejap! Kamu jago                 banget pake saldo, Chuna salut! 💰✨"`;
                 } else if (method === 'cash') {
-                    paymentInfo = `    💵 CASH   : "Duitnya Chuna terima dengan senyum
-                 lebar! Bayar tunai tetap berkesan!
-                 Makasih udah main ke E4 Store! 🫳🌸"`;
+                    paymentInfo = `    💵 CASH   : "Duitnya Chuna terima dengan senyum                 lebar! Bayar tunai tetap berkesan!                 Makasih udah main ke E4 Store! 🫳🌸"`;
                 } else {
-                    paymentInfo = `    📝 JANJI   : "Chuna percaya 100% sama kamu! 😍
-     BAYAR      Kamu pasti bayar tepat waktu karena
-    TEPAT       Chuna tahu kamu pelanggan baik hati.
-    WAKTU       Nanti kalau sudah transfer, chat
-                 Chuna aja, nanti Chuna proses dengan
-                 senyum manis! Makasih udah jujur! 💖🤗"`;
+                    paymentInfo = `    📝 JANJI   : "Chuna percaya 100% sama kamu! 😍     BAYAR      Kamu pasti bayar tepat waktu karena    TEPAT       Chuna tahu kamu pelanggan baik hati.    WAKTU       Nanti kalau sudah transfer, chat                 Chuna aja, nanti Chuna proses dengan                 senyum manis! Makasih udah jujur! 💖🤗"`;
                 }
                 
-                transactions[currTxIndex].status = status;
-                transactions[currTxIndex].modal = digiflazzPrice;
-                transactions[currTxIndex].cuan = cuan > 0 ? cuan : 0;
-                transactions[currTxIndex].sn = payJson.data?.sn || "-";
+                // PRE-REGISTER TRANSACTION
+                transactions.unshift({
+                    id: pay_ref_id,
+                    memberId: member.id,
+                    type: "prepaid",
+                    product: product.product_name,
+                    sku: product.buyer_sku_code,
+                    target: targetDisplay,
+                    price: total,
+                    modal: digiflazzPrice,
+                    cuan: cuan > 0 ? cuan : 0,
+                    status: status,
+                    method: method,
+                    sn: payJson.data?.sn || "-",
+                    date: new Date().toISOString(),
+                    waReceiptSent: false,
+                    tgReceiptSent: false
+                });
                 db.transactions = transactions;
                 writeDB(db);
                 
                 let msg = "";
-                let waMsgKey;
-                let notaBuffer;
+                let tgMsgId: number | undefined;
+                let waMsgKey: any | undefined;
+                let waJid: string | undefined;
+                let notaBuffer: Buffer | null = null;
+                
+                let returnMarkup;
+                if (stateData.memberId) {
+                    returnMarkup = { keyboard: [[{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true };
+                } else {
+                    returnMarkup = { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true };
+                }
 
                 if (status === 'Pending') {
-                    // Already sent before fetch
+                    msg = `⏳ Hai Kak!
+
+Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa saat, nanti akan kami kabari setelah selesai.
+
+📦 Produk  : ${product.product_name}
+🎯 Tujuan   : ${targetDisplay} (${member.name || "-"})
+
+Untuk cek status atau bertanya, langsung chat Chuna di Bot Telegram, ya!
+👉 https://t.me/ChunaChanbot
+
+Chuna menunggu kabar baik dari Kakak! 😊`;
+                    const tgMsg = await ctx.reply(msg, { reply_markup: returnMarkup });
+                    tgMsgId = tgMsg.message_id;
                 } else if (status === 'Sukses') {
                     const sn = payJson.data.sn || "-";
                     const now = new Date();
@@ -2225,15 +2146,9 @@ Chuna tunggu chat dari Kakak! 😊💖`;
                     if (pay_ref_id) notaBuffer = await generateCanvasReceipt("nota", { id: pay_ref_id, memberId: member.id, type: "prepaid", product: product.product_name, sku: product.buyer_sku_code, target: targetDisplay, price: total, modal: digiflazzPrice, cuan: cuan > 0 ? cuan : 0, status: status, method: method, sn: payJson.data?.sn || "-", date: new Date().toISOString() });
                     let tgMsg;
                     if (notaBuffer) {
-                        try { await ctx.telegram.deleteMessage(ctx.chat?.id, tgMsgId); } catch(e) {}
                         tgMsg = await ctx.replyWithPhoto({ source: notaBuffer }, { caption: msg, parse_mode: 'Markdown', reply_markup: returnMarkup });
                     } else {
-                        try {
-                            await ctx.telegram.editMessageText(ctx.chat?.id, tgMsgId, undefined, msg, { parse_mode: 'Markdown', reply_markup: returnMarkup });
-                            tgMsg = { message_id: tgMsgId };
-                        } catch (e) {
-                            tgMsg = await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: returnMarkup });
-                        }
+                        tgMsg = await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: returnMarkup });
                     }
                     tgMsgId = tgMsg.message_id;
                 } else {
@@ -2242,7 +2157,7 @@ Chuna tunggu chat dari Kakak! 😊💖`;
 
 Kemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan${(payJson.data.message || '').toLowerCase().includes('ip') ? ' lebih lanjut' : ''}.
 
-Keterangan : ${(payJson.data.message || 'Transaksi Gagal').replace(/[_*[\\]()~`>#+\\-=|{}.!]/g, '\\\\$&')}
+Keterangan : ${payJson.data.message || 'Transaksi Gagal'}
 📦 Produk  : ${product.product_name}
 🎯 Tujuan   : ${targetDisplay} (${member.name || "-"})
 
@@ -2266,13 +2181,7 @@ Coba lihat angka: *${product.product_name}* saat ini mungkin sudah naik, melebih
                             }
                         }
                     }
-                    let tgMsg;
-                    try {
-                        await ctx.telegram.editMessageText(ctx.chat?.id, tgMsgId, undefined, msg, { parse_mode: 'Markdown', reply_markup: returnMarkup });
-                        tgMsg = { message_id: tgMsgId };
-                    } catch (e) {
-                        tgMsg = await ctx.reply(msg, { reply_markup: returnMarkup });
-                    }
+                    const tgMsg = await ctx.reply(msg, { reply_markup: returnMarkup });
                     tgMsgId = tgMsg.message_id;
                 }
                 
@@ -2373,46 +2282,7 @@ async function processPascaPayment(ctx: any, ref_id: string, method: string, sta
         const methodDisplay = method === 'cash' ? '💵 Tunai (Cash)' : method === 'utang' ? '📝 Utang' : '💳 Saldo';
         await ctx.reply(`⏳ Status: Sedang memproses pembayaran tagihan untuk nomor ${customerNo} melalui metode ${methodDisplay}. Mohon ditunggu.`);
         
-        let pendingMsg = `⏳ Hai Kak!
-
-Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa saat, nanti akan kami kabari setelah selesai.
-
-📦 Tagihan : ${stateData.product.product_name}
-🎯 Tujuan   : ${customerNo} (${checkResult?.customer_name || "-"})
-
-Untuk cek status atau bertanya, langsung chat Chuna di Bot Telegram, ya!
-👉 https://t.me/ChunaChanbot
-
-Chuna menunggu kabar baik dari Kakak! 😊`;
-        
-        const tgMsg = await ctx.reply(pendingMsg, { reply_markup: returnMarkup });
-        let tgMsgId = tgMsg.message_id;
-
         const pay_ref_id = ref_id;
-        
-        // PRE-REGISTER TRANSACTION
-        transactions.unshift({
-            id: pay_ref_id,
-            memberId: member.id,
-            type: "pasca",
-            product: stateData.product.product_name,
-            sku: stateData.product.buyer_sku_code,
-            target: customerNo,
-            price: total,
-            modal: 0,
-            cuan: 0,
-            status: "Pending",
-            method: method,
-            sn: "-",
-            date: new Date().toISOString(),
-            waReceiptSent: false,
-            tgReceiptSent: false,
-            tgMsgId: tgMsgId,
-            tgChatId: ctx.chat?.id
-        });
-        db.transactions = transactions;
-        writeDB(db);
-
         try {
             const signText = digiflazzUsername + digiflazzApiKey + pay_ref_id;
             const sign = crypto.createHash("md5").update(signText).digest("hex");
@@ -2430,15 +2300,6 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
             });
             const payJson = await res.json();
             
-            // Reload transactions
-            let currTxIndex = transactions.findIndex(t => t.id === pay_ref_id);
-            if (currTxIndex >= 0 && transactions[currTxIndex].status !== 'Pending') {
-                transactions[currTxIndex].modal = payJson.data?.price || 0;
-                transactions[currTxIndex].cuan = total - (payJson.data?.price || 0);
-                writeDB(db);
-                return;
-            }
-
             if (payJson.data) {
                 const status = payJson.data.status || 'Gagal';
                 const digiflazzPrice = payJson.data.price || 0;
@@ -2446,35 +2307,60 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
                 
                 let paymentInfo = "";
                 if (method === 'saldo') {
-                    paymentInfo = `    💰 SALDO  : "Cusss! Saldo langsung kepotong,
-                 beres dalam sekejap! Kamu jago
-                 banget pake saldo, Chuna salut! 💰✨"`;
+                    paymentInfo = `    💰 SALDO  : "Cusss! Saldo langsung kepotong,                 beres dalam sekejap! Kamu jago                 banget pake saldo, Chuna salut! 💰✨"`;
                 } else if (method === 'cash') {
-                    paymentInfo = `    💵 CASH   : "Duitnya Chuna terima dengan senyum
-                 lebar! Bayar tunai tetap berkesan!
-                 Makasih udah main ke E4 Store! 🫳🌸"`;
+                    paymentInfo = `    💵 CASH   : "Duitnya Chuna terima dengan senyum                 lebar! Bayar tunai tetap berkesan!                 Makasih udah main ke E4 Store! 🫳🌸"`;
                 } else {
-                    paymentInfo = `    📝 JANJI   : "Chuna percaya 100% sama kamu! 😍
-     BAYAR      Kamu pasti bayar tepat waktu karena
-    TEPAT       Chuna tahu kamu pelanggan baik hati.
-    WAKTU       Nanti kalau sudah transfer, chat
-                 Chuna aja, nanti Chuna proses dengan
-                 senyum manis! Makasih udah jujur! 💖🤗"`;
+                    paymentInfo = `    📝 JANJI   : "Chuna percaya 100% sama kamu! 😍     BAYAR      Kamu pasti bayar tepat waktu karena    TEPAT       Chuna tahu kamu pelanggan baik hati.    WAKTU       Nanti kalau sudah transfer, chat                 Chuna aja, nanti Chuna proses dengan                 senyum manis! Makasih udah jujur! 💖🤗"`;
                 }
                 
-                transactions[currTxIndex].status = status;
-                transactions[currTxIndex].modal = digiflazzPrice;
-                transactions[currTxIndex].cuan = cuan > 0 ? cuan : 0;
-                transactions[currTxIndex].sn = payJson.data?.sn || "-";
+                // PRE-REGISTER TRANSACTION
+                transactions.unshift({
+                    id: pay_ref_id,
+                    memberId: member.id,
+                    type: "pasca",
+                    product: stateData.product.product_name,
+                    sku: stateData.product.buyer_sku_code,
+                    target: customerNo,
+                    price: total,
+                    modal: digiflazzPrice,
+                    cuan: cuan > 0 ? cuan : 0,
+                    status: status,
+                    method: method,
+                    sn: payJson.data?.sn || "-",
+                    date: new Date().toISOString(),
+                    waReceiptSent: false
+                });
                 db.transactions = transactions;
                 writeDB(db);
                 
                 let msg = "";
-                let waMsgKey;
-                let notaBuffer;
+                let tgMsgId: number | undefined;
+                let waMsgKey: any | undefined;
+                let waJid: string | undefined;
+                let notaBuffer: Buffer | null = null;
+                
+                let returnMarkup;
+                if (stateData.memberId) {
+                    returnMarkup = { keyboard: [[{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true };
+                } else {
+                    returnMarkup = { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Download" }, { text: "🎵 Lirik Lagu" }]], resize_keyboard: true };
+                }
 
                 if (status === 'Pending') {
-                    // Already sent before fetch
+                    msg = `⏳ Hai Kak!
+
+Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa saat, nanti akan kami kabari setelah selesai.
+
+📦 Tagihan : ${stateData.product.product_name}
+🎯 Tujuan   : ${customerNo} (${payJson.data?.customer_name || checkResult?.customer_name || "-"})
+
+Untuk cek status atau bertanya, langsung chat Chuna di Bot Telegram, ya!
+👉 https://t.me/ChunaChanbot
+
+Chuna menunggu kabar baik dari Kakak! 😊`;
+                    const tgMsg = await ctx.reply(msg, { reply_markup: returnMarkup });
+                    tgMsgId = tgMsg.message_id;
                 } else if (status === 'Sukses') {
                     const sn = payJson.data.sn || "-";
                     const now = new Date();
@@ -2505,15 +2391,9 @@ Chuna tunggu chat dari Kakak! 😊💖`;
                     if (pay_ref_id) notaBuffer = await generateCanvasReceipt("nota", { id: pay_ref_id, memberId: member.id, type: "pasca", product: stateData.product.product_name, sku: stateData.product.buyer_sku_code, target: customerNo, price: total, modal: digiflazzPrice, cuan: cuan > 0 ? cuan : 0, tagihan: stateData.checkResult?.selling_price || 0, admin_pel: stateData.adminFee || 0, status: status, method: method, sn: payJson.data?.sn || "-", date: new Date().toISOString() });
                     let tgMsg;
                     if (notaBuffer) {
-                        try { await ctx.telegram.deleteMessage(ctx.chat?.id, tgMsgId); } catch(e) {}
                         tgMsg = await ctx.replyWithPhoto({ source: notaBuffer }, { caption: msg, parse_mode: 'Markdown', reply_markup: returnMarkup });
                     } else {
-                        try {
-                            await ctx.telegram.editMessageText(ctx.chat?.id, tgMsgId, undefined, msg, { parse_mode: 'Markdown', reply_markup: returnMarkup });
-                            tgMsg = { message_id: tgMsgId };
-                        } catch (e) {
-                            tgMsg = await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: returnMarkup });
-                        }
+                        tgMsg = await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: returnMarkup });
                     }
                     tgMsgId = tgMsg.message_id;
                 } else {
@@ -2522,7 +2402,7 @@ Chuna tunggu chat dari Kakak! 😊💖`;
 
 Kemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan${(payJson.data.message || '').toLowerCase().includes('ip') ? ' lebih lanjut' : ''}.
 
-Keterangan : ${(payJson.data.message || 'Transaksi Gagal').replace(/[_*[\\]()~`>#+\\-=|{}.!]/g, '\\\\$&')}
+Keterangan : ${payJson.data.message || 'Transaksi Gagal'}
 📦 Tagihan : ${stateData.product.product_name}
 🎯 Tujuan   : ${customerNo} (${payJson.data?.customer_name || checkResult?.customer_name || "-"})
 
@@ -2546,13 +2426,7 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
                             }
                         }
                     }
-                    let tgMsg;
-                    try {
-                        await ctx.telegram.editMessageText(ctx.chat?.id, tgMsgId, undefined, msg, { parse_mode: 'Markdown', reply_markup: returnMarkup });
-                        tgMsg = { message_id: tgMsgId };
-                    } catch (e) {
-                        tgMsg = await ctx.reply(msg, { reply_markup: returnMarkup });
-                    }
+                    const tgMsg = await ctx.reply(msg, { reply_markup: returnMarkup });
                     tgMsgId = tgMsg.message_id;
                 }
 
@@ -3735,67 +3609,18 @@ await ctx.reply("❌ Download dibatalkan.", { reply_markup: returnMarkup });
                         targetUrls = [...new Set(targetUrls)];
                         
                         if (targetUrls.length > 0) {
-                            if (isImage && targetUrls.length > 1) {
-                                await ctx.replyWithChatAction("upload_photo").catch(() => {});
-                                const mediaGroup = targetUrls.map((u, i) => ({
-                                    type: 'photo',
-                                    media: u,
-                                    caption: i === 0 ? "✅ Semua gambar berhasil di-download!" : undefined
-                                }));
+                            for (const mediaUrl of targetUrls) {
                                 try {
-                                    for (let i = 0; i < mediaGroup.length; i += 10) {
-                                        await ctx.telegram.sendMediaGroup(ctx.chat.id, mediaGroup.slice(i, i + 10));
+                                    if (isVideo) {
+                                        await ctx.replyWithVideo(mediaUrl, { caption: "✅ Video berhasil di-download!" });
+                                        break; // Only send the first video to avoid spamming multiple qualities
+                                    } else if (isAudio) {
+                                        await ctx.replyWithAudio(mediaUrl, { caption: "✅ Audio berhasil di-download!" });
+                                        break;
+                                    } else {
+                                        await ctx.replyWithPhoto(mediaUrl, { caption: "✅ Gambar berhasil di-download!" });
                                     }
-                                } catch (e) {
-                                    for (const mediaUrl of targetUrls) {
-                                        await ctx.replyWithPhoto(mediaUrl).catch(()=>{});
-                                    }
-                                    await ctx.reply("✅ Semua gambar berhasil di-download!");
-                                }
-                            } else {
-                                for (const mediaUrl of targetUrls) {
-                                    try {
-                                        if (isVideo) {
-                                            if (mediaUrl.includes('.jpeg') || mediaUrl.includes('.jpg') || mediaUrl.includes('.png')) continue;
-                                            await ctx.replyWithChatAction("upload_video").catch(() => {});
-                                            try {
-                                                const res = await fetch(mediaUrl);
-                                                const arrayBuffer = await res.arrayBuffer();
-                                                const buffer = Buffer.from(arrayBuffer);
-                                                if (buffer.length > 49.5 * 1024 * 1024) {
-                                                    await ctx.reply("❌ Maaf Kak, ukuran video terlalu besar (Maksimal 50MB untuk Bot Telegram).");
-                                                    break;
-                                                }
-                                                await ctx.replyWithVideo({ source: buffer }, { caption: "✅ Video berhasil di-download!" });
-                                                break;
-                                            } catch (e) {
-                                                await ctx.replyWithVideo({ url: mediaUrl }, { caption: "✅ Video berhasil di-download!" });
-                                                break;
-                                            }
-                                        } 
-                                        else if (isAudio) {
-                                            if (mediaUrl.includes('.jpeg') || mediaUrl.includes('.jpg') || mediaUrl.includes('.png')) continue;
-                                            await ctx.replyWithChatAction("upload_voice").catch(() => {});
-                                            try {
-                                                const res = await fetch(mediaUrl);
-                                                const arrayBuffer = await res.arrayBuffer();
-                                                const buffer = Buffer.from(arrayBuffer);
-                                                if (buffer.length > 49.5 * 1024 * 1024) {
-                                                    await ctx.reply("❌ Maaf Kak, ukuran audio terlalu besar (Maksimal 50MB untuk Bot Telegram).");
-                                                    break;
-                                                }
-                                                await ctx.replyWithAudio({ source: buffer }, { caption: "✅ Audio berhasil di-download!" });
-                                                break;
-                                            } catch (e) {
-                                                await ctx.replyWithAudio({ url: mediaUrl }, { caption: "✅ Audio berhasil di-download!" });
-                                                break;
-                                            }
-                                        } else {
-                                            await ctx.replyWithPhoto(mediaUrl, { caption: "✅ Gambar berhasil di-download!" });
-                                            break;
-                                        }
-                                    } catch(e) {}
-                                }
+                                } catch(e) {}
                             }
                         } else {
                              await ctx.reply("❌ Gagal mendapatkan format " + format + " dari link tersebut.");
