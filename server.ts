@@ -2237,17 +2237,12 @@ Chuna tunggu chat dari Kakak! 😊💖`;
                     }
                     tgMsgId = tgMsg.message_id;
                 } else {
-                    if (!isOwnerSelf && method === 'saldo') {
-                        member.balance += total;
-                        db.members = members;
-                        writeDB(db);
-                    }
                     let refundMsg = method === 'saldo' ? '✅ Saldo sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (method === 'utang' ? '✅ Utang sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + total.toLocaleString('id-ID') + ' kepada pelanggan.');
                     msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.
-                    
+
 Kemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan${(payJson.data.message || '').toLowerCase().includes('ip') ? ' lebih lanjut' : ''}.
 
-Keterangan : ${(payJson.data.message || 'Transaksi Gagal').replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&')}
+Keterangan : ${(payJson.data.message || 'Transaksi Gagal').replace(/[_*[\\]()~`>#+\\-=|{}.!]/g, '\\\\$&')}
 📦 Produk  : ${product.product_name}
 🎯 Tujuan   : ${targetDisplay} (${member.name || "-"})
 
@@ -2327,7 +2322,24 @@ Coba lihat angka: *${product.product_name}* saat ini mungkin sudah naik, melebih
                 await ctx.reply(`❌ Pembelian Gagal:${payJson.data?.message || 'Error tidak diketahui'}${refundMsg}`);
             }
         } catch (e: any) {
-            await ctx.reply(`⏳ Transaksi Sedang Diproses (Network Error)\nPesananmu sedang dikonfirmasi oleh sistem pusat meski terjadi gangguan koneksi.\nMohon tunggu update otomatis dari Chuna atau hubungi Admin.\nPesan Error: ${e.message}`);
+            transactions.unshift({
+                id: pay_ref_id,
+                memberId: member.id,
+                type: "prepaid",
+                product: product.product_name,
+                sku: product.buyer_sku_code,
+                target: targetDisplay,
+                price: total,
+                modal: 0,
+                cuan: 0,
+                status: "Pending",
+                method: method,
+                date: new Date().toISOString()
+            });
+            db.transactions = transactions;
+            writeDB(db);
+            
+            await ctx.reply(`⏳ Transaksi Sedang Diproses (Network Error)Pesananmu sedang dikonfirmasi oleh sistem pusat meski terjadi gangguan koneksi.Mohon tunggu update otomatis dari Chuna atau hubungi Admin.Pesan Error: ${e.message}`);
         }
         
         if (stateData.memberId) {
@@ -2505,17 +2517,12 @@ Chuna tunggu chat dari Kakak! 😊💖`;
                     }
                     tgMsgId = tgMsg.message_id;
                 } else {
-                    if (!isOwnerSelf && method === 'saldo') {
-                        member.balance += total;
-                        db.members = members;
-                        writeDB(db);
-                    }
                     let refundMsg = method === 'saldo' ? '✅ Saldo sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (method === 'utang' ? '✅ Utang sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + total.toLocaleString('id-ID') + ' kepada pelanggan.');
                     msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.
 
 Kemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan${(payJson.data.message || '').toLowerCase().includes('ip') ? ' lebih lanjut' : ''}.
 
-Keterangan : ${(payJson.data.message || 'Transaksi Gagal').replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&')}
+Keterangan : ${(payJson.data.message || 'Transaksi Gagal').replace(/[_*[\\]()~`>#+\\-=|{}.!]/g, '\\\\$&')}
 📦 Tagihan : ${stateData.product.product_name}
 🎯 Tujuan   : ${customerNo} (${payJson.data?.customer_name || checkResult?.customer_name || "-"})
 
@@ -2595,7 +2602,26 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
                 await ctx.reply(`❌ Pembelian Gagal:${payJson.data?.message || 'Error tidak diketahui'}${refundMsg}`);
             }
         } catch (e: any) {
-            await ctx.reply(`⏳ Transaksi Sedang Diproses (Network Error)\nPesananmu sedang dikonfirmasi oleh sistem pusat meski terjadi gangguan koneksi.\nMohon tunggu update otomatis dari Chuna atau hubungi Admin.\nPesan Error: ${e.message}`);
+            transactions.unshift({
+                id: pay_ref_id,
+                memberId: member.id,
+                type: "pasca",
+                product: stateData.product.product_name,
+                sku: stateData.product.buyer_sku_code,
+                target: customerNo,
+                price: total,
+                modal: 0,
+                cuan: 0,
+                tagihan: stateData.checkResult?.selling_price || 0,
+                admin_pel: stateData.adminFee || 0,
+                status: "Pending",
+                method: method,
+                date: new Date().toISOString()
+            });
+            db.transactions = transactions;
+            writeDB(db);
+            
+            await ctx.reply(`⏳ Transaksi Sedang Diproses (Network Error)Pesananmu sedang dikonfirmasi oleh sistem pusat meski terjadi gangguan koneksi.Mohon tunggu update otomatis dari Chuna atau hubungi Admin.Pesan Error: ${e.message}`);
         }
         
         if (stateData.memberId) {
@@ -2622,8 +2648,7 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
         const userId = ctx.from.id;
 
         try {
-          let opusPath = path.join(process.cwd(), "welcome.ogg");
-          if (!fs.existsSync(opusPath)) opusPath = path.join(process.cwd(), "welcome.opus");
+          const opusPath = path.join(process.cwd(), "welcome.opus");
           if (fs.existsSync(opusPath)) {
             if (welcomeVoiceFileId) {
                 await ctx.replyWithVoice(welcomeVoiceFileId).catch(err => console.error("Gagal mengirim voice_id", err));
@@ -3407,139 +3432,172 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
             if (!url) return ctx.reply("❌ Link TikTok-nya mana kak?");
             await ctx.reply("⏳ Tunggu sebentar ya, Chuna sedang mendownload TikTok...");
             try {
-                        const btch = (await import('btch-downloader')).default || await import('btch-downloader');
-                        let result;
-                        let targetUrls: string[] = [];
-                        
-                        const isVideo = format === "🎥 Video";
-                        const isAudio = format === "🎵 Audio / MP3";
-                        const isImage = format === "📸 Gambar";
+                const btch = (await import('btch-downloader')).default || await import('btch-downloader');
+                const result = await btch.ttdl(url);
+                if (result && result.video) {
+                    await ctx.replyWithVideo(result.video, { caption: "✅ Berhasil di-download oleh Chuna!" });
+                } else if (result && result.audio) {
+                    await ctx.replyWithVideo(result.audio[0] || result.audio, { caption: "✅ Berhasil di-download oleh Chuna!" }).catch(async () => {
+                        await ctx.replyWithAudio(result.audio[0] || result.audio);
+                    });
+                } else {
+                    await ctx.reply("❌ Gagal mendownload.");
+                }
+            } catch (e: any) { await ctx.reply("❌ Error: " + e.message); }
+            return;
+        }
 
-                        if (url.includes('tiktok.com')) {
-                            try {
-                                const { Downloader } = require('@tobyg74/tiktok-api-dl');
-                                const tdl = await Downloader(url, { version: 'v1' });
-                                if (tdl.status === 'success' && tdl.result) {
-                                    if (isVideo && tdl.result.type === 'video') targetUrls = [tdl.result.video.playAddr || tdl.result.video[0]];
-                                    else if (isAudio && tdl.result.music?.playUrl) targetUrls = [tdl.result.music.playUrl];
-                                    else if (isImage && tdl.result.type === 'image') targetUrls = tdl.result.images || [];
-                                    else if (isImage && tdl.result.type === 'video') targetUrls = [tdl.result.cover[0]]; // fallback cover
-                                }
-                            } catch(e) { console.error("TobyG74 Error:", e.message); }
+        if (text.startsWith('.ig ') || text.startsWith('.instagram ')) {
+            const url = text.split(' ')[1];
+            if (!url) return ctx.reply("❌ Link Instagram-nya mana kak?");
+            await ctx.reply("⏳ Tunggu sebentar ya, Chuna sedang mendownload IG...");
+            try {
+                const btch = (await import('btch-downloader')).default || await import('btch-downloader');
+                const result = await btch.igdl(url);
+                if (result && Array.isArray(result) && result.length > 0) {
+                    for (const media of result) {
+                        if (media.url) {
+                            if (media.url.includes('.mp4')) await ctx.replyWithVideo(media.url, { caption: "✅ Berhasil!" });
+                            else await ctx.replyWithPhoto(media.url, { caption: "✅ Berhasil!" });
                         }
-
-                        if (targetUrls.length === 0) {
-                            if (url.includes('tiktok.com')) result = await btch.ttdl(url);
-                            else if (url.includes('instagram.com')) result = await btch.igdl(url);
-                            else if (url.includes('youtube.com') || url.includes('youtu.be')) result = await btch.youtube(url);
-                            else if (url.includes('facebook.com') || url.includes('fb.watch')) result = await btch.fbdown(url);
-                            else if (url.includes('twitter.com') || url.includes('x.com')) result = await btch.twitter(url);
-                            else result = await btch.aio(url);
-                            
-                            const extractUrls = (res: any): string[] => {
-    if (!res) return [];
-    if (typeof res === 'string' && res.startsWith('http')) return [res];
-    if (Array.isArray(res)) return res.map(r => extractUrls(r)).flat();
-    if (typeof res === 'object') {
-        return Object.values(res).map(r => extractUrls(r)).flat();
-    }
-    return [];
-};
-let allUrls = extractUrls(result);
-                            
-                            targetUrls = allUrls.filter(u => {
-                                const lu = u.toLowerCase();
-                                if (isAudio && (lu.includes('.mp3') || lu.includes('audio') || result?.mp3 === u || (result?.audio && JSON.stringify(result.audio).includes(u)))) return true;
-                                if (isVideo && (lu.includes('.mp4') || lu.includes('video') || result?.mp4 === u || (result?.video && JSON.stringify(result.video).includes(u)))) return true;
-                                if (isImage && (lu.includes('.jpg') || lu.includes('.jpeg') || lu.includes('.png') || lu.includes('image') || result?.thumbnail === u || (result?.thumbnail && JSON.stringify(result.thumbnail).includes(u)))) return true;
-                                return false;
-                            });
-                            
-                            if (targetUrls.length === 0) {
-                                if (isVideo && result?.mp4) targetUrls = [result.mp4];
-                                else if (isAudio && result?.mp3) targetUrls = [result.mp3];
-                                else if (isImage && result?.thumbnail) targetUrls = Array.isArray(result.thumbnail) ? result.thumbnail : [result.thumbnail];
-                                else {
-                                    if (isVideo) targetUrls = allUrls.filter(u => !u.includes('.jpg') && !u.includes('.mp3'));
-                                    if (isAudio) targetUrls = allUrls.filter(u => !u.includes('.jpg') && !u.includes('.mp4'));
-                                }
-                            }
-                        }
-                        
-                        targetUrls = [...new Set(targetUrls)];
-                        
-                        if (targetUrls.length > 0) {
-                            if (isImage && targetUrls.length > 1) {
-                                await ctx.replyWithChatAction("upload_photo").catch(() => {});
-                                const mediaGroup = targetUrls.map((u, i) => ({
-                                    type: 'photo',
-                                    media: u,
-                                    caption: i === 0 ? "✅ Semua gambar berhasil di-download!" : undefined
-                                }));
-                                try {
-                                    for (let i = 0; i < mediaGroup.length; i += 10) {
-                                        await ctx.telegram.sendMediaGroup(ctx.chat.id, mediaGroup.slice(i, i + 10));
-                                    }
-                                } catch (e) {
-                                    for (const mediaUrl of targetUrls) {
-                                        await ctx.replyWithPhoto(mediaUrl).catch(()=>{});
-                                    }
-                                    await ctx.reply("✅ Semua gambar berhasil di-download!");
-                                }
-                            } else {
-                                for (const mediaUrl of targetUrls) {
-                                    try {
-                                        if (isVideo) {
-                                            if (mediaUrl.includes('.jpeg') || mediaUrl.includes('.jpg') || mediaUrl.includes('.png')) continue;
-                                            await ctx.replyWithChatAction("upload_video").catch(() => {});
-                                            try {
-                                                const res = await fetch(mediaUrl);
-                                                const arrayBuffer = await res.arrayBuffer();
-                                                const buffer = Buffer.from(arrayBuffer);
-                                                if (buffer.length > 49.5 * 1024 * 1024) {
-                                                    await ctx.reply("❌ Maaf Kak, ukuran video terlalu besar (Maksimal 50MB untuk Bot Telegram).");
-                                                    break;
-                                                }
-                                                await ctx.replyWithVideo({ source: buffer }, { caption: "✅ Video berhasil di-download!" });
-                                                break;
-                                            } catch (e) {
-                                                await ctx.replyWithVideo({ url: mediaUrl }, { caption: "✅ Video berhasil di-download!" });
-                                                break;
-                                            }
-                                        } 
-                                        else if (isAudio) {
-                                            if (mediaUrl.includes('.jpeg') || mediaUrl.includes('.jpg') || mediaUrl.includes('.png')) continue;
-                                            await ctx.replyWithChatAction("upload_voice").catch(() => {});
-                                            try {
-                                                const res = await fetch(mediaUrl);
-                                                const arrayBuffer = await res.arrayBuffer();
-                                                const buffer = Buffer.from(arrayBuffer);
-                                                if (buffer.length > 49.5 * 1024 * 1024) {
-                                                    await ctx.reply("❌ Maaf Kak, ukuran audio terlalu besar (Maksimal 50MB untuk Bot Telegram).");
-                                                    break;
-                                                }
-                                                await ctx.replyWithAudio({ source: buffer }, { caption: "✅ Audio berhasil di-download!" });
-                                                break;
-                                            } catch (e) {
-                                                await ctx.replyWithAudio({ url: mediaUrl }, { caption: "✅ Audio berhasil di-download!" });
-                                                break;
-                                            }
-                                        } else {
-                                            await ctx.replyWithPhoto(mediaUrl, { caption: "✅ Gambar berhasil di-download!" });
-                                            break;
-                                        }
-                                    } catch(e) {}
-                                }
-                            }
-                        } else {
-                             await ctx.reply("❌ Gagal mendapatkan format " + format + " dari link tersebut.");
-                        }
-
-                    } catch (e: any) {
-                        await ctx.reply("❌ Terjadi kesalahan saat mendownload media. " + e.message);
                     }
+                } else {
+                    await ctx.reply("❌ Gagal mendownload.");
+                }
+            } catch (e: any) { await ctx.reply("❌ Error: " + e.message); }
+            return;
+        }
+
+        if (text.startsWith('.ytmp4 ')) {
+            const url = text.split(' ')[1];
+            if (!url) return ctx.reply("❌ Link YouTube-nya mana kak?");
+            await ctx.reply("⏳ Tunggu sebentar ya, Chuna sedang mendownload YT MP4...");
+            try {
+                const btch = (await import('btch-downloader')).default || await import('btch-downloader');
+                const result = await btch.youtube(url);
+                if (result && result.video) {
+                    await ctx.replyWithVideo(result.video, { caption: "✅ Berhasil!" });
+                } else { await ctx.reply("❌ Gagal mendownload."); }
+            } catch (e: any) { await ctx.reply("❌ Error: " + e.message); }
+            return;
+        }
+
+        if (text.startsWith('.ytmp3 ')) {
+            const url = text.split(' ')[1];
+            if (!url) return ctx.reply("❌ Link YouTube-nya mana kak?");
+            await ctx.reply("⏳ Tunggu sebentar ya, Chuna sedang mendownload YT MP3...");
+            try {
+                const btch = (await import('btch-downloader')).default || await import('btch-downloader');
+                const result = await btch.youtube(url);
+                if (result && result.audio) {
+                    await ctx.replyWithAudio(result.audio, { caption: "✅ Berhasil!" });
+                } else { await ctx.reply("❌ Gagal mendownload."); }
+            } catch (e: any) { await ctx.reply("❌ Error: " + e.message); }
+            return;
+        }
+
+        if (text.startsWith('.fb ')) {
+            const url = text.split(' ')[1];
+            if (!url) return ctx.reply("❌ Link Facebook-nya mana kak?");
+            await ctx.reply("⏳ Tunggu sebentar ya, Chuna sedang mendownload FB...");
+            try {
+                const btch = (await import('btch-downloader')).default || await import('btch-downloader');
+                const result = await btch.fbdown(url);
+                if (result && result.video) {
+                    await ctx.replyWithVideo(result.video, { caption: "✅ Berhasil!" });
+                } else if (result && result.Normal_video) {
+                    await ctx.replyWithVideo(result.Normal_video, { caption: "✅ Berhasil!" });
+                } else { await ctx.reply("❌ Gagal mendownload."); }
+            } catch (e: any) { await ctx.reply("❌ Error: " + e.message); }
+            return;
+        }
+
+        if (text.startsWith('.tw ') || text.startsWith('.twitter ')) {
+            const url = text.split(' ')[1];
+            if (!url) return ctx.reply("❌ Link Twitter-nya mana kak?");
+            await ctx.reply("⏳ Tunggu sebentar ya, Chuna sedang mendownload Twitter...");
+            try {
+                const btch = (await import('btch-downloader')).default || await import('btch-downloader');
+                const result = await btch.twitter(url);
+                if (result && result.url) {
+                    if (result.url[0] && result.url[0].hd) {
+                        await ctx.replyWithVideo(result.url[0].hd, { caption: "✅ Berhasil!" });
+                    } else {
+                        await ctx.reply("❌ Gagal mendownload.");
+                    }
+                } else { await ctx.reply("❌ Gagal mendownload."); }
+            } catch (e: any) { await ctx.reply("❌ Error: " + e.message); }
+            return;
+        }
+
+        if (text.startsWith('.spotify ')) {
+            const url = text.split(' ')[1];
+            if (!url) return ctx.reply("❌ Link Spotify-nya mana kak?");
+            await ctx.reply("⏳ Tunggu sebentar ya, Chuna sedang mendownload Spotify...");
+            try {
+                const btch = (await import('btch-downloader')).default || await import('btch-downloader');
+                const result = await btch.spotify(url);
+                if (result && result.audio) {
+                    await ctx.replyWithAudio(result.audio, { caption: `✅ ${result.title || 'Berhasil!'}` });
+                } else { await ctx.reply("❌ Gagal mendownload."); }
+            } catch (e: any) { await ctx.reply("❌ Error: " + e.message); }
+            return;
+        }
+
+        if (text.startsWith('.pinterest ') || text.startsWith('.pin ')) {
+            const url = text.split(' ')[1];
+            if (!url) return ctx.reply("❌ Link Pinterest-nya mana kak?");
+            await ctx.reply("⏳ Tunggu sebentar ya, Chuna sedang mendownload Pinterest...");
+            try {
+                const btch = (await import('btch-downloader')).default || await import('btch-downloader');
+                const result = await btch.pinterest(url);
+                if (result && Array.isArray(result) && result.length > 0) {
+                    for (const url of result) {
+                        await ctx.replyWithPhoto(url);
+                    }
+                } else if (result) {
+                    await ctx.replyWithPhoto(result);
+                } else { await ctx.reply("❌ Gagal mendownload."); }
+            } catch (e: any) { await ctx.reply("❌ Error: " + e.message); }
+            return;
+        }
+
+        if (text.startsWith('.lirik ') || text.startsWith('.play ')) {
+            const query = text.substring(text.indexOf(' ') + 1).trim();
+            if (!query) return ctx.reply("❌ Judul lagunya apa kak?");
+            await ctx.reply("⏳ Chuna sedang mencari '" + query + "'...");
+            try {
+                const ytSearch = (await import('yt-search')).default || await import('yt-search');
+                const searchResult = await ytSearch(query);
+                let msg = "🎵 *Hasil Pencarian YouTube* 🎵\n\n";
+                if (searchResult && searchResult.videos.length > 0) {
+                    const top = searchResult.videos.slice(0, 3);
+                    top.forEach((v: any, i: number) => {
+                        msg += `*${i+1}. ${v.title}*\n⏱️ ${v.timestamp} | 👁️ ${v.views}\n🔗 ${v.url}\n\n`;
+                    });
+                    const photoUrl = top[0].thumbnail;
                     
-                    delete userStates[userId];
+                    try {
+                        const axios = (await import('axios')).default || await import('axios');
+                        const lyricsRes = await axios.get(`https://some-random-api.com/lyrics?title=${encodeURIComponent(query)}`);
+                        if (lyricsRes.data && lyricsRes.data.lyrics) {
+                            msg += `\n*Lirik Lagu:*\n\n${lyricsRes.data.lyrics.substring(0, 2000)}`;
+                        }
+                    } catch (e) {}
+                    
+                    await ctx.replyWithPhoto(photoUrl, { caption: msg.substring(0, 1024), parse_mode: 'Markdown' });
+                    if (msg.length > 1024) await ctx.reply(msg, { parse_mode: 'Markdown' });
+                } else {
+                    await ctx.reply("❌ Lagu tidak ditemukan.");
+                }
+            } catch (e: any) { await ctx.reply("❌ Error: " + e.message); }
+            return;
+        }
+
+        
+        const ownerMenu = ["📒 Cek Utang Member", "📝 Tambah Member", "👑 List Member", "💳 Saldo Pusat", "⚙️ Pengaturan", "📢 Pengumuman WA", "📸 Buat Story WA"];
+        if (ownerMenu.includes(text) && db.owners.includes(userId)) {
+           delete userStates[userId];
            return next(); 
         }
 
@@ -3579,8 +3637,7 @@ await ctx.reply("❌ Download dibatalkan.", { reply_markup: returnMarkup });
                         reply_markup: {
                             keyboard: [
                                 [{ text: "🎥 Video" }, { text: "🎵 Audio / MP3" }],
-                                [{ text: "🎙️ Voice Note" }, { text: "📸 Gambar" }],
-                                [{ text: "❌ Batal" }]
+                                [{ text: "📸 Gambar" }, { text: "❌ Batal" }]
                             ],
                             resize_keyboard: true
                         }
@@ -3612,7 +3669,7 @@ await ctx.reply("❌ Download dibatalkan.", { reply_markup: returnMarkup });
                     }
                     
                     const format = text;
-                    if (!["🎥 Video", "🎵 Audio / MP3", "📸 Gambar", "🎙️ Voice Note"].includes(format)) {
+                    if (!["🎥 Video", "🎵 Audio / MP3", "📸 Gambar"].includes(format)) {
                         await ctx.reply("❌ Silakan pilih format menggunakan tombol di bawah.");
                         return;
                     }
@@ -3623,28 +3680,7 @@ await ctx.reply("❌ Download dibatalkan.", { reply_markup: returnMarkup });
                     try {
                         const btch = (await import('btch-downloader')).default || await import('btch-downloader');
                         let result;
-                        if (url.includes('tiktok.com')) {
-                            try {
-                                const { Downloader } = require('@tobyg74/tiktok-api-dl');
-                                const tdl = await Downloader(url, { version: 'v1' });
-                                if (tdl.status === 'success' && tdl.result) {
-                                    result = tdl.result;
-                                    // Map to btch format so it works seamlessly
-                                    if (result.type === 'image') {
-                                        result.thumbnail = result.images;
-                                    } else {
-                                        result.video = [result.video?.playAddr || result.video];
-                                    }
-                                    if (result.music?.playUrl) {
-                                        result.audio = [result.music.playUrl];
-                                    }
-                                } else {
-                                    result = await btch.ttdl(url);
-                                }
-                            } catch(e) {
-                                result = await btch.ttdl(url);
-                            }
-                        }
+                        if (url.includes('tiktok.com')) result = await btch.ttdl(url);
                         else if (url.includes('instagram.com')) result = await btch.igdl(url);
                         else if (url.includes('youtube.com') || url.includes('youtu.be')) result = await btch.youtube(url);
                         else if (url.includes('facebook.com') || url.includes('fb.watch')) result = await btch.fbdown(url);
@@ -3652,7 +3688,6 @@ await ctx.reply("❌ Download dibatalkan.", { reply_markup: returnMarkup });
                         else result = await btch.aio(url);
 
                         const isVideo = format === "🎥 Video";
-                        const isVoiceNote = format === "🎙️ Voice Note";
                         const isAudio = format === "🎵 Audio / MP3";
                         const isImage = format === "📸 Gambar";
                         
@@ -3661,10 +3696,16 @@ await ctx.reply("❌ Download dibatalkan.", { reply_markup: returnMarkup });
                             if (!res) return [];
                             if (typeof res === 'string' && res.startsWith('http')) return [res];
                             if (Array.isArray(res)) return res.map(r => extractUrls(r)).flat();
-                            if (typeof res === 'object') {
-                                return Object.values(res).map(r => extractUrls(r)).flat();
-                            }
-                            return [];
+                            
+                            let urls: string[] = [];
+                            if (res.url) urls.push(res.url);
+                            if (res.video) urls.push(...extractUrls(res.video));
+                            if (res.audio) urls.push(...extractUrls(res.audio));
+                            if (res.image) urls.push(...extractUrls(res.image));
+                            if (res.mp4) urls.push(...extractUrls(res.mp4));
+                            if (res.mp3) urls.push(...extractUrls(res.mp3));
+                            if (res.thumbnail) urls.push(...extractUrls(res.thumbnail));
+                            return urls.flat();
                         };
                         
                         let allUrls = extractUrls(result);
@@ -3672,7 +3713,7 @@ await ctx.reply("❌ Download dibatalkan.", { reply_markup: returnMarkup });
                         // Filter by extension roughly
                         let targetUrls = allUrls.filter(u => {
                             const lu = u.toLowerCase();
-                            if ((isAudio || isVoiceNote) && (lu.includes('.mp3') || lu.includes('audio') || result?.mp3 === u || (result?.audio && JSON.stringify(result.audio).includes(u)))) return true;
+                            if (isAudio && (lu.includes('.mp3') || lu.includes('audio') || result?.mp3 === u || (result?.audio && JSON.stringify(result.audio).includes(u)))) return true;
                             if (isVideo && (lu.includes('.mp4') || lu.includes('video') || result?.mp4 === u || (result?.video && JSON.stringify(result.video).includes(u)))) return true;
                             if (isImage && (lu.includes('.jpg') || lu.includes('.jpeg') || lu.includes('.png') || lu.includes('image') || result?.thumbnail === u)) return true;
                             return false;
@@ -3681,12 +3722,12 @@ await ctx.reply("❌ Download dibatalkan.", { reply_markup: returnMarkup });
                         if (targetUrls.length === 0) {
                             // fallback, if nothing specific matched, maybe just use the first few if we can guess
                             if (isVideo && result?.mp4) targetUrls = [result.mp4];
-                            else if ((isAudio || isVoiceNote) && result?.mp3) targetUrls = [result.mp3];
+                            else if (isAudio && result?.mp3) targetUrls = [result.mp3];
                             else if (isImage && result?.thumbnail) targetUrls = [result.thumbnail];
                             else {
                                 // If still nothing, just give whatever we got based on what the API usually returns
                                 if (isVideo) targetUrls = allUrls.filter(u => !u.includes('.jpg') && !u.includes('.mp3'));
-                                if (isAudio || isVoiceNote) targetUrls = allUrls.filter(u => !u.includes('.jpg') && !u.includes('.mp4'));
+                                if (isAudio) targetUrls = allUrls.filter(u => !u.includes('.jpg') && !u.includes('.mp4'));
                             }
                         }
                         
@@ -3747,24 +3788,6 @@ await ctx.reply("❌ Download dibatalkan.", { reply_markup: returnMarkup });
                                                 break;
                                             } catch (e) {
                                                 await ctx.replyWithAudio({ url: mediaUrl }, { caption: "✅ Audio berhasil di-download!" });
-                                                break;
-                                            }
-                                        }
-                                        else if (isVoiceNote) {
-                                            if (mediaUrl.includes('.jpeg') || mediaUrl.includes('.jpg') || mediaUrl.includes('.png')) continue;
-                                            await ctx.replyWithChatAction("upload_voice").catch(() => {});
-                                            try {
-                                                const res = await fetch(mediaUrl);
-                                                const arrayBuffer = await res.arrayBuffer();
-                                                const buffer = Buffer.from(arrayBuffer);
-                                                if (buffer.length > 49.5 * 1024 * 1024) {
-                                                    await ctx.reply("❌ Maaf Kak, ukuran voice note terlalu besar.");
-                                                    break;
-                                                }
-                                                await ctx.replyWithVoice({ source: buffer }, { caption: "✅ Voice Note berhasil di-download!" });
-                                                break;
-                                            } catch (e) {
-                                                await ctx.replyWithVoice({ url: mediaUrl }, { caption: "✅ Voice Note berhasil di-download!" });
                                                 break;
                                             }
                                         } else {
