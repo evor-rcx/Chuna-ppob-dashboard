@@ -2071,7 +2071,7 @@ Daya         : ${parts.slice(1).join(' / ')}`;
                     }
                     msg = `🎉 Horee! Sukses, Kak!
 
-Pesanan sudah diproses otomatis oleh E4 Store. ${product.product_name} sudah masuk ke akun ${member.name || targetDisplay} dan siap digunakan! 💪🔥${stateData.kembalianText ? "\n" + stateData.kembalianText : ""}
+Pesanan sudah diproses otomatis oleh E4 Store. ${product.product_name} sudah masuk ke akun ${member.name || targetDisplay} dan siap digunakan! 💪🔥
 
 Terima kasih telah berbelanja di E4 Store! 🐾
 
@@ -2327,7 +2327,7 @@ Daya         : ${parts.slice(1).join(' / ')}`;
                     }
                     msg = `🎉 Horee! Sukses, Kak!
 
-Pesanan sudah diproses otomatis oleh E4 Store. ${stateData.product.product_name} sudah masuk ke akun ${checkResult?.customer_name || customerNo} dan siap digunakan! 💪🔥${stateData.kembalianText ? "\n" + stateData.kembalianText : ""}
+Pesanan sudah diproses otomatis oleh E4 Store. ${stateData.product.product_name} sudah masuk ke akun ${checkResult?.customer_name || customerNo} dan siap digunakan! 💪🔥
 
 Terima kasih telah berbelanja di E4 Store! 🐾
 
@@ -3769,10 +3769,6 @@ Tagihan kamu udah muncul nih, jangan sampai kelewat ya~
                     userStates[userId] = { step: 'ASK_PIN_PREPAID', data: { ...state.data, method, sku: state.data.skuToPay } };
                     return ctx.reply("🔐 *Masukan PIN Keamanan Transaksi*Silakan ketik PIN Anda untuk melanjutkan transaksi ini.", { parse_mode: 'Markdown' });
                 }
-                if (method === 'cash') {
-                    userStates[userId] = { step: 'ASK_CASH_AMOUNT_PREPAID', data: { ...state.data, method, sku: state.data.skuToPay } };
-                    return ctx.reply("💵 Silakan masukkan nominal uang tunai yang diberikan (misal: 50000):", { reply_markup: { keyboard: [[{ text: "❌ Batal" }]], resize_keyboard: true } });
-                }
                 await processPrepaidPayment(ctx, state.data.skuToPay, method, state.data, state.data.memberId || `MBR-${ctx.from?.id}`);
                 break;
               }
@@ -3923,10 +3919,6 @@ Status pesanan kakak sekarang: ⚠️ BELUM LUNAS`;
                 if (!isOwner) {
                     userStates[userId] = { step: 'ASK_PIN_PASCA', data: { ...state.data, method, ref_id: state.data.ref_id } };
                     return ctx.reply("🔐 *Masukan PIN Keamanan Transaksi*Silakan ketik PIN Anda untuk melanjutkan transaksi ini.", { parse_mode: 'Markdown' });
-                }
-                if (method === 'cash') {
-                    userStates[userId] = { step: 'ASK_CASH_AMOUNT_PASCA', data: { ...state.data, method, ref_id: state.data.ref_id } };
-                    return ctx.reply("💵 Silakan masukkan nominal uang tunai yang diberikan (misal: 50000):", { reply_markup: { keyboard: [[{ text: "❌ Batal" }]], resize_keyboard: true } });
                 }
                 await processPascaPayment(ctx, state.data.ref_id, method, state.data, state.data.memberId || `MBR-${ctx.from?.id}`);
                 break;
