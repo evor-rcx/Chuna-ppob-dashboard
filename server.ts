@@ -2530,7 +2530,7 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
 
         if (db.owners.includes(userId)) {
            return ctx.reply(
-             "👑 DASHBOARD KASIR E4 STORESelamat datang bosku! Mau kelola apa hari ini?",
+             `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   👑  E4 STORE  👑\n   OFFICIAL MANAGEMENT PANEL\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nSelamat datang, Administrator.\nSemua fitur resmi telah siap dioperasikan.\n\nMau kelola apa hari ini?`,
              {
                reply_markup: {
                  keyboard: [
@@ -2551,7 +2551,7 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
 
         if (member) {
           await ctx.reply(
-            "✅ Welcome back kak di E4 Store Official! 🥰Mau transaksi apa hari ini kak bareng Chuna?",
+            `━━━━━━━━━━━━━━━━━━━━━\n   👥️ E4 STORE OFFICIAL\n━━━━━━━━━━━━━━━━━━━━━\n\n✅ Welcome back, kak ${member.name || "Kisah"}! 🥰\nSenang banget lihat kamu lagi!\n\nMau transaksi apa hari ini kak bareng Chuna?\nYuk pilih produk favoritmu! 🛍️`,
             {
               reply_markup: {
                 keyboard: [
@@ -2739,7 +2739,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
       
       bot.hears("🔙 Kembali ke Menu Owner", async (ctx) => {
           delete userStates[ctx.from.id];
-          await ctx.reply("👑 DASHBOARD KASIR E4 STORESelamat datang bosku! Mau kelola apa hari ini?", {
+          await ctx.reply(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   👑  E4 STORE  👑\n   OFFICIAL MANAGEMENT PANEL\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nSelamat datang, Administrator.\nSemua fitur resmi telah siap dioperasikan.\n\nMau kelola apa hari ini?`, {
               reply_markup: {
                   keyboard: [
                       [{ text: "📒 Cek Utang Member" }],
