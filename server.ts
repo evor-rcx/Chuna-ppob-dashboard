@@ -890,10 +890,10 @@ const app = express();
                 const memberIndex = members.findIndex((m) => m.id === tx.memberId);
                 let member = null;
                 let nama = "-";
+                let isOwnerSelf = false;
                 if (memberIndex >= 0) {
                     member = members[memberIndex];
                     nama = member.name || "-";
-                    let isOwnerSelf = false;
                     if (Array.isArray(member.telegram)) {
                         isOwnerSelf = member.telegram.some((tid: any) => db.owners.includes(parseInt(tid)));
                     } else if (typeof member.telegram === 'string' && member.telegram.length > 0) {
@@ -1922,6 +1922,124 @@ async function parseAnnouncementText(text: string) {
     return prefix + parsed;
 }
 
+
+async function getOmniKodeBayar(nohp: string, productName: string): Promise<string | null> {
+    try {
+        const params = new URLSearchParams();
+        params.append("nohp", nohp);
+        params.append("menu_id", "");
+        params.append("ci_csrf_token", "");
+
+        const res = await fetch("https://kodebayar.web.id/home/search_page?provider=TELKOMSEL", {
+            method: "POST",
+            body: params
+        });
+        const json = await res.json();
+        if (!json.isi) return null;
+        const html = json.isi;
+        
+        let targetName = productName.toLowerCase().replace(/[^a-z0-9]/g, '');
+        let regex = /<h6[^>]*>(.*?)<\/h6>[\s\S]*?<div[^>]*>[\s\S]*?<b[^>]*>(.*?)<\/b>[\s\S]*?<button[^>]*onclick="pay\('([^']+)'/gi;
+        
+        let match;
+        let bestMatch = null;
+        let highestScore = 0;
+        
+        while ((match = regex.exec(html)) !== null) {
+            const currentName = match[1].toLowerCase().replace(/[^a-z0-9]/g, '');
+            const currentPrice = match[2];
+            const currentCode = match[3];
+            
+            let score = 0;
+            if (currentName === targetName) score += 10;
+            if (targetName.includes(currentName) || currentName.includes(targetName)) score += 5;
+            
+            if (score > highestScore) {
+                highestScore = score;
+                bestMatch = currentCode;
+            }
+        }
+        
+        return bestMatch;
+    } catch (e) {
+        console.error("Omni scrape error", e);
+        return null;
+    }
+}
+async function getByuKodeBayar(nohp: string, productName: string): Promise<string | null> {
+    try {
+        const params = new URLSearchParams();
+        params.append("nohp", nohp);
+        params.append("menu_id", "");
+        params.append("ci_csrf_token", "");
+
+        const res = await fetch("https://kodebayar.web.id/home/search_page?provider=BYU", {
+            method: "POST",
+            body: params
+        });
+        const data = await res.json();
+        if (!data.is_valid_number) return null;
+
+        const html = data.isi;
+        const regex = /<h4 class="modal-title">([^<]+)<\/h4>[\s\S]*?kodebeli_([^"]+)"[\s\S]*?onclick="order\('([^']+)',\'([^']+)\',(\d+),\'([^']+)\'\)"/g;
+        let match;
+        const packages = [];
+        while ((match = regex.exec(html)) !== null) {
+            packages.push({
+                name: match[1].trim(),
+                kodebeli_id: match[2],
+                arg1: match[3],
+                arg2: match[4],
+                arg3: match[5],
+                arg4: match[6]
+            });
+        }
+        
+        let bestMatch = null;
+        let pNameClean = productName.toLowerCase().replace(/[^a-z0-9]/g, '');
+        for (const pkg of packages) {
+            let pkgNameClean = pkg.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (pkgNameClean.includes(pNameClean) || pNameClean.includes(pkgNameClean)) {
+                bestMatch = pkg;
+                break;
+            }
+        }
+        
+        if (!bestMatch) {
+            for (const pkg of packages) {
+                if (pkg.name.toLowerCase().includes("6 gb") && pkg.name.toLowerCase().includes("7 hari")) {
+                    bestMatch = pkg;
+                    break;
+                }
+            }
+        }
+        
+        if (bestMatch) {
+            const token = data.token;
+            const kodebeliMatch = html.match(new RegExp(`id="kodebeli_${bestMatch.arg2}"[^>]*value="([^"]+)"`));
+            const kodebeliValue = kodebeliMatch ? kodebeliMatch[1] : bestMatch.arg1;
+            
+            const orderParams = new URLSearchParams();
+            orderParams.append("nohp", nohp);
+            orderParams.append("kode", kodebeliValue);
+            orderParams.append("id", bestMatch.arg3);
+            orderParams.append("menu_id", bestMatch.arg4);
+            orderParams.append("ci_csrf_token", token);
+            
+            const res2 = await fetch("https://kodebayar.web.id/home/inquiry_page?provider=BYU", {
+                method: "POST",
+                body: orderParams
+            });
+            const orderData = await res2.json();
+            return orderData.kode_bayar || null;
+        }
+        
+        return null;
+    } catch (e) {
+        console.error("By.U scrape error", e);
+        return null;
+    }
+}
 async function getDigiflazzProducts(type: "prepaid" | "pasca") {
   if (!digiflazzUsername || !digiflazzApiKey) {
     throw new Error("Digiflazz belum dikonfigurasi");
@@ -2149,9 +2267,9 @@ Kalau mau tanya-tanya atau order lagi, langsung chat Chuna di Bot Telegram:
 
 Chuna tunggu chat dari Kakak! 😊💖`;
                     const appUrl = "http://localhost:3000";
-                    let notaBuffer = null;
                     if (pay_ref_id) notaBuffer = await generateCanvasReceipt("nota", { id: pay_ref_id, memberId: member.id, type: "prepaid", product: product.product_name, sku: product.buyer_sku_code, target: targetDisplay, price: total, modal: digiflazzPrice, cuan: cuan > 0 ? cuan : 0, status: status, method: method, sn: payJson.data?.sn || "-", date: new Date().toISOString() });
                     let tgMsg;
+                    let notaBuffer: any = null;
                     if (notaBuffer) {
                         tgMsg = await ctx.replyWithPhoto({ source: notaBuffer }, { caption: msg, parse_mode: 'Markdown' });
                     } else {
@@ -2405,9 +2523,9 @@ Kalau mau tanya-tanya atau order lagi, langsung chat Chuna di Bot Telegram:
 
 Chuna tunggu chat dari Kakak! 😊💖`;
                     const appUrl = "http://localhost:3000";
-                    let notaBuffer = null;
                     if (pay_ref_id) notaBuffer = await generateCanvasReceipt("nota", { id: pay_ref_id, memberId: member.id, type: "pasca", product: stateData.product.product_name, sku: stateData.product.buyer_sku_code, target: customerNo, price: total, modal: digiflazzPrice, cuan: cuan > 0 ? cuan : 0, tagihan: stateData.checkResult?.selling_price || 0, admin_pel: stateData.adminFee || 0, status: status, method: method, sn: payJson.data?.sn || "-", date: new Date().toISOString() });
                     let tgMsg;
+                    let notaBuffer: any = null;
                     if (notaBuffer) {
                         tgMsg = await ctx.replyWithPhoto({ source: notaBuffer }, { caption: msg, parse_mode: 'Markdown' });
                     } else {
@@ -3553,6 +3671,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                 let skuToPay = product.buyer_sku_code;
                 
                 state.data.targetNo = targetNo; // Save target number in state
+
                 
                 // --- Cek Nickname Game Automatis ---
                 if (product.brand && (product.brand.toUpperCase() === "FREE FIRE" || product.brand.toUpperCase() === "MOBILE LEGENDS")) {
@@ -3665,8 +3784,38 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                 }
                 const product = state.data.product;
                 await ctx.reply(`⏳ Sedang mengecek tagihan untuk nomor ${customerNo}...`);
+
+                let finalCustomerNo = customerNo;
+                // --- BY.U Auto Kode Bayar ---
+                if (product.brand && (product.brand.toLowerCase() === "by.u" || product.brand.toLowerCase() === "byu")) {
+                    if (customerNo.startsWith('0') || customerNo.startsWith('62') || customerNo.startsWith('+62')) {
+                        await ctx.reply("⏳ Sedang menggenerate Kode Bayar dari By.U secara otomatis...");
+                        const kodeBayar = await getByuKodeBayar(customerNo, product.product_name);
+                        if (kodeBayar) {
+                            finalCustomerNo = kodeBayar; // Override with the real Kode Bayar
+                            await ctx.reply("✅ Berhasil mendapatkan Kode Bayar By.U otomatis: *" + kodeBayar + "*\n\nMenggunakan kode bayar ini untuk pengecekan.", { parse_mode: "Markdown" });
+                        } else {
+                            await ctx.reply("⚠️ Gagal mendapatkan Kode Bayar otomatis dari By.U untuk paket ini. Silakan ulangi dan masukkan Kode Bayar secara manual jika web sedang gangguan.");
+                            return;
+                        }
+                    }
+                }
+                // --- Telkomsel Omni Auto Kode Bayar ---
+                else if (product.brand && (product.brand.toLowerCase().includes("omni") || product.brand.toLowerCase().includes("telkomsel omni"))) {
+                    if (customerNo.startsWith('0') || customerNo.startsWith('62') || customerNo.startsWith('+62')) {
+                        await ctx.reply("⏳ Sedang menggenerate Kode Bayar Telkomsel Omni secara otomatis...");
+                        const kodeBayar = await getOmniKodeBayar(customerNo, product.product_name);
+                        if (kodeBayar) {
+                            finalCustomerNo = kodeBayar;
+                            await ctx.reply("✅ Berhasil mendapatkan Kode Bayar Omni otomatis: *" + kodeBayar + "*\n\nMenggunakan kode bayar ini untuk pengecekan.", { parse_mode: "Markdown" });
+                        } else {
+                            await ctx.reply("⚠️ Gagal mendapatkan Kode Bayar otomatis dari Telkomsel Omni untuk paket ini. Silakan ulangi dan masukkan Kode Bayar secara manual jika web sedang gangguan.");
+                            return;
+                        }
+                    }
+                }
                 try {
-                    const result = await checkPascaBill(product.buyer_sku_code, customerNo);
+                    const result = await checkPascaBill(product.buyer_sku_code, finalCustomerNo);
                     if (result.status === 'Gagal') {
                          await ctx.reply(`❌ Pengecekan Gagal:${result.message}`);
                     } else if (result.status === 'Sukses') {
@@ -3739,7 +3888,7 @@ Tagihan kamu udah muncul nih, jangan sampai kelewat ya~
                              keyboard.push([{ text: "❌ Batal" }]);
                          }
 
-                         userStates[userId] = { step: 'WAIT_PAYMENT_PASCA', data: { ...state.data, ref_id: result.ref_id, totalBayar: total, checkResult: result, targetNo: customerNo } };
+                         userStates[userId] = { step: 'WAIT_PAYMENT_PASCA', data: { ...state.data, ref_id: result.ref_id, totalBayar: total, checkResult: result, targetNo: finalCustomerNo } };
 
                          const buffer = await generateCanvasReceipt("tagihan", billData);
                          if (buffer) {
@@ -4165,68 +4314,56 @@ Status pesanan kakak sekarang: ⚠️ BELUM LUNAS`;
                     
                     if (types.includes(text)) {
                         let filtered = brandProducts.filter((p: any) => p.type === text);
-                        filtered.sort((a: any, b: any) => a.price - b.price); filtered = filtered.slice(0, 100);
-                        
-                        const keyboard = [];
-                        for (let i = 0; i < filtered.length; i += 2) {
-                            const row = [{ text: getProductButtonText(filtered[i]) }];
-                            if (filtered[i+1]) row.push({ text: getProductButtonText(filtered[i+1]) });
-                            keyboard.push(row);
-                        }
-                        keyboard.push([{ text: "🔙 Kembali" }]);
-                        
-                        await ctx.reply(`📋 *Produk ${state.data.brand} - ${text}*Silakan pilih produk yang ingin dibeli:`, { 
-                            parse_mode: 'Markdown',
-                            reply_markup: { keyboard: keyboard, resize_keyboard: true }
-                        });
-                        handled = true;
-                    }
-                }
-            } catch(e) { console.error("Error:", e.message); }
-            
-            // Check prepaid categories
-            try {
-                const prepaid = await getDigiflazzProducts("prepaid");
-                const prepaidCats = [...new Set(prepaid.map((p: any) => p.category))].filter(Boolean);
-                if (prepaidCats.includes(text)) {
-                    const filtered = prepaid.filter((p: any) => p.category === text);
-                    const brands = [...new Set(filtered.map((p: any) => p.brand))].sort();
-                    
-                    if (brands.length === 1 && brands[0] === text) {
-                        // Skip category step, go straight to products
-                        const productsForBrand = prepaid.filter((p: any) => p.brand === text).slice(0, 100);
-                        const keyboard = [];
-                        for (let i = 0; i < productsForBrand.length; i += 2) {
-                            const row = [{ text: getProductButtonText(productsForBrand[i]) }];
-                            if (productsForBrand[i+1]) row.push({ text: getProductButtonText(productsForBrand[i+1]) });
-                            keyboard.push(row);
-                        }
-                        keyboard.push([{ text: "🔙 Kembali" }]);
-                        
-                        await ctx.reply(`📋 *Produk ${text}*Silakan pilih produk yang ingin dibeli:`, { 
-                            parse_mode: 'Markdown',
-                            reply_markup: { keyboard: keyboard, resize_keyboard: true }
-                        });
-                        handled = true;
-                    } else {
-                        const keyboard = [];
-                        for (let i = 0; i < brands.length; i += 2) {
-                            const row = [{ text: brands[i] }];
-                            if (brands[i+1]) row.push({ text: brands[i+1] });
-                            keyboard.push(row);
-                        }
-                        keyboard.push([{ text: "🔙 Kembali" }]);
-
-                        const prevMemberId = userStates[userId]?.data?.memberId;
-                        userStates[userId] = { step: 'PREPAID_SELECT_BRAND', data: { category: text, memberId: prevMemberId } };
-                        await ctx.reply(`📋 *Kategori ${text} (Prabayar)*\nSilakan pilih brand di bawah ini:`, { 
-                            parse_mode: 'Markdown',
-                            reply_markup: {
-                                keyboard: keyboard,
-                                resize_keyboard: true
+                    // (This was PREPAID_SELECT_} else {
+                        filtered.sort((a: any, b: any) => a.price - b.price);
+                        filtered = filtered.slice(0, 100);
+                        if (filtered.length === 1) {
+                            const matchedProduct = filtered[0];
+                            const prevMemberId = userStates[userId]?.data?.memberId;
+                            
+                            // Calculate price
+                            const memberId = prevMemberId || `MBR-${ctx.from?.id}`;
+                            const member = members.find(m => m.id === memberId || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
+                            const memberType = member?.type || 'Biasa';
+                            const isOwnerCtx = db.owners.includes(ctx.from?.id);
+                            const feeData = getProductFee(matchedProduct.buyer_sku_code);
+                            let adminFee = isOwnerCtx ? feeData.owner : (memberType === 'VIP' ? feeData.vip : feeData.biasa);
+                            let total = matchedProduct.price + adminFee;
+                            if (isOwnerCtx && feeData.owner_fixed !== undefined) {
+                                total = feeData.owner_fixed;
+                                adminFee = total - matchedProduct.price;
                             }
-                        });
-                        handled = true;
+                            if (!matchedProduct.buyer_product_status || !matchedProduct.seller_product_status) {
+                                return ctx.reply("❌ Mohon maaf kak, produk " + matchedProduct.product_name + " sedang gangguan/cut off dari pusat.");
+                            }
+                            
+                            userStates[userId] = { 
+                                step: 'PREPAID_INPUT_NUMBER', 
+                                data: { product: matchedProduct, memberId: prevMemberId, totalBayar: total, adminFee } 
+                            };
+                            
+                            await ctx.reply(`🛒 *Detail Pembelian*\n\nProduk       : ${matchedProduct.product_name}\nBrand        : ${matchedProduct.brand}\n💎 Total Bayar : Rp ${total.toLocaleString('id-ID')}\n\n✏️ Silakan masukkan nomor tujuan (HP/ID) untuk melanjutkan pembelian.`, {
+                                parse_mode: 'Markdown',
+                                reply_markup: {
+                                    keyboard: [[{ text: "❌ Batal" }]],
+                                    resize_keyboard: true
+                                }
+                            });
+                            handled = true;
+                        } else {
+                            const keyboard = [];
+                            for (let i = 0; i < filtered.length; i += 2) {
+                                const row = [{ text: getProductButtonText(filtered[i]) }];
+                                if (filtered[i+1]) row.push({ text: getProductButtonText(filtered[i+1]) });
+                                keyboard.push(row);
+                            }
+                            keyboard.push([{ text: "🔙 Kembali" }]);
+                            await ctx.reply(`📋 *Produk ${text}*\nSilakan pilih produk yang ingin dibeli:`, { 
+                                parse_mode: 'Markdown',
+                                reply_markup: { keyboard: keyboard, resize_keyboard: true }
+                            });
+                            handled = true;
+                        }
                     }
                 }
             } catch (e) { console.error("Error in prepaidBrands check:", e.message); }
@@ -4266,6 +4403,8 @@ Status pesanan kakak sekarang: ⚠️ BELUM LUNAS`;
                         }
                         keyboard.push([{ text: "🔙 Kembali" }]);
 
+                        const prevMemberId = userStates[userId]?.data?.memberId;
+                        userStates[userId] = { step: 'PASCA_SELECT_BRAND', data: { category: text, memberId: prevMemberId } };
                         await ctx.reply(`🧾 *Kategori ${text} (Pascabayar)*Silakan pilih layanan di bawah ini:`, { 
                             parse_mode: 'Markdown',
                             reply_markup: {
@@ -4280,11 +4419,79 @@ Status pesanan kakak sekarang: ⚠️ BELUM LUNAS`;
 
             if (handled) return;
             
+                        // Check prepaid categories
+            try {
+                const prepaid = await getDigiflazzProducts("prepaid");
+                const prepaidCats = [...new Set(prepaid.map((p: any) => p.category))].filter(Boolean);
+                if (prepaidCats.includes(text)) {
+                    const filtered = prepaid.filter((p: any) => p.category === text);
+                    const brands = [...new Set(filtered.map((p: any) => p.brand))].sort();
+                    
+                    if (brands.length === 1 && brands[0] === text) {
+                        // Skip
+                    } else {
+                        const keyboard = [];
+                        for (let i = 0; i < brands.length; i += 2) {
+                            const row = [{ text: brands[i] }];
+                            if (brands[i+1]) row.push({ text: brands[i+1] });
+                            keyboard.push(row);
+                        }
+                        keyboard.push([{ text: "🔙 Kembali" }]);
+                        const prevMemberId = userStates[userId]?.data?.memberId;
+                        userStates[userId] = { step: 'PREPAID_SELECT_BRAND', data: { category: text, memberId: prevMemberId } };
+                        await ctx.reply(`🛒 *Kategori ${text}*\nSilakan pilih brand di bawah ini:`, { 
+                            parse_mode: 'Markdown',
+                            reply_markup: { keyboard: keyboard, resize_keyboard: true }
+                        });
+                        handled = true;
+                    }
+                }
+            } catch (e) { console.error("Error in prepaidCats check:", e.message); }
+            if (handled) return;
+            
             // Check prepaid brands
             try {
                 const prepaid = await getDigiflazzProducts("prepaid");
+                // Also check if text is a prepaid product name!
+                if (!handled) {
+                    const cleanText = cleanProductName(text);
+                    const matchedProduct = prepaid.find((p: any) => p.product_name === cleanText);
+                    if (matchedProduct) {
+                        const prevMemberId = userStates[userId]?.data?.memberId;
+                        
+                        // Calculate price
+                        const memberId = prevMemberId || `MBR-${ctx.from?.id}`;
+                        const member = members.find(m => m.id === memberId || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
+                        const memberType = member?.type || 'Biasa';
+                        const isOwnerCtx = db.owners.includes(ctx.from?.id);
+                        const feeData = getProductFee(matchedProduct.buyer_sku_code);
+                        let adminFee = isOwnerCtx ? feeData.owner : (memberType === 'VIP' ? feeData.vip : feeData.biasa);
+                        let total = matchedProduct.price + adminFee;
+                        if (isOwnerCtx && feeData.owner_fixed !== undefined) {
+                            total = feeData.owner_fixed;
+                            adminFee = total - matchedProduct.price;
+                        }
+                        if (!matchedProduct.buyer_product_status || !matchedProduct.seller_product_status) {
+                            return ctx.reply("❌ Mohon maaf kak, produk " + matchedProduct.product_name + " sedang gangguan/cut off dari pusat.");
+                        }
+                        
+                        userStates[userId] = {
+                            step: 'PREPAID_INPUT_NUMBER',
+                            data: { product: matchedProduct, memberId: prevMemberId, totalBayar: total, adminFee }
+                        };
+                        
+                        await ctx.reply(`🛒 *Detail Pembelian*\n\nProduk       : ${matchedProduct.product_name}\nBrand        : ${matchedProduct.brand}\n💎 Total Bayar : Rp ${total.toLocaleString('id-ID')}\n\n✏️ Silakan masukkan nomor tujuan (HP/ID) untuk melanjutkan pembelian.`, {
+                            parse_mode: 'Markdown',
+                            reply_markup: {
+                                keyboard: [[{ text: "❌ Batal" }]],
+                                resize_keyboard: true
+                            }
+                        });
+                        handled = true;
+                    }
+                }
                 const prepaidBrands = [...new Set(prepaid.map((p: any) => p.brand))].filter(Boolean);
-                if (prepaidBrands.includes(text)) {
+                if (prepaidBrands.includes(text) && (!state || !state.step.startsWith("PASCA_"))) {
                     let filtered = prepaid.filter((p: any) => p.brand === text);
                     
                     const stateCategory = (state && state.step === 'PREPAID_SELECT_BRAND') ? state.data.category : null;
@@ -4348,44 +4555,7 @@ Status pesanan kakak sekarang: ⚠️ BELUM LUNAS`;
                     }
                 }
                 
-                // Also check if text is a prepaid product name!
-                if (!handled) {
-                    const cleanText = cleanProductName(text);
-                    const matchedProduct = prepaid.find((p: any) => p.product_name === cleanText);
-                    if (matchedProduct) {
-                        const prevMemberId = userStates[userId]?.data?.memberId;
-                        
-                        // Calculate price
-                        const memberId = prevMemberId || `MBR-${ctx.from?.id}`;
-                        const member = members.find(m => m.id === memberId || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
-                        const memberType = member?.type || 'Biasa';
-                        const isOwnerCtx = db.owners.includes(ctx.from?.id);
-                        const feeData = getProductFee(matchedProduct.buyer_sku_code);
-                        let adminFee = isOwnerCtx ? feeData.owner : (memberType === 'VIP' ? feeData.vip : feeData.biasa);
-                        let total = matchedProduct.price + adminFee;
-                        if (isOwnerCtx && feeData.owner_fixed !== undefined) {
-                            total = feeData.owner_fixed;
-                            adminFee = total - matchedProduct.price;
-                        }
-                        if (!matchedProduct.buyer_product_status || !matchedProduct.seller_product_status) {
-                            return ctx.reply("❌ Mohon maaf kak, produk " + matchedProduct.product_name + " sedang gangguan/cut off dari pusat.");
-                        }
-                        
-                        userStates[userId] = {
-                            step: 'PREPAID_INPUT_NUMBER',
-                            data: { product: matchedProduct, memberId: prevMemberId, totalBayar: total, adminFee }
-                        };
-                        
-                        await ctx.reply(`🛒 *Detail Pembelian*\n\nProduk       : ${matchedProduct.product_name}\nBrand        : ${matchedProduct.brand}\n💎 Total Bayar : Rp ${total.toLocaleString('id-ID')}\n\n✏️ Silakan masukkan nomor tujuan (HP/ID) untuk melanjutkan pembelian.`, {
-                            parse_mode: 'Markdown',
-                            reply_markup: {
-                                keyboard: [[{ text: "❌ Batal" }]],
-                                resize_keyboard: true
-                            }
-                        });
-                        handled = true;
-                    }
-                }
+                
             } catch (e) { console.error("Error in prepaidBrands check:", e.message); }
 
             if (handled) return;
@@ -4393,29 +4563,7 @@ Status pesanan kakak sekarang: ⚠️ BELUM LUNAS`;
             // Check pasca brands
             try {
                 const pasca = await getDigiflazzProducts("pasca");
-                const pascaBrands = [...new Set(pasca.map((p: any) => p.brand))].filter(Boolean);
-                if (pascaBrands.includes(text)) {
-                    let filtered = pasca.filter((p: any) => p.brand === text); filtered = filtered.slice(0, 100);
-                    
-                    const keyboard = [];
-                    for (let i = 0; i < filtered.length; i += 2) {
-                        const row = [{ text: getProductButtonText(filtered[i]) }];
-                        if (filtered[i+1]) row.push({ text: getProductButtonText(filtered[i+1]) });
-                        keyboard.push(row);
-                    }
-                    keyboard.push([{ text: "🔙 Kembali" }]);
-
-                    await ctx.reply(`🧾 *Layanan ${text}*Silakan pilih layanan untuk melihat detail:`, { 
-                        parse_mode: 'Markdown',
-                        reply_markup: {
-                            keyboard: keyboard,
-                            resize_keyboard: true
-                        }
-                    });
-                    handled = true;
-                }
-                
-                // Also check if text is a pasca product name!
+                                // Also check if text is a pasca product name!
                 if (!handled) {
                     const cleanText = cleanProductName(text);
                     const matchedProduct = pasca.find((p: any) => p.product_name === cleanText);
@@ -4428,7 +4576,7 @@ Status pesanan kakak sekarang: ⚠️ BELUM LUNAS`;
                             step: 'PASCA_INPUT_NUMBER', 
                             data: { product: matchedProduct, memberId: prevMemberId } 
                         };
-                        await ctx.reply(`🛒 *Detail Layanan*Nama: ${matchedProduct.product_name}Brand: ${matchedProduct.brand}Kategori: ${matchedProduct.category}✏️ *Silakan masukkan nomor tujuan/pelanggan untuk mengecek tagihan:*`, {
+                        await ctx.reply(`🛒 *Detail Layanan*\nNama: ${matchedProduct.product_name}\nBrand: ${matchedProduct.brand}\nKategori: ${matchedProduct.category}\n\n${matchedProduct.brand.toLowerCase().includes("by.u") || matchedProduct.brand.toLowerCase().includes("byu") ? "✏️ *Silakan masukkan Nomor HP by.U (atau Kode Pembayaran langsung):*\n\n_(Sistem akan mencarikan Kode Pembayaran otomatis)_" : (matchedProduct.brand.toLowerCase().includes("omni") || matchedProduct.brand.toLowerCase().includes("telkomsel omni") ? "✏️ *Silakan masukkan KODE PEMBAYARAN Telkomsel Omni (BUKAN Nomor HP):*\n\n_(Anda dapat menggenerate kode pembayaran di web: https://www.telkomsel.com/shops/channel/o2o)_" : "✏️ *Silakan masukkan nomor tujuan/pelanggan untuk mengecek tagihan:*")}`, {
                             parse_mode: 'Markdown',
                             reply_markup: {
                                 keyboard: [[{ text: "❌ Batal" }]],
@@ -4438,6 +4586,48 @@ Status pesanan kakak sekarang: ⚠️ BELUM LUNAS`;
                         handled = true;
                     }
                 }
+                const pascaBrands = [...new Set(pasca.map((p: any) => p.brand))].filter(Boolean);
+                if (pascaBrands.includes(text)) {
+                    let filtered = pasca.filter((p: any) => p.brand === text); filtered = filtered.slice(0, 100);
+                    if (filtered.length === 1) {
+                        const matchedProduct = filtered[0];
+                        const prevMemberId = userStates[userId]?.data?.memberId;
+                        if (!matchedProduct.buyer_product_status || !matchedProduct.seller_product_status) {
+                            return ctx.reply("❌ Mohon maaf kak, produk " + matchedProduct.product_name + " sedang gangguan/cut off dari pusat.");
+                        }
+                        userStates[userId] = { 
+                            step: 'PASCA_INPUT_NUMBER', 
+                            data: { product: matchedProduct, memberId: prevMemberId } 
+                        };
+                        await ctx.reply(`🛒 *Detail Layanan*\nNama: ${matchedProduct.product_name}\nBrand: ${matchedProduct.brand}\nKategori: ${matchedProduct.category}\n\n${matchedProduct.brand.toLowerCase().includes("by.u") || matchedProduct.brand.toLowerCase().includes("byu") ? "✏️ *Silakan masukkan Nomor HP by.U (atau Kode Pembayaran langsung):*\n\n_(Sistem akan mencarikan Kode Pembayaran otomatis)_" : (matchedProduct.brand.toLowerCase().includes("omni") || matchedProduct.brand.toLowerCase().includes("telkomsel omni") ? "✏️ *Silakan masukkan KODE PEMBAYARAN Telkomsel Omni (BUKAN Nomor HP):*\n\n_(Anda dapat menggenerate kode pembayaran di web: https://www.telkomsel.com/shops/channel/o2o)_" : "✏️ *Silakan masukkan nomor tujuan/pelanggan untuk mengecek tagihan:*")}`, {
+                            parse_mode: 'Markdown',
+                            reply_markup: {
+                                keyboard: [[{ text: "❌ Batal" }]],
+                                resize_keyboard: true
+                            }
+                        });
+                        handled = true;
+                    } else {
+                        const keyboard = [];
+                        for (let i = 0; i < filtered.length; i += 2) {
+                            const row = [{ text: getProductButtonText(filtered[i]) }];
+                            if (filtered[i+1]) row.push({ text: getProductButtonText(filtered[i+1]) });
+                            keyboard.push(row);
+                        }
+                        keyboard.push([{ text: "🔙 Kembali" }]);
+
+                        await ctx.reply(`🧾 *Layanan ${text}*\nSilakan pilih layanan untuk melihat detail:`, { 
+                            parse_mode: 'Markdown',
+                            reply_markup: {
+                                keyboard: keyboard,
+                                resize_keyboard: true
+                            }
+                        });
+                        handled = true;
+                    }
+                }
+                
+                
             } catch (e) { console.error("Error in prepaidBrands check:", e.message); }
 
             if (handled) return;
