@@ -4058,6 +4058,25 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                         await ctx.reply(`⏳ Sedang mencari paket ${providerLabel} untuk nomor ${customerNo}...`);
                         const packages = await getKodeBayarPackages(customerNo, providerStr);
                         if (packages.length > 0) {
+                            const memberId = state.data.memberId || `MBR-${ctx.from?.id}`;
+                            const member = members.find((m: any) => m.id === memberId || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
+                            const memberType = member?.type || 'Biasa';
+                            const isOwnerCtx = db.owners.includes(ctx.from?.id);
+                            const feeData = getProductFee(product.buyer_sku_code);
+                            let adminFee = isOwnerCtx ? feeData.owner : (memberType === 'VIP' ? feeData.vip : feeData.biasa);
+                            
+                            packages.forEach((pkg: any) => {
+                                let cleanPrice = pkg.price.replace(/[^0-9]/g, '');
+                                if (cleanPrice) {
+                                    let priceNum = parseInt(cleanPrice, 10);
+                                    let total = priceNum + adminFee;
+                                    if (isOwnerCtx && feeData.owner_fixed !== undefined) {
+                                        total = feeData.owner_fixed;
+                                    }
+                                    pkg.price = `Rp. ${total.toLocaleString('id-ID')}`;
+                                }
+                            });
+                            
                             userStates[userId] = {
                                 step: 'KODEBAYAR_SELECT_PACKAGE',
                                 data: { product: product, memberId: state.data.memberId, kodebayarPackages: packages, kodebayarProvider: providerStr, customerNo: customerNo }
@@ -4090,6 +4109,25 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                         await ctx.reply("⏳ Sedang mencari paket Telkomsel Omni untuk nomor " + customerNo + "...");
                         const packages = await getOmniPackages(customerNo);
                         if (packages.length > 0) {
+                            const memberId = state.data.memberId || `MBR-${ctx.from?.id}`;
+                            const member = members.find((m: any) => m.id === memberId || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
+                            const memberType = member?.type || 'Biasa';
+                            const isOwnerCtx = db.owners.includes(ctx.from?.id);
+                            const feeData = getProductFee(product.buyer_sku_code);
+                            let adminFee = isOwnerCtx ? feeData.owner : (memberType === 'VIP' ? feeData.vip : feeData.biasa);
+                            
+                            packages.forEach((pkg: any) => {
+                                let cleanPrice = pkg.price.replace(/[^0-9]/g, '');
+                                if (cleanPrice) {
+                                    let priceNum = parseInt(cleanPrice, 10);
+                                    let total = priceNum + adminFee;
+                                    if (isOwnerCtx && feeData.owner_fixed !== undefined) {
+                                        total = feeData.owner_fixed;
+                                    }
+                                    pkg.price = `Rp. ${total.toLocaleString('id-ID')}`;
+                                }
+                            });
+                            
                             userStates[userId] = {
                                 step: 'OMNI_SELECT_PACKAGE',
                                 data: { product: product, memberId: state.data.memberId, omniPackages: packages, customerNo: customerNo }
