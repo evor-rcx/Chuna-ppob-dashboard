@@ -914,6 +914,7 @@ const app = express();
                 let msg = "";
                 let notaBuffer: Buffer | null = null;
                 if (status === 'Sukses') {
+                    
                     const sn = data.sn || "-";
                     const now = new Date();
                     const months = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
@@ -984,6 +985,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                         await new Promise(r => setTimeout(r, 1500));
                         let tgPhotoSent = false;
                         if (status === 'Sukses') {
+                    
                             const appUrl = "http://localhost:3000";
                             const buffer = await generateCanvasReceipt("nota", tx);
                             if (buffer) {
@@ -1009,6 +1011,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                         const tgId = Array.isArray(member.telegram) ? member.telegram[0] : member.telegram.replace(/\D/g, '');
                         let tgPhotoSent = false;
                         if (status === 'Sukses') {
+                    
                             const appUrl = "http://localhost:3000";
                             const buffer = await generateCanvasReceipt("nota", tx);
                             if (buffer) {
@@ -1047,6 +1050,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                                 }
                                 
                                 if (status === 'Sukses') {
+                    
                                     const buffer = await generateCanvasReceipt("nota", tx);
                                     if (buffer) {
                                         // Wait a little bit for realistic flow
@@ -1923,7 +1927,7 @@ async function parseAnnouncementText(text: string) {
 }
 
 
-async function getOmniKodeBayar(nohp: string, productName: string): Promise<string | null> {
+async function getOmniPackages(nohp: string): Promise<any[]> {
     try {
         const params = new URLSearchParams();
         params.append("nohp", nohp);
@@ -1935,108 +1939,130 @@ async function getOmniKodeBayar(nohp: string, productName: string): Promise<stri
             body: params
         });
         const json = await res.json();
-        if (!json.isi) return null;
+        if (!json.isi) return [];
         const html = json.isi;
         
-        let targetName = productName.toLowerCase().replace(/[^a-z0-9]/g, '');
-        let regex = /<h6[^>]*>(.*?)<\/h6>[\s\S]*?<div[^>]*>[\s\S]*?<b[^>]*>(.*?)<\/b>[\s\S]*?<button[^>]*onclick="pay\('([^']+)'/gi;
-        
-        let match;
-        let bestMatch = null;
-        let highestScore = 0;
-        
-        while ((match = regex.exec(html)) !== null) {
-            const currentName = match[1].toLowerCase().replace(/[^a-z0-9]/g, '');
-            const currentPrice = match[2];
-            const currentCode = match[3];
+        let packages = [];
+        const parts = html.split('<h4 class="modal-title">');
+        for (let i = 1; i < parts.length; i++) {
+            const part = parts[i];
+            const nameMatch = part.match(/^(.*?)<\/h4>/);
+            if (!nameMatch) continue;
+            let baseName = nameMatch[1].trim();
             
-            let score = 0;
-            if (currentName === targetName) score += 10;
-            if (targetName.includes(currentName) || currentName.includes(targetName)) score += 5;
+            let dataSize = "";
+            const badgeMatch = part.match(/<span class="[^"]*float-right[^"]*">([^<]*(?:GB|MB))<\/span>/i);
+            if (badgeMatch) dataSize = badgeMatch[1].trim();
             
-            if (score > highestScore) {
-                highestScore = score;
-                bestMatch = currentCode;
+            let masaAktif = "";
+            const masaMatch = part.match(/<span class="[^"]*float-right[^"]*">([^<]*(?:Hari|Days))<\/span>/i);
+            if (masaMatch) masaAktif = masaMatch[1].trim();
+            
+            let price = "";
+            const priceMatch = part.match(/Harga[\s\S]*?<span class="[^"]*float-right[^"]*">([^<]+)<\/span>/i);
+            if (priceMatch) price = priceMatch[1].trim();
+            
+            let code = "";
+            const orderMatch = part.match(/onclick="order\('([^']+)'/);
+            if (orderMatch) code = orderMatch[1].trim();
+            
+            if (baseName && code) {
+                let fullName = baseName;
+                if (dataSize) fullName += " " + dataSize;
+                if (masaAktif) fullName += " " + masaAktif;
+                packages.push({ name: fullName, price: price, code: code });
             }
         }
-        
-        return bestMatch;
+        return packages;
     } catch (e) {
         console.error("Omni scrape error", e);
-        return null;
+        return [];
     }
 }
-async function getByuKodeBayar(nohp: string, productName: string): Promise<string | null> {
+async function getKodeBayarPackages(nohp: string, provider: string): Promise<any[]> {
     try {
         const params = new URLSearchParams();
         params.append("nohp", nohp);
         params.append("menu_id", "");
         params.append("ci_csrf_token", "");
 
-        const res = await fetch("https://kodebayar.web.id/home/search_page?provider=BYU", {
+        const res = await fetch(`https://kodebayar.web.id/home/search_page?provider=${provider}`, {
             method: "POST",
             body: params
         });
         const data = await res.json();
-        if (!data.is_valid_number) return null;
-
+        if (!data.is_valid_number) return [];
         const html = data.isi;
-        const regex = /<h4 class="modal-title">([^<]+)<\/h4>[\s\S]*?kodebeli_([^"]+)"[\s\S]*?onclick="order\('([^']+)',\'([^']+)\',(\d+),\'([^']+)\'\)"/g;
-        let match;
-        const packages = [];
-        while ((match = regex.exec(html)) !== null) {
-            packages.push({
-                name: match[1].trim(),
-                kodebeli_id: match[2],
-                arg1: match[3],
-                arg2: match[4],
-                arg3: match[5],
-                arg4: match[6]
-            });
-        }
         
-        let bestMatch = null;
-        let pNameClean = productName.toLowerCase().replace(/[^a-z0-9]/g, '');
-        for (const pkg of packages) {
-            let pkgNameClean = pkg.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-            if (pkgNameClean.includes(pNameClean) || pNameClean.includes(pkgNameClean)) {
-                bestMatch = pkg;
-                break;
+        let packages = [];
+        const parts = html.split('<h4 class="modal-title">');
+        for (let i = 1; i < parts.length; i++) {
+            const part = parts[i];
+            
+            const nameMatch = part.match(/^(.*?)</);
+            if (!nameMatch) continue;
+            let baseName = nameMatch[1].trim();
+            
+            const descMatch = part.match(/<div class="card-body">\s*(.*?)\s*<\/div>/);
+            if (descMatch && !baseName) {
+                baseName = descMatch[1].trim();
+            }
+            
+            let price = "";
+            const priceMatch = part.match(/Harga[\s\S]*?<span class="[^"]*float-right[^"]*">([^<]+)<\/span>/i);
+            if (priceMatch) {
+                price = priceMatch[1].trim();
+            }
+            
+            const orderMatch = part.match(/onclick="order\('([^']+)',\s*'([^']+)',\s*(\d+),\s*'([^']+)'\)"/);
+            if (orderMatch && baseName) {
+                let pkg: any = { name: baseName, price: price };
+                pkg.arg1 = orderMatch[1];
+                pkg.arg2 = orderMatch[2];
+                pkg.arg3 = orderMatch[3];
+                pkg.arg4 = orderMatch[4];
+                
+                const kodebeliField = part.match(new RegExp(`id="kodebeli_${pkg.arg2}"[^>]*value="([^"]+)"`));
+                pkg.kodebeliValue = kodebeliField ? kodebeliField[1] : pkg.arg1;
+                pkg.token = data.token;
+                
+                packages.push(pkg);
             }
         }
         
-        if (!bestMatch) {
-            for (const pkg of packages) {
-                if (pkg.name.toLowerCase().includes("6 gb") && pkg.name.toLowerCase().includes("7 hari")) {
-                    bestMatch = pkg;
-                    break;
-                }
+        const unique = [];
+        const seen = new Set();
+        for (const p of packages) {
+            const key = p.name + p.price;
+            if (!seen.has(key)) {
+                seen.add(key);
+                unique.push(p);
             }
         }
-        
-        if (bestMatch) {
-            const token = data.token;
-            const kodebeliMatch = html.match(new RegExp(`id="kodebeli_${bestMatch.arg2}"[^>]*value="([^"]+)"`));
-            const kodebeliValue = kodebeliMatch ? kodebeliMatch[1] : bestMatch.arg1;
-            
-            const orderParams = new URLSearchParams();
-            orderParams.append("nohp", nohp);
-            orderParams.append("kode", kodebeliValue);
-            orderParams.append("id", bestMatch.arg3);
-            orderParams.append("menu_id", bestMatch.arg4);
-            orderParams.append("ci_csrf_token", token);
-            
-            const res2 = await fetch("https://kodebayar.web.id/home/inquiry_page?provider=BYU", {
-                method: "POST",
-                body: orderParams
-            });
-            const orderData = await res2.json();
-            return orderData.kode_bayar || null;
-        }
-        
-        return null;
+        return unique;
     } catch (e) {
-        console.error("By.U scrape error", e);
+        console.error(`${provider} scrape error`, e);
+        return [];
+    }
+}
+
+async function generateKodeBayar(nohp: string, pkg: any, provider: string): Promise<string | null> {
+    try {
+        const orderParams = new URLSearchParams();
+        orderParams.append("nohp", nohp);
+        orderParams.append("kode", pkg.kodebeliValue);
+        orderParams.append("id", pkg.arg3);
+        orderParams.append("menu_id", pkg.arg4);
+        orderParams.append("ci_csrf_token", pkg.token);
+        
+        const res2 = await fetch(`https://kodebayar.web.id/home/inquiry_page?provider=${provider}`, {
+            method: "POST",
+            body: orderParams
+        });
+        const orderData = await res2.json();
+        return orderData.kode_bayar || null;
+    } catch (e) {
+        console.error(`${provider} generate kode bayar error`, e);
         return null;
     }
 }
@@ -2241,6 +2267,7 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
                     const tgMsg = await ctx.reply(msg);
                     tgMsgId = tgMsg.message_id;
                 } else if (status === 'Sukses') {
+                    
                     const sn = payJson.data.sn || "-";
                     const now = new Date();
                     const months = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
@@ -2267,9 +2294,10 @@ Kalau mau tanya-tanya atau order lagi, langsung chat Chuna di Bot Telegram:
 
 Chuna tunggu chat dari Kakak! 😊💖`;
                     const appUrl = "http://localhost:3000";
-                    if (pay_ref_id) notaBuffer = await generateCanvasReceipt("nota", { id: pay_ref_id, memberId: member.id, type: "prepaid", product: product.product_name, sku: product.buyer_sku_code, target: targetDisplay, price: total, modal: digiflazzPrice, cuan: cuan > 0 ? cuan : 0, status: status, method: method, sn: payJson.data?.sn || "-", date: new Date().toISOString() });
+                    
+                    if (pay_ref_id) { var notaBuffer: any = await generateCanvasReceipt("nota", { id: pay_ref_id, memberId: member.id, type: "prepaid", product: product.product_name, sku: product.buyer_sku_code, target: targetDisplay, price: total, modal: digiflazzPrice, cuan: cuan > 0 ? cuan : 0, status: status, method: method, sn: payJson.data?.sn || "-", date: new Date().toISOString() }); }
                     let tgMsg;
-                    let notaBuffer: any = null;
+
                     if (notaBuffer) {
                         tgMsg = await ctx.replyWithPhoto({ source: notaBuffer }, { caption: msg, parse_mode: 'Markdown' });
                     } else {
@@ -2429,6 +2457,7 @@ async function processPascaPayment(ctx: any, ref_id: string, method: string, sta
         const isOwnerSelf = db.owners.includes(ctx.from?.id) && isTelegramMatch(member.telegram, ctx.from?.id, ctx.from?.username);
         const checkResult = stateData.checkResult;
         const total = stateData.totalBayar;
+        const displayCustomerNo = stateData.customerNo || stateData.checkResult?.customer_no || stateData.targetNo || "-";
         const customerNo = stateData.targetNo || stateData.customerNo || stateData.checkResult?.customer_no || "-";
         
         if (!isOwnerSelf) {
@@ -2443,7 +2472,7 @@ async function processPascaPayment(ctx: any, ref_id: string, method: string, sta
         }
         
         const methodDisplay = method === 'cash' ? '💵 Tunai (Cash)' : method === 'utang' ? '📝 Utang' : '💳 Saldo';
-        await ctx.reply(`⏳ Status: Sedang memproses pembayaran tagihan untuk nomor ${customerNo} melalui metode ${methodDisplay}. Mohon ditunggu.`);
+        await ctx.reply(`⏳ Status: Sedang memproses pembayaran tagihan untuk nomor ${displayCustomerNo} melalui metode ${methodDisplay}. Mohon ditunggu.`);
         
         const pay_ref_id = ref_id;
         try {
@@ -2488,7 +2517,7 @@ async function processPascaPayment(ctx: any, ref_id: string, method: string, sta
 Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa saat, nanti akan kami kabari setelah selesai.
 
 📦 Tagihan : ${stateData.product.product_name}
-🎯 Tujuan   : ${customerNo} (${payJson.data?.customer_name || checkResult?.customer_name || "-"})
+🎯 Tujuan   : ${displayCustomerNo} (${payJson.data?.customer_name || checkResult?.customer_name || "-"})
 
 Untuk cek status atau bertanya, langsung chat Chuna di Bot Telegram, ya!
 👉 https://t.me/ChunaChanbot
@@ -2497,6 +2526,7 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
                     const tgMsg = await ctx.reply(msg);
                     tgMsgId = tgMsg.message_id;
                 } else if (status === 'Sukses') {
+                    
                     const sn = payJson.data.sn || "-";
                     const now = new Date();
                     const months = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
@@ -2523,9 +2553,9 @@ Kalau mau tanya-tanya atau order lagi, langsung chat Chuna di Bot Telegram:
 
 Chuna tunggu chat dari Kakak! 😊💖`;
                     const appUrl = "http://localhost:3000";
-                    if (pay_ref_id) notaBuffer = await generateCanvasReceipt("nota", { id: pay_ref_id, memberId: member.id, type: "pasca", product: stateData.product.product_name, sku: stateData.product.buyer_sku_code, target: customerNo, price: total, modal: digiflazzPrice, cuan: cuan > 0 ? cuan : 0, tagihan: stateData.checkResult?.selling_price || 0, admin_pel: stateData.adminFee || 0, status: status, method: method, sn: payJson.data?.sn || "-", date: new Date().toISOString() });
+                    
+                    if (pay_ref_id) { var notaBuffer: any = await generateCanvasReceipt("nota", { id: pay_ref_id, memberId: member.id, type: "pasca", product: stateData.product.product_name, sku: stateData.product.buyer_sku_code, target: displayCustomerNo, price: total, modal: digiflazzPrice, cuan: cuan > 0 ? cuan : 0, tagihan: stateData.checkResult?.selling_price || 0, admin_pel: stateData.adminFee || 0, status: status, method: method, sn: payJson.data?.sn || "-", date: new Date().toISOString() }); }
                     let tgMsg;
-                    let notaBuffer: any = null;
                     if (notaBuffer) {
                         tgMsg = await ctx.replyWithPhoto({ source: notaBuffer }, { caption: msg, parse_mode: 'Markdown' });
                     } else {
@@ -2545,7 +2575,7 @@ Kemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubu
 
 Keterangan : ${payJson.data.message || 'Transaksi Gagal'}
 📦 Tagihan : ${stateData.product.product_name}
-🎯 Tujuan   : ${customerNo} (${payJson.data?.customer_name || checkResult?.customer_name || "-"})
+🎯 Tujuan   : ${displayCustomerNo} (${payJson.data?.customer_name || checkResult?.customer_name || "-"})
 
 ${refundMsg}
 
@@ -2599,7 +2629,7 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
                     type: "pasca",
                     product: stateData.product.product_name,
                     sku: stateData.product.buyer_sku_code,
-                    target: customerNo,
+                    target: displayCustomerNo,
                     price: total,
                     modal: digiflazzPrice,
                     cuan: cuan > 0 ? cuan : 0,
@@ -2633,7 +2663,7 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
                 type: "pasca",
                 product: stateData.product.product_name,
                 sku: stateData.product.buyer_sku_code,
-                target: customerNo,
+                target: displayCustomerNo,
                 price: total,
                 modal: 0,
                 cuan: 0,
@@ -2782,7 +2812,7 @@ Oke kak! Langkah pertama, kasih tau Chuna Username yang kakak mau dong.`);
       
       bot.hears("📥 Fitur Download", async (ctx) => {
         delete userStates[ctx.from.id]; // Reset state
-        userStates[ctx.from.id] = { step: 'AWAITING_DOWNLOAD_LINK' };
+        userStates[ctx.from.id] = { step: 'AWAITING_DOWNLOAD_LINK', data: {} };
         await ctx.reply(`Fitur Download 📥
 
 Halo kak! Silakan kirimkan link video/audio yang ingin didownload.
@@ -3761,7 +3791,221 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                 }
                 break;
               }
-              case 'PASCA_INPUT_NUMBER':
+                          case 'OMNI_SELECT_PACKAGE':
+                if (text === '❌ Batal') {
+                    if (state.data.memberId) {
+                        userStates[userId] = { step: 'LOCKED_MEMBER', data: { memberId: state.data.memberId } };
+                        await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: { keyboard: [[{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true } });
+                    } else {
+                        delete userStates[userId];
+                        await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Fitur Download" }]], resize_keyboard: true } });
+                    }
+                    return;
+                }
+                
+                const selectedPkg = state.data.omniPackages.find((p: any) => p.name + " - " + p.price === text.trim());
+                if (!selectedPkg) {
+                    await ctx.reply("❌ Pilihan tidak valid. Silakan pilih dari menu di bawah atau klik Batal.");
+                    return;
+                }
+                
+                await ctx.reply("⏳ Sedang memproses Kode Bayar untuk " + selectedPkg.name + "...");
+                let omniFinalCustomerNo = selectedPkg.code;
+                
+                try {
+                    const result = await checkPascaBill(state.data.product.buyer_sku_code, omniFinalCustomerNo);
+                    if (result.status === 'Gagal') {
+                         await ctx.reply(`❌ Pengecekan Gagal:${result.message}`, {
+                             reply_markup: {
+                                keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Fitur Download" }]],
+                                resize_keyboard: true
+                             }
+                         });
+                         delete userStates[userId];
+                    } else if (result.status === 'Sukses') {
+                         const nama = result.customer_name || "-";
+                         const tagihan = result.selling_price || 0;
+                         
+                         const memberId = state.data.memberId || `MBR-${ctx.from?.id}`;
+                         const member = members.find(m => m.id === memberId || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
+                         const memberType = member?.type || 'Biasa';
+                         
+                         const isOwnerCtx = db.owners.includes(ctx.from?.id);
+                         const feeData = getProductFee(state.data.product.buyer_sku_code);
+                         let adminFee = isOwnerCtx ? feeData.owner : (memberType === 'VIP' ? feeData.vip : feeData.biasa);
+                         let total = tagihan + adminFee;
+                         if (isOwnerCtx && feeData.owner_fixed !== undefined) {
+                             total = feeData.owner_fixed;
+                             adminFee = total - tagihan;
+                         }
+                         
+                         let detail = selectedPkg.name;
+                         
+                         const billData = {
+                             nama: nama,
+                             no: state.data.customerNo, // The phone number instead of the giant base64 code
+                             layanan: state.data.product.product_name + " - Omni",
+                             total: total,
+                             detail: detail
+                         };
+                         const base64Data = Buffer.from(JSON.stringify(billData)).toString('base64');
+                         const appUrl = process.env.APP_URL || "http://localhost:3000";
+                         const notaUrl = `${appUrl}/api/tagihan-nota?data=${encodeURIComponent(base64Data)}`;
+
+                         const replyText = `✅ *Tagihan Ditemukan!*\n\nHaiii! Aku Chuna, asisten imut dari E4 Store 🐾✨\nTagihan kamu udah muncul nih, jangan sampai kelewat ya~\n\n💬 "Jangan lupa bayar tepat waktu ya, sayang! Biar listrik tetap menyala dan kamu tetap semangat seharian~ Chuna doain yang terbaik buat kamu! 🌸💖"`;
+
+                         const isOwner = db.owners.includes(ctx.from?.id);
+                         const keyboard = [];
+                         if (isOwner) {
+                             keyboard.push([{ text: "💵 Cash" }, { text: "📝 Utang" }]);
+                             keyboard.push([{ text: "❌ Batal" }]);
+                         } else {
+                             keyboard.push([{ text: "💳 Saldo" }]);
+                             keyboard.push([{ text: "❌ Batal" }]);
+                         }
+
+                         userStates[userId] = { step: 'WAIT_PAYMENT_PASCA', data: { ...state.data, ref_id: result.ref_id, totalBayar: total, checkResult: result, targetNo: omniFinalCustomerNo } };
+
+                         const buffer = await generateCanvasReceipt("tagihan", billData);
+                         if (buffer) {
+                             await ctx.replyWithPhoto({ source: buffer }, {
+                                 caption: replyText,
+                                 parse_mode: 'Markdown',
+                                 reply_markup: { keyboard, resize_keyboard: true }
+                             });
+                         } else {
+                             let msg = `🧾 *Detail Tagihan*\n\n`;
+                             msg += `Layanan: ${billData.layanan}\n`;
+                             msg += `Detail: ${detail}\n`;
+                             msg += `Nomor: ${billData.no}\n`;
+                             msg += `Nama: ${billData.nama}\n\n`;
+                             msg += `Tagihan: Rp ${tagihan.toLocaleString('id-ID')}\n`;
+                             msg += `Admin: Rp ${adminFee.toLocaleString('id-ID')}\n`;
+                             msg += `*Total: Rp ${total.toLocaleString('id-ID')}*\n\n`;
+                             msg += `[Lihat Nota Web](${notaUrl})\n\n`;
+                             msg += replyText;
+                             await ctx.reply(msg, {
+                                 parse_mode: 'Markdown',
+                                 reply_markup: { keyboard, resize_keyboard: true }
+                             });
+                         }
+                    }
+                } catch (e) {
+                     await ctx.reply("❌ Terjadi kesalahan saat mengecek tagihan Omni.");
+                }
+                return;
+
+            case 'KODEBAYAR_SELECT_PACKAGE':
+                if (text === '❌ Batal') {
+                    if (state.data.memberId) {
+                        userStates[userId] = { step: 'LOCKED_MEMBER', data: { memberId: state.data.memberId } };
+                        await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: { keyboard: [[{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true } });
+                    } else {
+                        delete userStates[userId];
+                        await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Fitur Download" }]], resize_keyboard: true } });
+                    }
+                    return;
+                }
+                
+                const providerMap: Record<string, string> = {
+                    'BYU': 'By.U',
+                    'INDOSAT': 'Indosat',
+                    'TRI': 'Tri',
+                    'AXIATA': 'XL/Axis'
+                };
+                const pLabel = providerMap[state.data.kodebayarProvider] || state.data.kodebayarProvider;
+
+                const selectedKodebayarPkg = state.data.kodebayarPackages.find((p: any) => p.name + " - " + p.price === text.trim());
+                if (!selectedKodebayarPkg) {
+                    await ctx.reply("❌ Pilihan tidak valid. Silakan pilih dari menu di bawah atau klik Batal.");
+                    return;
+                }
+                
+                await ctx.reply("⏳ Sedang memproses Kode Bayar untuk " + selectedKodebayarPkg.name + "...");
+                const kodeBayar = await generateKodeBayar(state.data.customerNo, selectedKodebayarPkg, state.data.kodebayarProvider);
+                
+                if (!kodeBayar) {
+                     await ctx.reply(`❌ Gagal men-generate Kode Bayar ${pLabel} dari sistem. Silakan coba lagi nanti.`);
+                     return;
+                }
+                
+                let finalCustomerNoVal = kodeBayar;
+                
+                try {
+                    const result = await checkPascaBill(state.data.product.buyer_sku_code, finalCustomerNoVal);
+                    if (result.status === 'Gagal') {
+                         await ctx.reply(`❌ Pengecekan Gagal:${result.message}`, {
+                             reply_markup: {
+                                keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Fitur Download" }]],
+                                resize_keyboard: true
+                             }
+                         });
+                         delete userStates[userId];
+                    } else if (result.status === 'Sukses') {
+                         let notaBuffer: any = null;
+                         const nama = result.customer_name || "-";
+                         const tagihan = result.selling_price || 0;
+                         
+                         const memberId = state.data.memberId || `MBR-${ctx.from?.id}`;
+                         const member = members.find(m => m.id === memberId || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
+                         const memberType = member?.type || 'Biasa';
+                         
+                         const isOwnerCtx = db.owners.includes(ctx.from?.id);
+                         const feeData = getProductFee(state.data.product.buyer_sku_code);
+                         let adminFee = isOwnerCtx ? feeData.owner : (memberType === 'VIP' ? feeData.vip : feeData.biasa);
+                         let total = tagihan + adminFee;
+                         if (isOwnerCtx && feeData.owner_fixed !== undefined) {
+                             total = feeData.owner_fixed;
+                             adminFee = total - tagihan;
+                         }
+                         
+                         let detail = selectedPkg.name;
+                         
+                         const billData = {
+                             nama: nama,
+                             no: state.data.customerNo,
+                             layanan: state.data.product.product_name + ` - ${pLabel}`,
+                             total: total,
+                             detail: detail
+                         };
+                         const base64Data = Buffer.from(JSON.stringify(billData)).toString('base64');
+                         const appUrl = process.env.APP_URL || "http://localhost:3000";
+                         const notaUrl = `${appUrl}/api/tagihan-nota?data=${encodeURIComponent(base64Data)}`;
+
+                         const replyText = `✅ *Tagihan Ditemukan!*\n\nHaiii! Aku Chuna, asisten imut dari E4 Store 🐾✨\nTagihan kamu udah muncul nih, jangan sampai kelewat ya~\n\n💬 "Jangan lupa bayar tepat waktu ya, sayang! Biar listrik tetap menyala dan kamu tetap semangat seharian~ Chuna doain yang terbaik buat kamu! 🌸💖"`;
+
+                         const isOwner = db.owners.includes(ctx.from?.id);
+                         const keyboard = [];
+                         if (isOwner) {
+                             keyboard.push([{ text: "💵 Cash" }, { text: "📝 Utang" }]);
+                             keyboard.push([{ text: "❌ Batal" }]);
+                         } else {
+                             keyboard.push([{ text: "💳 Saldo" }]);
+                             keyboard.push([{ text: "❌ Batal" }]);
+                         }
+
+                         userStates[userId] = { step: 'WAIT_PAYMENT_PASCA', data: { ...state.data, ref_id: result.ref_id, totalBayar: total, checkResult: result, targetNo: finalCustomerNoVal } };
+
+                         const buffer = await generateCanvasReceipt("tagihan", billData);
+                         if (buffer) {
+                             await ctx.replyWithPhoto({ source: buffer }, {
+                                 caption: replyText,
+                                 parse_mode: 'Markdown',
+                                 reply_markup: { keyboard, resize_keyboard: true }
+                             });
+                         } else {
+                             await ctx.reply(replyText, {
+                                 parse_mode: 'Markdown',
+                                 reply_markup: { keyboard, resize_keyboard: true }
+                             });
+                         }
+                    }
+                } catch (e) {
+                     await ctx.reply(`❌ Terjadi kesalahan saat mengecek tagihan ${pLabel}.`);
+                }
+                return;
+
+            case 'PASCA_INPUT_NUMBER':
                 const customerNo = text.trim();
                 if (customerNo.toLowerCase() === 'batal' || customerNo === '❌ Batal') {
                     if (state.data.memberId) {
@@ -3786,34 +4030,6 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                 await ctx.reply(`⏳ Sedang mengecek tagihan untuk nomor ${customerNo}...`);
 
                 let finalCustomerNo = customerNo;
-                // --- BY.U Auto Kode Bayar ---
-                if (product.brand && (product.brand.toLowerCase() === "by.u" || product.brand.toLowerCase() === "byu")) {
-                    if (customerNo.startsWith('0') || customerNo.startsWith('62') || customerNo.startsWith('+62')) {
-                        await ctx.reply("⏳ Sedang menggenerate Kode Bayar dari By.U secara otomatis...");
-                        const kodeBayar = await getByuKodeBayar(customerNo, product.product_name);
-                        if (kodeBayar) {
-                            finalCustomerNo = kodeBayar; // Override with the real Kode Bayar
-                            await ctx.reply("✅ Berhasil mendapatkan Kode Bayar By.U otomatis: *" + kodeBayar + "*\n\nMenggunakan kode bayar ini untuk pengecekan.", { parse_mode: "Markdown" });
-                        } else {
-                            await ctx.reply("⚠️ Gagal mendapatkan Kode Bayar otomatis dari By.U untuk paket ini. Silakan ulangi dan masukkan Kode Bayar secara manual jika web sedang gangguan.");
-                            return;
-                        }
-                    }
-                }
-                // --- Telkomsel Omni Auto Kode Bayar ---
-                else if (product.brand && (product.brand.toLowerCase().includes("omni") || product.brand.toLowerCase().includes("telkomsel omni"))) {
-                    if (customerNo.startsWith('0') || customerNo.startsWith('62') || customerNo.startsWith('+62')) {
-                        await ctx.reply("⏳ Sedang menggenerate Kode Bayar Telkomsel Omni secara otomatis...");
-                        const kodeBayar = await getOmniKodeBayar(customerNo, product.product_name);
-                        if (kodeBayar) {
-                            finalCustomerNo = kodeBayar;
-                            await ctx.reply("✅ Berhasil mendapatkan Kode Bayar Omni otomatis: *" + kodeBayar + "*\n\nMenggunakan kode bayar ini untuk pengecekan.", { parse_mode: "Markdown" });
-                        } else {
-                            await ctx.reply("⚠️ Gagal mendapatkan Kode Bayar otomatis dari Telkomsel Omni untuk paket ini. Silakan ulangi dan masukkan Kode Bayar secara manual jika web sedang gangguan.");
-                            return;
-                        }
-                    }
-                }
                 try {
                     const result = await checkPascaBill(product.buyer_sku_code, finalCustomerNo);
                     if (result.status === 'Gagal') {
@@ -3911,7 +4127,7 @@ Tagihan kamu udah muncul nih, jangan sampai kelewat ya~
                           const cleanTgId = typeof tgId === 'string' ? tgId.replace(/[^0-9]/g, '') : String(tgId);
                           if (cleanTgId && cleanTgId !== String(ctx.from?.id)) {
                               try {
-                                  await bot.telegram.sendMessage(cleanTgId, lunasText);
+                                  await bot.telegram.sendMessage(cleanTgId, replyText);
                               } catch(e) {
                                   console.error("Failed to send to customer tg", e);
                               }
