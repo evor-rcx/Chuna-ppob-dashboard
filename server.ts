@@ -2667,13 +2667,12 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
 │  ▸  Rp ${balance} 
 │     [ ░░░░░░░░░░ ] 
 │
-├─── ✨ CHUNA · SPECIAL CALL ✨ ───
 │
-│  🎁  Promo spesial untuk "${nameOriginal}":
-│  ✔️  Free admin fee (periode terbatas)
-│  ✔️  Cara klaim: balas "AMBIL" di sini
+│  
+│  
+│  
 │
-└─── 🚀 24/7 Ready. Balas kapan saja ───`);
+└─── 🚀 24/JAM Ready. Balas kapan saja ───`);
           } else {
              await ctx.reply("❌ Kakak belum terdaftar. Yuk daftar dulu!💡 Info: ID Telegram kakak adalah *" + ctx.from.id + "* (Berikan ID ini ke Owner untuk dihubungkan dengan akun web kakak)", { parse_mode: "Markdown" });
           }
