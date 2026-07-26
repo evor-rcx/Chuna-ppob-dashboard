@@ -1,4 +1,5 @@
 import fs from "fs";
+import { EdgeTTS } from "node-edge-tts";
 import cron from "node-cron";
 import express from "express";
 import { fetchTiktok } from "./downloader";
@@ -618,6 +619,7 @@ async function startServer() {
                               await new Promise(r => setTimeout(r, 1200));
                               await waSocket.sendPresenceUpdate("paused", jid);
                               await waSocket.sendMessage(jid, { image: buffer, caption: "✅ *Transaksi Berhasil!* Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰" });
+                                        
                               
                               const tIndex = db.transactions.findIndex((t: any) => t.id === tx.id);
                               if (tIndex >= 0) {
@@ -928,7 +930,7 @@ const app = express();
                     }
                     msg = `🎉 Horee! Sukses, Kak!
 
-Pesanan sudah diproses otomatis oleh E4 Store. ${tx.product} sudah masuk ke akun ${nama || tx.target} dan siap digunakan! 💪🔥
+Pesanan sudah diproses otomatis oleh E4 Store. ${tx.product} sudah masuk ke ${isOwnerSelf ? "nama" : "akun"} ${nama || tx.target} ${isOwnerSelf ? "!" : "dan siap digunakan!"} 💪🔥
 
 Terima kasih telah berbelanja di E4 Store! 🐾
 
@@ -1053,6 +1055,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                                         await new Promise(r => setTimeout(r, 1200));
                                         await waSocket.sendPresenceUpdate("paused", jid);
                                         await waSocket.sendMessage(jid, { image: buffer, caption: "✅ *Transaksi Berhasil!* Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰" });
+                                        
                                     } else if (!edited) {
                                         await waSocket.sendMessage(jid, { text: msg });
                                     }
@@ -1219,10 +1222,49 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
       }
     });
 
+    const repliedThanks = new Set<string>();
     waSocket.ev.on("messages.upsert", async (m) => {
       const msg = m.messages[0];
-      if (!msg.key.fromMe && m.type === "notify") {
-        console.log("Got WA message:", msg.message?.conversation);
+      if (!msg.key.fromMe && m.type === "notify" && msg.message) {
+        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+        const lowerText = text.toLowerCase();
+        
+        if (lowerText.includes("makasih") || lowerText.includes("mksih") || lowerText.includes("makasi") || lowerText.includes("terima kasih") || lowerText.includes("thanks") || lowerText.includes("tq") || lowerText.includes("suwun")) {
+            const jid = msg.key.remoteJid;
+            
+            if (jid && !repliedThanks.has(jid)) {
+                repliedThanks.add(jid);
+                // Hapus dari cache setelah 1 jam
+                setTimeout(() => repliedThanks.delete(jid), 3600000);
+                
+                let customerName = msg.pushName || "Kakak";
+                const cleanJid = jid.split('@')[0];
+                const member = db.members.find((m: any) => m.whatsapp && m.whatsapp.replace(/\D/g, '').includes(cleanJid));
+                if (member && member.name) {
+                    customerName = member.name;
+                } else {
+                    // Cari di db.transactions siapa tau ada target (nama)
+                    const tx = db.transactions.slice().reverse().find((t: any) => t.waJid === jid || (member && t.memberId === member.id));
+                    if (tx && tx.target && !tx.target.match(/^\d+$/)) {
+                        customerName = tx.target;
+                    }
+                }
+                
+                try {
+                    const vnText = `Sama-sama, Kak ${customerName}! Terima kasih sudah berbelanja di E4 Store. Semoga pulsa atau kuotanya langsung terpakai dengan lancar. Kalau ada kendala atau mau order lagi, jangan sungkan chat Chuna lagi ya!`;
+                    const vnPath = `./tmp_vn_${Date.now()}_${Math.floor(Math.random()*1000)}.mp3`;
+                    const tts = new EdgeTTS({ voice: 'id-ID-GadisNeural', lang: 'id-ID', outputFormat: 'audio-24khz-48kbitrate-mono-mp3' });
+                    await tts.ttsPromise(vnText, vnPath);
+                    await waSocket.sendPresenceUpdate("recording", jid);
+                    await new Promise(r => setTimeout(r, 4500));
+                    await waSocket.sendPresenceUpdate("paused", jid);
+                    await waSocket.sendMessage(jid, { audio: { url: vnPath }, mimetype: 'audio/mp4', ptt: true }, { quoted: msg });
+                    setTimeout(() => { try { fs.unlinkSync(vnPath); } catch(e){} }, 5000);
+                } catch (e) {
+                    console.error("Gagal kirim balasan makasih VN:", e);
+                }
+            }
+        }
       }
     });
 
@@ -2071,7 +2113,7 @@ Daya         : ${parts.slice(1).join(' / ')}`;
                     }
                     msg = `🎉 Horee! Sukses, Kak!
 
-Pesanan sudah diproses otomatis oleh E4 Store. ${product.product_name} sudah masuk ke akun ${member.name || targetDisplay} dan siap digunakan! 💪🔥
+Pesanan sudah diproses otomatis oleh E4 Store. ${product.product_name} sudah masuk ke ${isOwnerSelf ? "nama" : "akun"} ${member.name || targetDisplay} ${isOwnerSelf ? "!" : "dan siap digunakan!"} 💪🔥
 
 Terima kasih telah berbelanja di E4 Store! 🐾
 
@@ -2327,7 +2369,7 @@ Daya         : ${parts.slice(1).join(' / ')}`;
                     }
                     msg = `🎉 Horee! Sukses, Kak!
 
-Pesanan sudah diproses otomatis oleh E4 Store. ${stateData.product.product_name} sudah masuk ke akun ${checkResult?.customer_name || customerNo} dan siap digunakan! 💪🔥
+Pesanan sudah diproses otomatis oleh E4 Store. ${stateData.product.product_name} sudah masuk ke ${isOwnerSelf ? "nama" : "akun"} ${checkResult?.customer_name || customerNo} ${isOwnerSelf ? "!" : "dan siap digunakan!"} 💪🔥
 
 Terima kasih telah berbelanja di E4 Store! 🐾
 
