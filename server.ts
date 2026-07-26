@@ -988,19 +988,19 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                             const buffer = await generateCanvasReceipt("nota", tx);
                             if (buffer) {
                                 try { await bot.telegram.deleteMessage(tx.tgChatId, tx.tgMsgId); } catch(e) {}
-                                await bot.telegram.sendPhoto(tx.tgChatId, { source: buffer }, { caption: msg, parse_mode: "Markdown" });
+                                await bot.telegram.sendPhoto(tx.tgChatId, { source: buffer }, { caption: msg });
                                 tgPhotoSent = true;
                             }
                         }
                         if (!tgPhotoSent) {
                             try {
-                                await bot.telegram.editMessageText(tx.tgChatId, tx.tgMsgId, undefined, msg, { parse_mode: "Markdown" });
+                                await bot.telegram.editMessageText(tx.tgChatId, tx.tgMsgId, undefined, msg);
                             } catch (e) {
-                                try { await bot.telegram.sendMessage(tx.tgChatId, msg, { parse_mode: "Markdown" }); } catch(err) {}
+                                try { await bot.telegram.sendMessage(tx.tgChatId, msg); } catch(err) {}
                             }
                         }
                     } catch (e) {
-                        try { await bot.telegram.sendMessage(tx.tgChatId, msg, { parse_mode: "Markdown" }); } catch(err) {}
+                        try { await bot.telegram.sendMessage(tx.tgChatId, msg); } catch(err) {}
                     }
                     })();
                 } else if (bot && member && member.telegram && member.telegram.length > 0) {
@@ -1012,12 +1012,12 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                             const appUrl = "http://localhost:3000";
                             const buffer = await generateCanvasReceipt("nota", tx);
                             if (buffer) {
-                                await bot.telegram.sendPhoto(tgId, { source: buffer }, { caption: msg, parse_mode: "Markdown" });
+                                await bot.telegram.sendPhoto(tgId, { source: buffer }, { caption: msg });
                                 tgPhotoSent = true;
                             }
                         }
                         if (!tgPhotoSent) {
-                            await bot.telegram.sendMessage(tgId, msg, { parse_mode: "Markdown" });
+                            await bot.telegram.sendMessage(tgId, msg);
                         }
                     } catch (e: any) { console.error("Error in prepaidBrands check:", e.message); }
                     })();
@@ -4450,7 +4450,11 @@ Status pesanan kakak sekarang: ⚠️ BELUM LUNAS`;
       });
       
 try { await bot.telegram.deleteWebhook({ drop_pending_updates: true }); } catch (e) {}
-await bot.launch();
+if (process.env.APPLET_ID || process.env.K_REVISION) {
+    console.log("Skipping bot.launch() in AI Studio environment to prevent 409 Conflict with your local server.");
+} else {
+    await bot.launch();
+}
 
       botStatus = "Connected as @" + botInfo.username;
       console.log("Bot started successfully:", botInfo.username);
