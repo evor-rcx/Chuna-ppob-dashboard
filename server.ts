@@ -1229,7 +1229,15 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         const lowerText = text.toLowerCase();
         
-        if (lowerText.includes("makasih") || lowerText.includes("mksih") || lowerText.includes("makasi") || lowerText.includes("terima kasih") || lowerText.includes("thanks") || lowerText.includes("tq") || lowerText.includes("suwun")) {
+        const thankYouWords = [
+            "makasih", "mksih", "makasi", "terima kasih", "terimakasih", "suwun", "hatur nuhun", "trmks", "mksi", "mks", "trimakasih", "thx", "tq",
+            "thanks", "thank you", "ty", "thankyou",
+            "arigatou", "arigato", "ありがとう", "az",
+            "gomawo", "kamsahamnida", "고마워", "감사합니다",
+            "xiexie", "xie xie", "谢谢",
+            "syukron", "shukran", "شكرا"
+        ];
+        if (thankYouWords.some(word => lowerText.includes(word))) {
             const jid = msg.key.remoteJid;
             
             if (jid && !repliedThanks.has(jid)) {
@@ -1251,11 +1259,11 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                 }
                 
                 try {
-                    const vnText = `Sama-sama, Kak ${customerName}! Terima kasih sudah berbelanja di E4 Store. Semoga pulsa/kuotanya langsung terpakai dengan lancar. Kalau ada kendala atau mau order lagi, jangan sungkan chat Chuna lagi ya! 😊`;
+                    const vnText = `Makasih kembali Kak ${customerName}! Seneng banget bisa ngobrol dan bantu transaksi hari ini. Chuna doain semoga berkah, ya. Sampai jumpa lagi di transaksi berikutnya! 🥰`;
                     const baseVnName = `./tmp_vn_${Date.now()}_${Math.floor(Math.random()*1000)}`;
                     const vnPathMp3 = `${baseVnName}.mp3`;
                     const vnPathOgg = `${baseVnName}.ogg`;
-                    const tts = new EdgeTTS({ voice: 'id-ID-GadisNeural', lang: 'id-ID', outputFormat: 'audio-24khz-48kbitrate-mono-mp3', pitch: '+30%', rate: '+15%' });
+                    const tts = new EdgeTTS({ voice: 'id-ID-GadisNeural', lang: 'id-ID', outputFormat: 'audio-24khz-48kbitrate-mono-mp3' });
                     await tts.ttsPromise(vnText, vnPathMp3);
                     await waSocket.sendPresenceUpdate("recording", jid);
                     await new Promise(r => setTimeout(r, 4500));
