@@ -3834,10 +3834,6 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          const feeData = getProductFee(state.data.product.buyer_sku_code);
                          let adminFee = isOwnerCtx ? feeData.owner : (memberType === 'VIP' ? feeData.vip : feeData.biasa);
                          let total = tagihan + adminFee;
-                         if (isOwnerCtx && feeData.owner_fixed !== undefined) {
-                             total = feeData.owner_fixed;
-                             adminFee = total - tagihan;
-                         }
                          
                          let detail = selectedPkg.name;
                          
@@ -3954,10 +3950,6 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          const feeData = getProductFee(state.data.product.buyer_sku_code);
                          let adminFee = isOwnerCtx ? feeData.owner : (memberType === 'VIP' ? feeData.vip : feeData.biasa);
                          let total = tagihan + adminFee;
-                         if (isOwnerCtx && feeData.owner_fixed !== undefined) {
-                             total = feeData.owner_fixed;
-                             adminFee = total - tagihan;
-                         }
                          
                          let detail = selectedPkg.name;
                          
@@ -4069,10 +4061,8 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                                 let cleanPrice = pkg.price.replace(/[^0-9]/g, '');
                                 if (cleanPrice) {
                                     let priceNum = parseInt(cleanPrice, 10);
-                                    let total = priceNum + adminFee;
-                                    if (isOwnerCtx && feeData.owner_fixed !== undefined) {
-                                        total = feeData.owner_fixed;
-                                    }
+                                    let digiflazzAdmin = product.admin || 0;
+                                    let total = digiflazzAdmin + priceNum + adminFee;
                                     pkg.price = `Rp. ${total.toLocaleString('id-ID')}`;
                                 }
                             });
@@ -4120,10 +4110,8 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                                 let cleanPrice = pkg.price.replace(/[^0-9]/g, '');
                                 if (cleanPrice) {
                                     let priceNum = parseInt(cleanPrice, 10);
-                                    let total = priceNum + adminFee;
-                                    if (isOwnerCtx && feeData.owner_fixed !== undefined) {
-                                        total = feeData.owner_fixed;
-                                    }
+                                    let digiflazzAdmin = product.admin || 0;
+                                    let total = digiflazzAdmin + priceNum + adminFee;
                                     pkg.price = `Rp. ${total.toLocaleString('id-ID')}`;
                                 }
                             });
@@ -4172,10 +4160,6 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          const feeData = getProductFee(product.buyer_sku_code);
                          let adminFee = isOwnerCtx ? feeData.owner : (memberType === 'VIP' ? feeData.vip : feeData.biasa);
                          let total = tagihan + adminFee;
-                         if (isOwnerCtx && feeData.owner_fixed !== undefined) {
-                             total = feeData.owner_fixed;
-                             adminFee = total - tagihan;
-                         }
                          // We can add our own markup here if needed, but for now we just pass through
                          let detail = "";
                          if (result.desc) {
