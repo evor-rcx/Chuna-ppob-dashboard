@@ -4707,7 +4707,7 @@ Status pesanan kakak sekarang: ⚠️ BELUM LUNAS`;
                     }
                 }
                 const prepaidBrands = [...new Set(prepaid.map((p: any) => p.brand))].filter(Boolean);
-                if (prepaidBrands.includes(text) && (!state || !state.step.startsWith("PASCA_"))) {
+                if (!handled && prepaidBrands.includes(text) && (!state || !state.step.startsWith("PASCA_"))) {
                     let filtered = prepaid.filter((p: any) => p.brand === text);
                     
                     const stateCategory = (state && state.step === 'PREPAID_SELECT_BRAND') ? state.data.category : null;
@@ -4803,7 +4803,7 @@ Status pesanan kakak sekarang: ⚠️ BELUM LUNAS`;
                     }
                 }
                 const pascaBrands = [...new Set(pasca.map((p: any) => p.brand))].filter(Boolean);
-                if (pascaBrands.includes(text)) {
+                if (!handled && pascaBrands.includes(text)) {
                     let filtered = pasca.filter((p: any) => p.brand === text); filtered = filtered.slice(0, 100);
                     if (filtered.length === 1) {
                         const matchedProduct = filtered[0];

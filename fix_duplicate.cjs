@@ -1,10 +1,8 @@
 const fs = require('fs');
 let code = fs.readFileSync('server.ts', 'utf8');
-let idx = code.indexOf('import fs from "fs";', 10);
-if (idx !== -1) {
-    code = code.substring(0, idx);
-    fs.writeFileSync('server.ts', code);
-    console.log("Fixed duplication");
-} else {
-    console.log("No duplication found");
-}
+
+code = code.replace(/if \(prepaidBrands\.includes\(text\) \&\& \(\!state \|\| \!state\.step\.startsWith\("PASCA_"\)\)\) \{/g, 'if (!handled && prepaidBrands.includes(text) && (!state || !state.step.startsWith("PASCA_"))) {');
+code = code.replace(/if \(pascaBrands\.includes\(text\)\) \{/g, 'if (!handled && pascaBrands.includes(text)) {');
+
+fs.writeFileSync('server.ts', code);
+console.log("Fixed duplicate checks");
