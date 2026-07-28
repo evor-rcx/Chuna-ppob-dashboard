@@ -905,7 +905,7 @@ const app = express();
                 }
                 
                 // Initialize waReceiptSent to false when first moving from Pending
-                tx.waReceiptSent = false;
+                tx.waReceiptSent = "processing";
                 
                 db.transactions = transactions;
                 db.members = members;
@@ -936,10 +936,7 @@ Pesanan sudah diproses otomatis oleh E4 Store. ${tx.product} sudah masuk ke ${is
 Terima kasih telah berbelanja di E4 Store! 🐾
 
 Chuna ~ Asisten Imutmu siap bantu 24 jam!
-Kalau mau tanya-tanya atau order lagi, langsung chat Chuna di Bot Telegram:
-👉 https://t.me/ChunaChanbot
-
-Chuna tunggu chat dari Kakak! 😊💖`;
+Chuna tunggu Transaksi berikutnya dari Kakak! 😊💖`;
                 } else if (status === 'Gagal') {
                     let refundMsg = tx.method === 'saldo' ? '✅ Saldo sebesar Rp ' + tx.price.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (tx.method === 'utang' ? '✅ Utang sebesar Rp ' + tx.price.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + tx.price.toLocaleString('id-ID') + ' kepada pelanggan.');
                     msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.
@@ -955,11 +952,7 @@ ${refundMsg}
 ${(data.message || '').toLowerCase().includes('ip') ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Tenang saja, Kakak bisa mencoba ulang kapan pun.'}
 
 Butuh bantuan? ${(data.message || '').toLowerCase().includes('ip') ? `Langsung chat Chuna di Bot Telegram:
-👉 https://t.me/ChunaChanbot
-
 Chuna siap membantu dengan senyum! 😊💪` : `Chat Chuna di Bot Telegram:
-👉 https://t.me/ChunaChanbot
-
 Chuna siap bantu! 😊💪`}`;
                     
                     if (data.message && data.message.toLowerCase().includes("harga seller lebih besar dari ketentuan harga buyer")) {
@@ -1076,6 +1069,11 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                                 }
                             } catch (e: any) {
                                 console.log("WA delivery error:", e.message);
+                                const tIndex = db.transactions.findIndex((t: any) => t.id === tx.id);
+                                if (tIndex >= 0) {
+                                    db.transactions[tIndex].waReceiptSent = false;
+                                    writeDB(db);
+                                }
                             }
                         }
                     })();
@@ -1301,7 +1299,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
     waSocket.ev.on("call", async (calls) => {
       for (const call of calls) {
         if (call.status === "offer") {
-          const replyMsg = `Maaf banget, Kak! Chuna nggak bisa angkat telepon sekarang (lagi sibuk ngurus pelanggan lain, hihi). Tapi jangan khawatir, mending langsung chat Bot Telegram resmi E4Store aja! Di sana Chuna 24 jam siap bantu jawab semua pertanyaan kamu dengan cepat dan ramah~👉 https://t.me/ChunaChanbotChuna asisten E4Store, transaksi langsung otomatis kok, tetap aman dan terpercaya! Yuk, mampir~ Chuna tunggu, ya! 😘🐾`;
+          const replyMsg = `Maaf banget, Kak! Chuna nggak bisa angkat telepon sekarang (lagi sibuk ngurus pelanggan lain, hihi). Tapi jangan khawatir, mending langsung chat Bot Telegram resmi E4Store aja! Di sana Chuna 24 jam siap bantu jawab semua pertanyaan kamu dengan cepat dan ramah~Chuna asisten E4Store, transaksi langsung otomatis kok, tetap aman dan terpercaya! Yuk, mampir~ Chuna tunggu, ya! 😘🐾`;
           try {
             if (waSocket) {
               await waSocket.rejectCall(call.id, call.from);
@@ -2260,9 +2258,6 @@ Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa s
 📦 Produk  : ${product.product_name}
 🎯 Tujuan   : ${targetDisplay} (${member.name || "-"})
 
-Untuk cek status atau bertanya, langsung chat Chuna di Bot Telegram, ya!
-👉 https://t.me/ChunaChanbot
-
 Chuna menunggu kabar baik dari Kakak! 😊`;
                     const tgMsg = await ctx.reply(msg);
                     tgMsgId = tgMsg.message_id;
@@ -2289,10 +2284,7 @@ Pesanan sudah diproses otomatis oleh E4 Store. ${product.product_name} sudah mas
 Terima kasih telah berbelanja di E4 Store! 🐾
 
 Chuna ~ Asisten Imutmu siap bantu 24 jam!
-Kalau mau tanya-tanya atau order lagi, langsung chat Chuna di Bot Telegram:
-👉 https://t.me/ChunaChanbot
-
-Chuna tunggu chat dari Kakak! 😊💖`;
+Chuna tunggu Transaksi berikutnya dari Kakak! 😊💖`;
                     const appUrl = "http://localhost:3000";
                     
                     if (pay_ref_id) { var notaBuffer: any = await generateCanvasReceipt("nota", { id: pay_ref_id, memberId: member.id, type: "prepaid", product: product.product_name, sku: product.buyer_sku_code, target: targetDisplay, price: total, modal: digiflazzPrice, cuan: cuan > 0 ? cuan : 0, status: status, method: method, sn: payJson.data?.sn || "-", date: new Date().toISOString() }); }
@@ -2323,7 +2315,7 @@ ${refundMsg}
 
 ${(payJson.data.message || '').toLowerCase().includes('ip') ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Tenang saja, Kakak bisa mencoba ulang kapan pun.'}
 
-Butuh bantuan? ${(payJson.data.message || '').toLowerCase().includes('ip') ? `Langsung chat Chuna di Bot Telegram:\n👉 https://t.me/ChunaChanbot\n\nChuna siap membantu dengan senyum! 😊💪` : `Chat Chuna di Bot Telegram:\n👉 https://t.me/ChunaChanbot\n\nChuna siap bantu! 😊💪`}`;
+Butuh bantuan? Chuna siap membantu dengan senyum! 😊💪`;
                     
                     if (payJson.data.message && payJson.data.message.toLowerCase().includes("harga seller lebih besar dari ketentuan harga buyer")) {
                         const ownerMsg = `🚨 *INFO PENTING DARI CHUNA!* 🚨
@@ -2383,7 +2375,8 @@ Coba lihat angka: *${product.product_name}* saat ini mungkin sudah naik, melebih
                     tgMsgId,
                     waMsgKey,
                     tgChatId: ctx.chat?.id,
-                    waJid
+                    waJid,
+                    waReceiptSent: status === "Sukses" && waMsgKey !== undefined
                 });
                 db.transactions = transactions;
                 writeDB(db);
@@ -2519,9 +2512,6 @@ Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa s
 📦 Tagihan : ${stateData.product.product_name}
 🎯 Tujuan   : ${displayCustomerNo} (${payJson.data?.customer_name || checkResult?.customer_name || "-"})
 
-Untuk cek status atau bertanya, langsung chat Chuna di Bot Telegram, ya!
-👉 https://t.me/ChunaChanbot
-
 Chuna menunggu kabar baik dari Kakak! 😊`;
                     const tgMsg = await ctx.reply(msg);
                     tgMsgId = tgMsg.message_id;
@@ -2548,10 +2538,7 @@ Pesanan sudah diproses otomatis oleh E4 Store. ${stateData.product.product_name}
 Terima kasih telah berbelanja di E4 Store! 🐾
 
 Chuna ~ Asisten Imutmu siap bantu 24 jam!
-Kalau mau tanya-tanya atau order lagi, langsung chat Chuna di Bot Telegram:
-👉 https://t.me/ChunaChanbot
-
-Chuna tunggu chat dari Kakak! 😊💖`;
+Chuna tunggu Transaksi berikutnya dari Kakak! 😊💖`;
                     const appUrl = "http://localhost:3000";
                     
                     if (pay_ref_id) { var notaBuffer: any = await generateCanvasReceipt("nota", { id: pay_ref_id, memberId: member.id, type: "pasca", product: stateData.product.product_name, sku: stateData.product.buyer_sku_code, target: displayCustomerNo, price: total, modal: digiflazzPrice, cuan: cuan > 0 ? cuan : 0, tagihan: stateData.checkResult?.selling_price || 0, admin_pel: stateData.adminFee || 0, status: status, method: method, sn: payJson.data?.sn || "-", date: new Date().toISOString() }); }
@@ -2581,7 +2568,7 @@ ${refundMsg}
 
 ${(payJson.data.message || '').toLowerCase().includes('ip') ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Tenang saja, Kakak bisa mencoba ulang kapan pun.'}
 
-Butuh bantuan? ${(payJson.data.message || '').toLowerCase().includes('ip') ? `Langsung chat Chuna di Bot Telegram:\n👉 https://t.me/ChunaChanbot\n\nChuna siap membantu dengan senyum! 😊💪` : `Chat Chuna di Bot Telegram:\n👉 https://t.me/ChunaChanbot\n\nChuna siap bantu! 😊💪`}`;
+Butuh bantuan? Chuna siap membantu dengan senyum! 😊💪`;
                     
                     if (payJson.data.message && payJson.data.message.toLowerCase().includes("harga seller lebih besar dari ketentuan harga buyer")) {
                         const ownerMsg = `🚨 *INFO PENTING DARI CHUNA!* 🚨
@@ -2642,7 +2629,8 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
                     tgMsgId,
                     waMsgKey,
                     tgChatId: ctx.chat?.id,
-                    waJid
+                    waJid,
+                    waReceiptSent: status === "Sukses" && waMsgKey !== undefined
                 });
                 db.transactions = transactions;
                 writeDB(db);
