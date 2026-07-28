@@ -1261,11 +1261,11 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                 }
                 
                 try {
-                    const vnText = `Makasih kembali Kak ${customerName}! Seneng banget bisa ngobrol dan bantu transaksi hari ini. Chuna doain semoga berkah, ya. Sampai jumpa lagi di transaksi berikutnya! 🥰`;
-                    const baseVnName = require('path').join(process.cwd(), `tmp_vn_${Date.now()}_${Math.floor(Math.random()*1000)}`);
+                    const vnText = `Sama-sama Kak ${customerName}! Makasih banyak ya udah belanja di E4 Store. Semoga rezekinya makin lancar. Chuna tunggu pesanan selanjutnya ya kak!`;
+                    const baseVnName = path.join(process.cwd(), `tmp_vn_${Date.now()}_${Math.floor(Math.random()*1000)}`);
                     const vnPathMp3 = `${baseVnName}.mp3`;
                     const vnPathOgg = `${baseVnName}.ogg`;
-                    const tts = new EdgeTTS({ voice: 'id-ID-GadisNeural', lang: 'id-ID', outputFormat: 'audio-24khz-48kbitrate-mono-mp3' });
+                    const tts = new EdgeTTS({ voice: 'id-ID-GadisNeural', lang: 'id-ID', outputFormat: 'audio-24khz-48kbitrate-mono-mp3', pitch: '+15Hz', rate: '+10%' });
                     await tts.ttsPromise(vnText, vnPathMp3);
                     await waSocket.sendPresenceUpdate("recording", jid);
                     await new Promise(r => setTimeout(r, 4500));
