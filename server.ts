@@ -1265,7 +1265,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                     const baseVnName = path.join(process.cwd(), `tmp_vn_${Date.now()}_${Math.floor(Math.random()*1000)}`);
                     const vnPathMp3 = `${baseVnName}.mp3`;
                     const vnPathOgg = `${baseVnName}.ogg`;
-                    const tts = new EdgeTTS({ voice: 'id-ID-GadisNeural', lang: 'id-ID', outputFormat: 'audio-24khz-48kbitrate-mono-mp3', pitch: '+15Hz', rate: '+10%' });
+                    const tts = new EdgeTTS({ voice: 'id-ID-GadisNeural', lang: 'id-ID', outputFormat: 'audio-24khz-48kbitrate-mono-mp3', pitch: '+20Hz', rate: '+15%' });
                     await tts.ttsPromise(vnText, vnPathMp3);
                     await waSocket.sendPresenceUpdate("recording", jid);
                     await new Promise(r => setTimeout(r, 4500));
@@ -1273,7 +1273,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                     
                     const { exec } = await import('child_process');
                     await new Promise((resolve, reject) => {
-                        exec(`ffmpeg -i ${vnPathMp3} -c:a libopus -vbr on -compression_level 10 -frame_duration 20 -application voip ${vnPathOgg}`, (error) => {
+                        exec(`ffmpeg -y -i ${vnPathMp3} -c:a libopus -b:a 48k -vbr on -compression_level 10 -frame_duration 20 -application voip ${vnPathOgg}`, (error) => {
                             if (error) {
                                 console.error("FFmpeg error:", error);
                                 reject(error);
