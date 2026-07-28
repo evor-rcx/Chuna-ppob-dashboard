@@ -1232,7 +1232,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
         const lowerText = text.toLowerCase();
         
         const thankYouWords = [
-            "makasih", "mksih", "makasi", "terima kasih", "terimakasih", "suwun", "hatur nuhun", "trmks", "mksi", "mks", "trimakasih", "thx", "tq",
+            "makasih", "mksih", "makasi", "terima kasih", "terimakasih", "suwun", "hatur nuhun", "trmks", "mksi", "mks", "trimakasih", "thx", "tq", "terimakasi", "trmksi", "terima kasi", "maksi",
             "thanks", "thank you", "ty", "thankyou",
             "arigatou", "arigato", "ありがとう", "az",
             "gomawo", "kamsahamnida", "고마워", "감사합니다",
@@ -1245,7 +1245,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
             if (jid && !repliedThanks.has(jid)) {
                 repliedThanks.add(jid);
                 // Hapus dari cache setelah 1 jam
-                setTimeout(() => repliedThanks.delete(jid), 3600000);
+                setTimeout(() => repliedThanks.delete(jid), 360000); // 6 mins
                 
                 let customerName = msg.pushName || "Kakak";
                 const cleanJid = jid.split('@')[0];
