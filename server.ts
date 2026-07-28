@@ -1262,7 +1262,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                 
                 try {
                     const vnText = `Makasih kembali Kak ${customerName}! Seneng banget bisa ngobrol dan bantu transaksi hari ini. Chuna doain semoga berkah, ya. Sampai jumpa lagi di transaksi berikutnya! 🥰`;
-                    const baseVnName = `./tmp_vn_${Date.now()}_${Math.floor(Math.random()*1000)}`;
+                    const baseVnName = require('path').join(process.cwd(), `tmp_vn_${Date.now()}_${Math.floor(Math.random()*1000)}`);
                     const vnPathMp3 = `${baseVnName}.mp3`;
                     const vnPathOgg = `${baseVnName}.ogg`;
                     const tts = new EdgeTTS({ voice: 'id-ID-GadisNeural', lang: 'id-ID', outputFormat: 'audio-24khz-48kbitrate-mono-mp3' });
@@ -1283,7 +1283,8 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                         });
                     });
 
-                    await waSocket.sendMessage(jid, { audio: { url: vnPathOgg }, mimetype: 'audio/ogg; codecs=opus', ptt: true }, { quoted: msg });
+                    const audioBuffer = fs.readFileSync(vnPathOgg);
+                    await waSocket.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true }, { quoted: msg });
                     setTimeout(() => { 
                         try { fs.unlinkSync(vnPathMp3); } catch(e){} 
                         try { fs.unlinkSync(vnPathOgg); } catch(e){} 
