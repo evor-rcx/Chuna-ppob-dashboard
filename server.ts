@@ -1224,7 +1224,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
       }
     });
 
-    const repliedThanks = new Set<string>();
+    const repliedThanks = new Map<string, number>();
     waSocket.ev.on("messages.upsert", async (m) => {
       const msg = m.messages[0];
       if (!msg.key.fromMe && m.type === "notify" && msg.message) {
@@ -2822,6 +2822,9 @@ Halo kak! Silakan kirimkan link video/audio yang ingin didownload.
 Saat ini Chuna mendukung download dari:
 🎵 TikTok
 🎬 YouTube
+📘 Facebook
+📸 Instagram
+🐦 Twitter/X
 
 Kirim linknya sekarang ya! 🥰
 Contoh link
@@ -3107,15 +3110,57 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
                 }
             }
             else {
-                // Fallback for other platforms using btch-downloader AIO or specific
-                const { aio } = await import('btch-downloader');
-                await ctx.telegram.editMessageText(ctx.chat?.id, processMsg.message_id, undefined, "⏳ Mencoba mendownload dari platform lain...");
-                
-                // Let's just mock it gracefully since generic AIO might timeout
-                setTimeout(async () => {
+                                let data;
+                try {
+                    const { fbdown, igdl, twitter } = await import('btch-downloader');
+                    await ctx.telegram.editMessageText(ctx.chat?.id, processMsg.message_id, undefined, "⏳ Mencoba mendownload dari platform lain...");
+                    if (link.includes('facebook.com') || link.includes('fb.watch') || link.includes('fb.gg')) {
+                        data = await fbdown(link);
+                        if (!data || (!data.Normal_video && !data.HD)) throw new Error("Gagal mengambil data dari Facebook");
+                        await ctx.telegram.deleteMessage(ctx.chat?.id, processMsg.message_id).catch(()=>null);
+                        if (type === 'video' || type === 'audio') {
+                            await ctx.replyWithVideo(data.HD || data.Normal_video, { caption: "Facebook Video" });
+                        } else {
+                            await ctx.reply("❌ Gambar tidak tersedia untuk link ini.");
+                        }
+                        return;
+                    } else if (link.includes('instagram.com') || link.includes('ig.me')) {
+                        const igData = await igdl(link);
+                        if (!igData || igData.length === 0) throw new Error("Gagal mengambil data dari Instagram");
+                        await ctx.telegram.deleteMessage(ctx.chat?.id, processMsg.message_id).catch(()=>null);
+                        if (type === 'image') {
+                            const img = igData.find((d) => d.url.includes('.jpg') || d.url.includes('.webp') || d.url.includes('.png'));
+                            if (img) await ctx.replyWithPhoto(img.url, { caption: "Instagram Photo" });
+                            else await ctx.reply("❌ Tidak ada foto ditemukan di link ini.");
+                        } else {
+                            const vid = igData.find((d) => d.url.includes('.mp4'));
+                            if (vid) await ctx.replyWithVideo(vid.url, { caption: "Instagram Video" });
+                            else await ctx.reply("❌ Tidak ada video ditemukan di link ini.");
+                        }
+                        return;
+                    } else if (link.includes('twitter.com') || link.includes('x.com')) {
+                        const twData = await twitter(link);
+                        if (!twData || !twData.url) throw new Error("Gagal mengambil data dari Twitter");
+                        await ctx.telegram.deleteMessage(ctx.chat?.id, processMsg.message_id).catch(()=>null);
+                        const media = twData.url;
+                        if (Array.isArray(media) && media.length > 0) {
+                             const hd = media.find(m => m.hd)?.hd || media[0].sd || media[0].url;
+                             await ctx.replyWithVideo(hd, { caption: twData.title || "Twitter Video" });
+                        } else {
+                             await ctx.replyWithVideo(twData.url, { caption: twData.title || "Twitter Media" });
+                        }
+                        return;
+                    } else {
+                        await ctx.telegram.deleteMessage(ctx.chat?.id, processMsg.message_id).catch(()=>null);
+                        await ctx.reply(`✅ Permintaan untuk link: 
+${link}
+
+Mohon maaf, platform ini masih dalam pengembangan penuh. Saat ini Chuna baru mendukung TikTok, YouTube, Facebook, Instagram, dan Twitter secara optimal. 🥰`);
+                    }
+                } catch (e: any) {
                     await ctx.telegram.deleteMessage(ctx.chat?.id, processMsg.message_id).catch(()=>null);
-                    await ctx.reply(`✅ Permintaan untuk link: \n${link}\n\nMohon maaf, platform ini masih dalam pengembangan penuh. Saat ini Chuna baru mendukung TikTok dan YouTube secara optimal. 🥰`);
-                }, 2000);
+                    await ctx.reply("❌ Gagal mendownload media: " + e.message);
+                }
             }
         } catch (e) {
             console.error("Download Error:", e);
