@@ -1232,7 +1232,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
         const lowerText = text.toLowerCase();
         
         const thankYouWords = [
-            "makasih", "mksih", "makasi", "terima kasih", "terimakasih", "suwun", "hatur nuhun", "trmks", "mksi", "mks", "trimakasih", "thx", "tq", "terimakasi", "trmksi", "terima kasi", "maksi",
+            "makasih", "mksih", "makasi", "terima kasih", "terimakasih", "suwun", "hatur nuhun", "trmks", "mksi", "mks", "trimakasih", "thx", "tq", "terimakasi", "trmksi", "terima kasi", "maksi", "teq", "terima kask",
             "thanks", "thank you", "ty", "thankyou",
             "arigatou", "arigato", "ありがとう", "az",
             "gomawo", "kamsahamnida", "고마워", "감사합니다",
@@ -1283,8 +1283,22 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                         });
                     });
 
-                    const audioBuffer = fs.readFileSync(vnPathOgg);
-                    await waSocket.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true }, { quoted: msg });
+                    
+                    // Retry upload up to 3 times to mitigate 'Media upload failed on all hosts'
+                    let sent = false;
+                    for(let i=0; i<3; i++) {
+                        try {
+                            const audioBuffer = fs.readFileSync(vnPathOgg);
+                            await waSocket.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true }, { quoted: msg });
+                            sent = true;
+                            break;
+                        } catch (err) {
+                            console.log("Upload failed, retrying...", err.message);
+                            await new Promise(r => setTimeout(r, 2000));
+                        }
+                    }
+                    if(!sent) throw new Error("Gagal kirim VN setelah 3 kali percobaan");
+
                     setTimeout(() => { 
                         try { fs.unlinkSync(vnPathMp3); } catch(e){} 
                         try { fs.unlinkSync(vnPathOgg); } catch(e){} 
@@ -3067,7 +3081,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
                 }
             } 
             else if (isYoutube) {
-                const { youtube } = require('btch-downloader');
+                const { youtube } = await import('btch-downloader');
                 const data = await youtube(link);
                 if (!data || !data.status) {
                     await ctx.telegram.editMessageText(ctx.chat?.id, processMsg.message_id, undefined, "❌ Gagal mengambil data dari YouTube.");
@@ -3094,7 +3108,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
             }
             else {
                 // Fallback for other platforms using btch-downloader AIO or specific
-                const { aio } = require('btch-downloader');
+                const { aio } = await import('btch-downloader');
                 await ctx.telegram.editMessageText(ctx.chat?.id, processMsg.message_id, undefined, "⏳ Mencoba mendownload dari platform lain...");
                 
                 // Let's just mock it gracefully since generic AIO might timeout
