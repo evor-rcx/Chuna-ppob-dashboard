@@ -2822,12 +2822,9 @@ Halo kak! Silakan kirimkan link video/audio yang ingin didownload.
 Saat ini Chuna mendukung download dari:
 🎵 TikTok
 🎬 YouTube
-📘 Facebook
-📸 Instagram
 
-Kirim linknya sekarang ya! 🥰
-Contoh link
-https://vt.tiktok.com/ZSXWsjbFd/`);
+
+Kirim linknya sekarang ya! 🥰`);
       });
 
 bot.hears(/Cek Saldo/i, async (ctx) => {
