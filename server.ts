@@ -2,6 +2,21 @@ import fs from "fs";
 import { EdgeTTS } from "node-edge-tts";
 import cron from "node-cron";
 import express from "express";
+
+import fs_logger from 'fs';
+const originalLog = console.log;
+console.log = function(...args) {
+    const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ');
+    fs_logger.appendFileSync('app_debug.log', new Date().toISOString() + ' ' + msg + '\n');
+    originalLog.apply(console, args);
+};
+const originalError = console.error;
+console.error = function(...args) {
+    const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ');
+    fs_logger.appendFileSync('app_debug.log', new Date().toISOString() + ' ERROR ' + msg + '\n');
+    originalError.apply(console, args);
+};
+
 import { fetchTiktok } from "./downloader";
 
 import path from 'path';
@@ -1242,6 +1257,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
 
         if (thankYouWords.some(word => lowerText.includes(word))) {
             const jid = msg.key.remoteJid;
+            console.log('Received thank you word from:', jid, 'Message:', lowerText);
             
             if (jid) {
                 const cleanJid = jid.split('@')[0];
@@ -1249,6 +1265,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                 
                 const tx = db.transactions.slice().reverse().find((t: any) => t.waJid === jid || (member && t.memberId === member.id));
                 
+                console.log('Found tx:', tx?.id, 'status:', tx?.status, 'Already replied:', tx ? repliedThanks.has(tx.id) : false);
                 if (tx && (tx.status === 'Sukses' || tx.status === 'Gagal' || tx.status === 'Sukses (Manual)') && !repliedThanks.has(tx.id)) {
                     repliedThanks.add(tx.id);
                     
