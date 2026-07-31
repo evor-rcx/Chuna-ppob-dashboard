@@ -1,30 +1,48 @@
 import re
 
-with open('/app/applet/server.ts', 'r', encoding='utf-8') as f:
-    text = f.read()
+with open('server.ts', 'r') as f:
+    code = f.read()
 
-# 1. Webhook
-webhook_old = r'''                    if (status === 'Gagal' && tx.method !== 'cash') {
-                        member.balance += tx.price;
-                    }'''
-webhook_new = r'''                    const isOwnerSelf = member.telegram && member.telegram.some((tid: any) => db.owners.includes(parseInt(tid)));
-                    if (status === 'Gagal' && tx.method === 'saldo' && !isOwnerSelf) {
-                        member.balance += tx.price;
-                    }'''
-text = text.replace(webhook_old, webhook_new)
+pattern = r"""                    return ctx\.reply\(`❌ TRANSAKSI DITOLAK!Maaf kak, saldo kakak tidak mencukupi untuk melakukan transaksi ini\.
+💳 Saldo Saat Ini: Rp \$\{member\.balance\.toLocaleString\('id-ID'\)\}
+💰 Total Bayar: Rp \$\{total\.toLocaleString\('id-ID'\)\}
+Silakan isi ulang saldo kakak terlebih dahulu\. 🙏`\);"""
 
-# 2. Preflight Prepaid
-prepaid_utang_deduct = r'''            } else if (method === 'utang') {
-                member.balance -= total;
-                db.members = members;
-                writeDB(db);
-            }'''
-text = text.replace(prepaid_utang_deduct, r'''            }''')
+new_code = """                    await ctx.reply(`❌ TRANSAKSI DITOLAK!Maaf kak, saldo kakak tidak mencukupi untuk melakukan transaksi ini.
+💳 Saldo Saat Ini: Rp ${member.balance.toLocaleString('id-ID')}
+💰 Total Bayar: Rp ${total.toLocaleString('id-ID')}
+Silakan isi ulang saldo kakak terlebih dahulu. 🙏`);
+                    delete userStates[ctx.from?.id || 0];
+                    const isOwnerMenu = db.owners.includes(ctx.from?.id);
+                    if (isOwnerMenu) {
+                        return ctx.reply("Silakan pilih menu selanjutnya:", {
+                            reply_markup: {
+                                keyboard: [
+                                    [{ text: "📒 Cek Utang Member" }],
+                                    [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
+                                    [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
+                                    [{ text: "📢 Pengumuman WA" }, { text: "📥 Fitur Download" }]
+                                ],
+                                resize_keyboard: true
+                            }
+                        });
+                    } else {
+                        return ctx.reply("Silakan pilih menu selanjutnya:", {
+                            reply_markup: {
+                                keyboard: [
+                                    [{ text: "💵 Cek Saldo" }],
+                                    [{ text: "🧾 Cek Tagihan" }],
+                                    [{ text: "📋 Menu Produk" }],
+                                    [{ text: "📥 Fitur Download" }]
+                                ],
+                                resize_keyboard: true
+                            }
+                        });
+                    }"""
 
-# 3. Direct failure replacements
-text = text.replace("if (!isOwnerSelf && method !== 'cash')", "if (!isOwnerSelf && method === 'saldo')")
+code = re.sub(pattern, new_code, code)
 
-with open('/app/applet/server.ts', 'w', encoding='utf-8') as f:
-    f.write(text)
+with open('server.ts', 'w') as f:
+    f.write(code)
 
-print("Balance logic fixed.")
+print("Balance check updated")
