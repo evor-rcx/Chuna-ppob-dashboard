@@ -2333,19 +2333,39 @@ Chuna tunggu Transaksi berikutnya dari Kakak! 😊💖`;
                         writeDB(db);
                     }
                     let refundMsg = method === 'saldo' ? '✅ Saldo sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (method === 'utang' ? '✅ Utang sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + total.toLocaleString('id-ID') + ' kepada pelanggan.');
+                    let isIpError = (payJson.data.message || '').toLowerCase().includes('ip anda tidak kami kenali') || (payJson.data.message || '').toLowerCase().includes('ip');
+                    let customerErrorMsg = isIpError ? 'Sedang ada pemeliharaan' : (payJson.data.message || 'Transaksi Gagal');
                     msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.
 
-Kemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan${(payJson.data.message || '').toLowerCase().includes('ip') ? ' lebih lanjut' : ''}.
+Kemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan${isIpError ? ' lebih lanjut' : ''}.
 
-Keterangan : ${payJson.data.message || 'Transaksi Gagal'}
+Keterangan : ${customerErrorMsg}
 📦 Produk  : ${product.product_name}
 🎯 Tujuan   : ${targetDisplay} (${member.name || "-"})
 
 ${refundMsg}
 
-${(payJson.data.message || '').toLowerCase().includes('ip') ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Tenang saja, Kakak bisa mencoba ulang kapan pun.'}
+${isIpError ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Tenang saja, Kakak bisa mencoba ulang kapan pun.'}
 
 Butuh bantuan? Chuna siap membantu dengan senyum! 😊💪`;
+
+                    if (isIpError) {
+                        const ownerIpMsg = `🚨 *INFO PENTING DARI CHUNA!* 🚨
+IP Digiflazz tidak dikenali!
+Pelanggan mencoba memesan namun gagal karena error IP.
+👤 *Pelanggan*: ${member.name || "-"} (${targetDisplay})
+📦 *Produk*: ${product.product_name}
+⚠️ *Error*: ${payJson.data.message}
+
+Segera cek dan update whitelist IP di dashboard Digiflazz Kakak!`;
+                        for (const ownerId of db.owners) {
+                            try {
+                                await bot.telegram.sendMessage(ownerId, ownerIpMsg, { parse_mode: 'Markdown' });
+                            } catch(e) {
+                                console.error("Failed to notify owner", e);
+                            }
+                        }
+                    }
                     
                     if (payJson.data.message && payJson.data.message.toLowerCase().includes("harga seller lebih besar dari ketentuan harga buyer")) {
                         const ownerMsg = `🚨 *INFO PENTING DARI CHUNA!* 🚨
@@ -2586,19 +2606,39 @@ Chuna tunggu Transaksi berikutnya dari Kakak! 😊💖`;
                         writeDB(db);
                     }
                     let refundMsg = method === 'saldo' ? '✅ Saldo sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (method === 'utang' ? '✅ Utang sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + total.toLocaleString('id-ID') + ' kepada pelanggan.');
+                    let isIpError = (payJson.data.message || '').toLowerCase().includes('ip anda tidak kami kenali') || (payJson.data.message || '').toLowerCase().includes('ip');
+                    let customerErrorMsg = isIpError ? 'Sedang ada pemeliharaan' : (payJson.data.message || 'Transaksi Gagal');
                     msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.
 
-Kemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan${(payJson.data.message || '').toLowerCase().includes('ip') ? ' lebih lanjut' : ''}.
+Kemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan${isIpError ? ' lebih lanjut' : ''}.
 
-Keterangan : ${payJson.data.message || 'Transaksi Gagal'}
+Keterangan : ${customerErrorMsg}
 📦 Tagihan : ${stateData.product.product_name}
 🎯 Tujuan   : ${displayCustomerNo} (${payJson.data?.customer_name || checkResult?.customer_name || "-"})
 
 ${refundMsg}
 
-${(payJson.data.message || '').toLowerCase().includes('ip') ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Tenang saja, Kakak bisa mencoba ulang kapan pun.'}
+${isIpError ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Tenang saja, Kakak bisa mencoba ulang kapan pun.'}
 
 Butuh bantuan? Chuna siap membantu dengan senyum! 😊💪`;
+
+                    if (isIpError) {
+                        const ownerIpMsg = `🚨 *INFO PENTING DARI CHUNA!* 🚨
+IP Digiflazz tidak dikenali!
+Pelanggan mencoba memesan namun gagal karena error IP.
+👤 *Pelanggan*: ${payJson.data?.customer_name || checkResult?.customer_name || "-"} (${displayCustomerNo})
+📦 *Tagihan*: ${stateData.product.product_name}
+⚠️ *Error*: ${payJson.data.message}
+
+Segera cek dan update whitelist IP di dashboard Digiflazz Kakak!`;
+                        for (const ownerId of db.owners) {
+                            try {
+                                await bot.telegram.sendMessage(ownerId, ownerIpMsg, { parse_mode: 'Markdown' });
+                            } catch(e) {
+                                console.error("Failed to notify owner", e);
+                            }
+                        }
+                    }
                     
                     if (payJson.data.message && payJson.data.message.toLowerCase().includes("harga seller lebih besar dari ketentuan harga buyer")) {
                         const ownerMsg = `🚨 *INFO PENTING DARI CHUNA!* 🚨
