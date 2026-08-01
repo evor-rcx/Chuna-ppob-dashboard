@@ -1,44 +1,57 @@
 import re
 
-with open('/app/applet/src/components/views/Transaksi.tsx', 'r', encoding='utf-8') as f:
-    text = f.read()
+with open('src/components/views/Transaksi.tsx', 'r') as f:
+    code = f.read()
 
-btn_old = """                  {t.status.includes('Sukses') && (
-                    <a 
-                      href={`/api/nota/${t.id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-3 py-1 bg-indigo-500/20 text-indigo-400 rounded-md text-xs font-semibold hover:bg-indigo-500/30 transition-colors flex items-center gap-1 w-fit"
-                      title="Cetak Struk HTML"
-                    >
-                      🖨️ Cetak Struk
-                    </a>
-                  )}"""
+btn_pattern = r"""                      <a 
+                        href=\{\`/api/nota/\$\{t\.id\}\`\}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1 bg-sky-500/20 text-sky-400 rounded-md text-xs font-semibold hover:bg-sky-500/30 transition-colors flex items-center gap-1 w-fit"
+                        title="Print Nota Gambar"
+                      >
+                        🖼️ Web Print
+                      </a>"""
 
-btn_new = """                  {t.status.includes('Sukses') && (
-                    <div className="flex gap-2 items-center justify-end">
-                      <a 
+new_btn = """                      <a 
                         href={`/api/nota/${t.id}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="px-3 py-1 bg-sky-500/20 text-sky-400 rounded-md text-xs font-semibold hover:bg-sky-500/30 transition-colors flex items-center gap-1 w-fit"
-                        title="Nota Web (HTML)"
+                        title="Print Nota Gambar"
                       >
-                        🌐 Web
+                        🖼️ Web Print
                       </a>
-                      <button 
-                        onClick={() => printReceiptBluetooth(t)}
-                        className="px-3 py-1 bg-indigo-500/20 text-indigo-400 rounded-md text-xs font-semibold hover:bg-indigo-500/30 transition-colors flex items-center gap-1 w-fit"
-                        title="Cetak Struk Bluetooth"
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const email = prompt("Masukkan email tujuan untuk mengirim nota:");
+                          if (email) {
+                            fetch(`/api/nota/${t.id}/send-email`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ email })
+                            })
+                            .then(res => res.json())
+                            .then(data => {
+                              if (data.success) {
+                                alert("Nota berhasil dikirim ke email!");
+                              } else {
+                                alert("Gagal: " + data.error);
+                              }
+                            })
+                            .catch(() => alert("Terjadi kesalahan saat mengirim email"));
+                          }
+                        }}
+                        className="px-3 py-1 bg-red-500/20 text-red-400 rounded-md text-xs font-semibold hover:bg-red-500/30 transition-colors flex items-center gap-1 w-fit"
+                        title="Kirim Nota ke Gmail"
                       >
-                        🖨️ Bluetooth
-                      </button>
-                    </div>
-                  )}"""
+                        ✉️ Kirim Email
+                      </button>"""
 
-text = text.replace(btn_old, btn_new)
+code = re.sub(btn_pattern, new_btn, code)
 
-with open('/app/applet/src/components/views/Transaksi.tsx', 'w', encoding='utf-8') as f:
-    f.write(text)
+with open('src/components/views/Transaksi.tsx', 'w') as f:
+    f.write(code)
 
-print("Added bluetooth print button.")
+print("Transaksi.tsx updated")

@@ -19,6 +19,26 @@ import { Page } from './types';
 export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>('menu');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [bgType, setBgType] = useState(localStorage.getItem('chuna_bg_type') || '');
+  const [bgUrl, setBgUrl] = useState(localStorage.getItem('chuna_bg_url') || '');
+
+  useEffect(() => {
+    const handleBgChange = () => {
+      setBgType(localStorage.getItem('chuna_bg_type') || '');
+      setBgUrl(localStorage.getItem('chuna_bg_url') || '');
+    };
+    window.addEventListener('chuna_bg_update', handleBgChange);
+    return () => window.removeEventListener('chuna_bg_update', handleBgChange);
+  }, []);
+
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('chuna_theme');
+    if (savedTheme === 'light') {
+      document.documentElement.classList.add('theme-light');
+    } else {
+      document.documentElement.classList.remove('theme-light');
+    }
+  }, []);
 
   useEffect(() => {
     const handleLogout = () => setIsAuthenticated(false);
@@ -58,8 +78,18 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0f1d] text-slate-200 font-sans flex justify-center">
-      <div className="w-full max-w-[1200px] flex flex-col md:flex-row">
+    <div className="min-h-screen bg-[#0a0f1d] text-slate-200 font-sans flex justify-center relative">
+      {bgType === 'image' && bgUrl && (
+        <div className="absolute inset-0 z-0 overflow-hidden">
+          <img src={bgUrl} className="w-full h-full object-cover opacity-20" alt="bg" data-no-invert />
+        </div>
+      )}
+      {bgType === 'video' && bgUrl && (
+        <div className="absolute inset-0 z-0 overflow-hidden">
+          <video src={bgUrl} autoPlay loop muted playsInline className="w-full h-full object-cover opacity-20" data-no-invert />
+        </div>
+      )}
+      <div className="w-full max-w-[1200px] flex flex-col md:flex-row relative z-10">
         <Sidebar />
         <main className="flex-1 flex flex-col p-6 md:p-8 gap-8 overflow-hidden">
           {renderPage()}

@@ -7,6 +7,8 @@ export function Konfig({ onBack }: { onBack: () => void }) {
   const [status, setStatus] = useState('Checking...');
   const [balance, setBalance] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [bgType, setBgType] = useState(localStorage.getItem('chuna_bg_type') || '');
+  const [bgUrl, setBgUrl] = useState(localStorage.getItem('chuna_bg_url') || '');
 
   useEffect(() => {
     fetch('/api/digiflazz/status')
@@ -28,6 +30,7 @@ export function Konfig({ onBack }: { onBack: () => void }) {
     
     setLoading(true);
     setStatus('Connecting...');
+    
     try {
       const res = await fetch('/api/digiflazz/configure', {
         method: 'POST',
@@ -35,6 +38,7 @@ export function Konfig({ onBack }: { onBack: () => void }) {
         body: JSON.stringify({ username, apiKey })
       });
       const data = await res.json();
+      
       if (data.success) {
         setStatus('Connected');
         setBalance(data.balance);
@@ -69,6 +73,72 @@ export function Konfig({ onBack }: { onBack: () => void }) {
           )}
         </div>
 
+        <div className="bg-slate-800/30 p-4 rounded-xl border border-slate-700/50 flex flex-col gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center">🎨</div>
+            <div className="text-[10px] uppercase text-slate-500 font-bold">Tema Tampilan & Latar Belakang</div>
+          </div>
+          
+          <div className="flex flex-col gap-2 mt-2">
+            <label className="text-xs text-slate-400">Mode Tema</label>
+            <div className="flex gap-2">
+              <button 
+                onClick={() => {
+                  localStorage.setItem('chuna_theme', 'dark');
+                  document.documentElement.classList.remove('theme-light');
+                }}
+                className="flex-1 bg-slate-800 border border-slate-700 text-slate-300 py-2 rounded-lg text-sm font-medium hover:bg-slate-700 transition-colors"
+              >
+                🌙 Mode Gelap
+              </button>
+              <button 
+                onClick={() => {
+                  localStorage.setItem('chuna_theme', 'light');
+                  document.documentElement.classList.add('theme-light');
+                }}
+                className="flex-1 bg-slate-200 border border-slate-300 text-slate-800 py-2 rounded-lg text-sm font-medium hover:bg-white transition-colors"
+                data-no-invert
+              >
+                ☀️ Mode Terang
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2 mt-2 border-t border-slate-700/50 pt-3">
+            <label className="text-xs text-slate-400">Tipe Latar Belakang</label>
+            <select
+              value={bgType}
+              onChange={(e) => {
+                setBgType(e.target.value);
+                localStorage.setItem('chuna_bg_type', e.target.value);
+                window.dispatchEvent(new Event('chuna_bg_update'));
+              }}
+              className="w-full bg-slate-800/50 border border-slate-700/50 p-2 rounded-lg text-white text-sm outline-none"
+            >
+              <option value="">Tidak ada (Warna solid)</option>
+              <option value="image">Gambar (Image)</option>
+              <option value="video">Video</option>
+            </select>
+          </div>
+
+          {bgType && (
+            <div className="flex flex-col gap-2">
+              <label className="text-xs text-slate-400">URL Gambar / Video</label>
+              <input
+                type="text"
+                placeholder={bgType === 'image' ? 'Masukkan URL gambar...' : 'Masukkan URL video...'}
+                value={bgUrl}
+                onChange={(e) => {
+                  setBgUrl(e.target.value);
+                  localStorage.setItem('chuna_bg_url', e.target.value);
+                  window.dispatchEvent(new Event('chuna_bg_update'));
+                }}
+                className="w-full bg-slate-800/50 border border-slate-700/50 p-2 rounded-lg text-white text-sm outline-none"
+              />
+            </div>
+          )}
+        </div>
+
         <div className="flex flex-col gap-2">
           <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">Username Digiflazz</label>
           <input 
@@ -79,6 +149,7 @@ export function Konfig({ onBack }: { onBack: () => void }) {
             className="w-full bg-slate-800/50 border border-slate-700/50 p-3 rounded-xl text-white outline-none focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/50 transition-all"
           />
         </div>
+
         <div className="flex flex-col gap-2">
           <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">API Key (Production)</label>
           <input 
@@ -89,6 +160,7 @@ export function Konfig({ onBack }: { onBack: () => void }) {
             className="w-full bg-slate-800/50 border border-slate-700/50 p-3 rounded-xl text-white outline-none focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/50 transition-all"
           />
         </div>
+        
         <button 
           onClick={handleSave}
           disabled={loading}

@@ -113,6 +113,32 @@ export function Transaksi({ onBack }: { onBack: () => void }) {
                       >
                         🖼️ Web Print
                       </a>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const email = prompt("Masukkan email tujuan untuk mengirim nota:");
+                          if (email) {
+                            fetch(`/api/nota/${t.id}/send-email`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ email })
+                            })
+                            .then(res => res.json())
+                            .then(data => {
+                              if (data.success) {
+                                alert("Nota berhasil dikirim ke email!");
+                              } else {
+                                alert("Gagal: " + data.error);
+                              }
+                            })
+                            .catch(() => alert("Terjadi kesalahan saat mengirim email"));
+                          }
+                        }}
+                        className="px-3 py-1 bg-red-500/20 text-red-400 rounded-md text-xs font-semibold hover:bg-red-500/30 transition-colors flex items-center gap-1 w-fit"
+                        title="Kirim Nota ke Gmail"
+                      >
+                        ✉️ Kirim Email
+                      </button>
                       <button 
                         type="button"
                         onClick={(e) => {

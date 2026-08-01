@@ -1218,15 +1218,21 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
         waStatus = "Disconnected: " + (errMsg || "Closed");
         console.log("WA connection closed", errMsg, "statusCode:", statusCode);
         
-        if (statusCode === 401 || statusCode === 403 || statusCode === 405) {
-           try { fs.rmSync(path.join(process.cwd(), "wa_auth"), { recursive: true, force: true }); } catch (e) { }
+        // Always try to reconnect unless it's explicitly logged out (401)
+        if (statusCode === 401) {
+           // fs.rmSync disabled to prevent auto-logout
            waSocket = null;
+           console.log("WA Logged out by device. Auth deleted.");
         } else {
-           if (waReconnectAttempts < 5) {
-             waReconnectAttempts++;
-             console.log("Reconnecting WA in 3 seconds...");
-             setTimeout(startWaSocket, 3000);
+           if (statusCode === 405) {
+               console.log("WA bad session, deleting auth and reconnecting...");
+               // fs.rmSync disabled to prevent auto-logout
            }
+           // Reconnect
+           waReconnectAttempts++;
+           let backoff = Math.min(waReconnectAttempts * 2000, 10000);
+           console.log(`Reconnecting WA in ${backoff/1000} seconds...`);
+           setTimeout(startWaSocket, backoff);
         }
       } else if (connection === "open") {
         waReconnectAttempts = 0;
@@ -2194,7 +2200,7 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca") {
 
   // --- Telegram Bot API Routes ---
   app.get("/api/bot/status", (req, res) => {
-    res.json({ status: botStatus, running: bot !== null });
+    res.json({ status: botStatus, running: bot !== null, token: db.telegramToken || "" });
   });
 
   app.get("/api/bot/owner", (req, res) => {
@@ -5039,6 +5045,40 @@ if (process.env.APPLET_ID || process.env.K_REVISION) {
     }
   }
 
+
+  app.get("/api/gmail/status", (req, res) => {
+    res.json({
+      status: db.gmailEmail ? "Configured" : "Not Configured",
+      email: db.gmailEmail || ""
+    });
+  });
+
+  app.post("/api/gmail/configure", async (req, res) => {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: "Email and App Password are required" });
+    
+    try {
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: email,
+          pass: password
+        }
+      });
+      
+      // Verify connection
+      await transporter.verify();
+      
+      db.gmailEmail = email;
+      db.gmailAppPassword = password;
+      writeDB(db);
+      
+      res.json({ success: true, message: "Gmail connected successfully" });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: "Failed to connect: " + error.message });
+    }
+  });
+
   app.post("/api/bot/configure", async (req, res) => {
     const { token } = req.body;
     if (!token) return res.status(400).json({ error: "Token is required" });
@@ -5158,6 +5198,69 @@ app.get("/api/tagihan-nota-image", async (req, res) => {
         }
     } catch (e) {
         res.status(500).send("Error parsing tagihan data for image");
+    }
+  });
+
+
+  app.post("/api/nota/:id/send-email", async (req, res) => {
+    const { id } = req.params;
+    const { email } = req.body;
+    
+    if (!email) {
+      return res.status(400).json({ success: false, error: "Email tujuan diperlukan" });
+    }
+    
+    if (!db.gmailEmail || !db.gmailAppPassword) {
+      return res.status(400).json({ success: false, error: "Gmail belum dikonfigurasi di menu Bot" });
+    }
+    
+    const tx = db.transactions.find(t => t.id === id);
+    if (!tx) {
+        return res.status(404).json({ success: false, error: "Nota tidak ditemukan" });
+    }
+    
+    try {
+      const buffer = await generateCanvasReceipt("nota", tx);
+      if (!buffer) {
+          return res.status(500).json({ success: false, error: "Gagal generate gambar nota" });
+      }
+      
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: db.gmailEmail,
+          pass: db.gmailAppPassword
+        }
+      });
+      
+      const mailOptions = {
+        from: `E4 Store <${db.gmailEmail}>`,
+        to: email,
+        subject: `Nota Pembelian - ${tx.product}`,
+        text: `Halo,
+
+Terima kasih telah berbelanja di E4 Store.
+Berikut adalah nota pembelian Anda untuk produk ${tx.product}.
+
+ID Transaksi: ${tx.id}
+Harga: Rp ${tx.price.toLocaleString('id-ID')}
+Status: ${tx.status}
+
+Salam,
+E4 Store`,
+        attachments: [
+          {
+            filename: `Nota-${tx.id}.png`,
+            content: buffer
+          }
+        ]
+      };
+      
+      await transporter.sendMail(mailOptions);
+      res.json({ success: true, message: "Email berhasil dikirim!" });
+    } catch (e: any) {
+      console.error("Error sending email:", e);
+      res.status(500).json({ success: false, error: "Gagal mengirim email: " + e.message });
     }
   });
 
