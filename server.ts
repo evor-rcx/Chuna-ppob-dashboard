@@ -1,7 +1,12 @@
 import fs from "fs";
+import dotenv from "dotenv";
+dotenv.config();
+import { z } from "zod";
 import { EdgeTTS } from "node-edge-tts";
 import cron from "node-cron";
 import express from "express";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 
 import fs_logger from 'fs';
 const originalLog = console.log;
@@ -879,6 +884,41 @@ function getWitaDate(dateInput?: string) {
 }
 
 const app = express();
+// Menggunakan filter IP internal untuk trust proxy agar aman dari spoofing X-Forwarded-For
+app.set('trust proxy', 'loopback, linklocal, uniquelocal');
+
+  // Cyber Security Measures (Anti-hacker, Anti-bot)
+  app.use(helmet({
+    contentSecurityPolicy: false, // disabled for some react apps if it breaks inline scripts, adjust if needed
+    crossOriginEmbedderPolicy: false
+  }));
+  
+  // Basic rate limiting to prevent brute force & bot attacks
+  const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 1000, // limit each IP to 1000 requests per windowMs
+    message: { success: false, error: "Terlalu banyak request dari IP ini, coba lagi nanti. (Anti-Bot Protection)" },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => {
+      // Bebaskan webhook dari rate limit agar notifikasi dari Digiflazz tidak terblokir
+      return req.path.includes('/webhook') || req.path.includes('/api/digiflazz-webhook');
+    }
+  });
+  app.use(limiter);
+  
+  // Specific stricter rate limit for API endpoints
+  const apiLimiter = rateLimit({
+    windowMs: 5 * 60 * 1000, // 5 minutes
+    max: 200, 
+    message: { success: false, error: "Limit request API tercapai. (Anti-DDoS Protection)" },
+    skip: (req) => {
+      // Bebaskan webhook dari rate limit
+      return req.path.includes('/webhook') || req.path.includes('/api/digiflazz-webhook');
+    }
+  });
+  app.use("/api/", apiLimiter);
+
   app.get("/api/dump", (req, res) => {
     res.json({ registeredUsers, dbRegistered: db.registeredUsers });
   });
@@ -969,9 +1009,7 @@ ${refundMsg}
 
 ${(data.message || '').toLowerCase().includes('ip') ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Tenang saja, Kakak bisa mencoba ulang kapan pun.'}
 
-Butuh bantuan? ${(data.message || '').toLowerCase().includes('ip') ? `Langsung chat Chuna di Bot Telegram:
-Chuna siap membantu dengan senyum! 😊💪` : `Chat Chuna di Bot Telegram:
-Chuna siap bantu! 😊💪`}`;
+${(data.message || '').toLowerCase().includes('ip') ? `Chuna siap membantu dengan senyum! 😊💪` : `Chuna siap bantu! 😊💪`}`;
                     
                     if (data.message && data.message.toLowerCase().includes("harga seller lebih besar dari ketentuan harga buyer")) {
                         const ownerMsg = `🚨 *INFO PENTING DARI CHUNA!* 🚨
@@ -2519,7 +2557,7 @@ ${refundMsg}
 
 ${isIpError ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Tenang saja, Kakak bisa mencoba ulang kapan pun.'}
 
-Butuh bantuan? Chuna siap membantu dengan senyum! 😊💪`;
+Chuna siap bantu! 😊💪`;
 
                     if (isIpError) {
                         const ownerIpMsg = `🚨 *INFO PENTING DARI CHUNA!* 🚨
@@ -2792,7 +2830,7 @@ ${refundMsg}
 
 ${isIpError ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Tenang saja, Kakak bisa mencoba ulang kapan pun.'}
 
-Butuh bantuan? Chuna siap membantu dengan senyum! 😊💪`;
+Chuna siap bantu! 😊💪`;
 
                     if (isIpError) {
                         const ownerIpMsg = `🚨 *INFO PENTING DARI CHUNA!* 🚨

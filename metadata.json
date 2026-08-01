@@ -1,5 +1,5 @@
 {
-  "name": "e4tstore PPOB Dashboard",
+  "name": "e4store PPOB Dashboard",
   "description": "Dashboard PPOB for e4store with glassmorphism UI.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
