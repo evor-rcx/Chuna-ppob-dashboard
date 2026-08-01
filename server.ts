@@ -2456,7 +2456,7 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca") {
         if (!isOwnerSelf) {
             if (method === 'saldo') {
                 if (member.balance < total) {
-                    return ctx.reply(`❌ TRANSAKSI DITOLAK!Maaf kak, saldo kakak tidak mencukupi untuk melakukan transaksi ini.💳 Saldo Saat Ini: Rp ${member.balance.toLocaleString('id-ID')}💰 Total Bayar: Rp ${total.toLocaleString('id-ID')}Silakan isi ulang saldo kakak terlebih dahulu. 🙏`);
+                    return ctx.reply(`❌ TRANSAKSI DITOLAK!Maaf kak, saldo kakak tidak mencukupi untuk melakukan transaksi ini.💳 Saldo Saat Ini: Rp ${member.balance.toLocaleString('id-ID')}💰 Total Bayar: Rp ${total.toLocaleString('id-ID')}Silakan isi ulang saldo kakak terlebih dahulu. 🙏`, { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Fitur Download" }]], resize_keyboard: true } });
                 }
                 member.balance -= total;
                 db.members = members;
@@ -2729,7 +2729,7 @@ async function processPascaPayment(ctx: any, ref_id: string, method: string, sta
         if (!isOwnerSelf) {
             if (method === 'saldo') {
                 if (member.balance < total) {
-                    return ctx.reply(`❌ TRANSAKSI DITOLAK!Maaf kak, saldo kakak tidak mencukupi untuk melakukan transaksi ini.💳 Saldo Saat Ini: Rp ${member.balance.toLocaleString('id-ID')}💰 Total Bayar: Rp ${total.toLocaleString('id-ID')}Silakan isi ulang saldo kakak terlebih dahulu. 🙏`);
+                    return ctx.reply(`❌ TRANSAKSI DITOLAK!Maaf kak, saldo kakak tidak mencukupi untuk melakukan transaksi ini.💳 Saldo Saat Ini: Rp ${member.balance.toLocaleString('id-ID')}💰 Total Bayar: Rp ${total.toLocaleString('id-ID')}Silakan isi ulang saldo kakak terlebih dahulu. 🙏`, { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Fitur Download" }]], resize_keyboard: true } });
                 }
                 member.balance -= total;
                 db.members = members;
