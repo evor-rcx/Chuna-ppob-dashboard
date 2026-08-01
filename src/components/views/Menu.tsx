@@ -38,7 +38,7 @@ export function Menu({ onNavigate }: MenuProps) {
     { id: 'transaksi', icon: <FileText size={32} />, label: 'Transaksi' },
     { id: 'konfig', icon: <Settings size={32} />, label: 'Konfig API' },
     { id: 'bot', icon: <Bot size={32} />, label: 'Bot WA/Tele' },
-    { id: 'saldo', icon: <Wallet size={32} />, label: 'Saldo Member' },
+    { id: 'saldo', icon: <Wallet size={32} />, label: 'Customer Telegram' },
     { id: 'member-offline', icon: <Users size={32} />, label: 'Member Offline' },
     { id: 'kasir-fisik', icon: <Store size={32} />, label: 'Kasir Jualan Fisik' },
   ];

@@ -117,7 +117,7 @@ export function Saldo({ onBack }: { onBack: () => void }) {
   const selectedMember = members.find(m => m.id === topupModal.memberId);
 
   return (
-    <PageContainer title="Saldo Member" onBack={onBack}>
+    <PageContainer title="Data Customer Telegram" onBack={onBack}>
       <div className="-mx-6 -mt-6">
         <table className="w-full text-left">
           <thead>

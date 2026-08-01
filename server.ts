@@ -1798,7 +1798,11 @@ Yuk langsung belanja kak, banyak promo nunggu! 🛍️✨`;
     const { id } = req.params;
     const memberIndex = members.findIndex(m => m.id === id);
     if (memberIndex !== -1) {
-      const userId = id.replace('MBR-', '');
+      const member = members[memberIndex];
+      let userId = id.replace('MBR-', '');
+      if (member.telegram && member.telegram.startsWith('ID:')) {
+         userId = member.telegram.substring(3);
+      }
       let found = false;
       let matchedKey = userId;
       
@@ -1857,10 +1861,15 @@ Yuk langsung belanja kak, banyak promo nunggu! 🛍️✨`;
     const { id } = req.params;
     const memberIndex = members.findIndex(m => m.id === id);
     if (memberIndex !== -1) {
+      const member = members[memberIndex];
       members.splice(memberIndex, 1);
       db.members = members;
       
-      const userId = id.replace('MBR-', '');
+      let userId = id.replace('MBR-', '');
+      if (member.telegram && member.telegram.startsWith('ID:')) {
+         userId = member.telegram.substring(3);
+      }
+      
       if (registeredUsers[userId]) {
         delete registeredUsers[userId];
       } else {
@@ -2946,11 +2955,14 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
 
       bot.hears(/Daftar Bareng Chuna/i, async (ctx) => {
         if (ctx.from) {
-          if (registeredUsers[ctx.from.id]) {
-             ctx.reply("Mohon maaf kak, akun anda sudah terdaftar dengan tegas.");
+          const userId = ctx.from.id;
+          console.log("Checking user registration. ctx.from.id:", userId);
+          console.log("Is in registeredUsers?", !!registeredUsers[userId], registeredUsers[userId]);
+          if (registeredUsers[userId]) {
+             ctx.reply("Mohon maaf kak, akun anda sudah terdaftar ");
              return;
           }
-          userStates[ctx.from.id] = { step: 'AWAITING_USERNAME', data: {} };
+          userStates[userId] = { step: 'AWAITING_USERNAME', data: {} };
         }
         ctx.reply(`📝 PENDAFTARAN AKUN
 
