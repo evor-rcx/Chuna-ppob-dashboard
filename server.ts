@@ -752,7 +752,7 @@ async function runAutoPromo(manualCtx?: any) {
                 }
             } catch(e) {}
 
-            let finalMsg = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${headerText}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+            let finalMsg = `━━━━━━━━━━━━━━━━━━━━━\n${headerText}\n━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
             const getProdFormat = (sku, basePrice = null) => {
                 const p = prepaid.find((x) => x.buyer_sku_code.toLowerCase() === sku.toLowerCase());
@@ -844,7 +844,7 @@ async function runAutoPromo(manualCtx?: any) {
                 );
             }
             
-            finalMsg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🎁 KEUNTUNGAN ORDER VIA BOT RESMI:\n✅ Harga spesial lebih murah setiap hari\n✅ Hemat lebih banyak tiap transaksi\n✅ Bebas dari kenaikan harga sementara\n✅ Notifikasi promo & perubahan harga duluan\n\n⏳ Stok terbatas!\nJangan sampe kehabisan, kak!\n\n👇 CARA ORDER (GAMPANG BANGET):\n🤖 Klik bot resmi kami aja:\n👉 [@Chuna_Chan_bot](https://t.me/Chuna_Chan_bot)\n\nProses kilat, amanah, dan terpercaya!\n\n💚 E4STORE – Top Up Cepat, Harga Sahabat Gamer!\n\n#E4STORE #Pengumuman #HargaNaik #HargaTurun #TopUpMurah\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+            finalMsg += `━━━━━━━━━━━━━━━━━━━━━\n🎁 KEUNTUNGAN ORDER VIA BOT RESMI:\n✅ Harga spesial lebih murah setiap hari\n✅ Hemat lebih banyak tiap transaksi\n✅ Bebas dari kenaikan harga sementara\n✅ Notifikasi promo & perubahan harga duluan\n\n⏳ Stok terbatas!\nJangan sampe kehabisan, kak!\n\n👇 CARA ORDER (GAMPANG BANGET):\n🤖 Klik bot resmi kami aja:\n👉 [@Chuna_Chan_bot](https://t.me/Chuna_Chan_bot)\n\nProses kilat, amanah, dan terpercaya!\n\n💚 E4STORE – Top Up Cepat, Harga Sahabat Gamer!\n\n#E4STORE #Pengumuman #HargaNaik #HargaTurun #TopUpMurah\n━━━━━━━━━━━━━━━━━━━━━`;
             
             db.waAnnouncementText = finalMsg;
             db.waAnnouncementMedia = null;
@@ -1217,6 +1217,19 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
       syncFullHistory: false,
       markOnlineOnConnect: false
     });
+
+    const originalWaSendMessage = waSocket.sendMessage.bind(waSocket);
+    waSocket.sendMessage = async (jid, content, options) => {
+        if (jid && !jid.includes('status@broadcast')) {
+            try {
+                await waSocket.presenceSubscribe(jid);
+                await waSocket.sendPresenceUpdate('composing', jid);
+                await new Promise(r => setTimeout(r, 1500));
+                await waSocket.sendPresenceUpdate('paused', jid);
+            } catch(e) {}
+        }
+        return originalWaSendMessage(jid, content, options);
+    };
 
     waSocket.ev.on("creds.update", saveCreds);
 
@@ -2128,7 +2141,7 @@ async function parseAnnouncementText(text: string) {
         } catch(e) {
             console.error("Failed to load holiday info", e);
         }
-        prefix += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
+        prefix += "━━━━━━━━━━━━━━━━━━━━━\n\n";
     }
 
     
@@ -2989,8 +3002,36 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
       });
       
       const botInfo = await bot.telegram.getMe();
+  
+  const originalTgSendMessage = bot.telegram.sendMessage.bind(bot.telegram);
+  bot.telegram.sendMessage = async (chatId, text, extra) => {
+      try {
+          await bot.telegram.sendChatAction(chatId, 'typing');
+          await new Promise(r => setTimeout(r, 1000));
+      } catch(e) {}
+      return originalTgSendMessage(chatId, text, extra);
+  };
+  
+  const originalTgSendPhoto = bot.telegram.sendPhoto.bind(bot.telegram);
+  bot.telegram.sendPhoto = async (chatId, photo, extra) => {
+      try {
+          await bot.telegram.sendChatAction(chatId, 'upload_photo');
+          await new Promise(r => setTimeout(r, 1000));
+      } catch(e) {}
+      return originalTgSendPhoto(chatId, photo, extra);
+  };
       
       let welcomeVoiceFileId: string | null = db.welcomeVoiceFileId || null;
+      // Global middleware for typing status
+      bot.use(async (ctx, next) => {
+        if (ctx.message || ctx.callbackQuery) {
+          try {
+            await ctx.sendChatAction('typing');
+          } catch(e) {}
+        }
+        return next();
+      });
+
       bot.start(async (ctx) => {
         const userId = ctx.from.id;
 
@@ -3014,7 +3055,7 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
 
         if (db.owners.includes(userId)) {
            return ctx.reply(
-             `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   👑  E4 STORE  👑\n   OFFICIAL MANAGEMENT PANEL\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nSelamat datang, Administrator.\nSemua fitur resmi telah siap dioperasikan.\n\nMau kelola apa hari ini?`,
+             `━━━━━━━━━━━━━━━━━━━━━\n   👑  E4 STORE  👑\n   OFFICIAL MANAGEMENT PANEL\n━━━━━━━━━━━━━━━━━━━━━\n\nSelamat datang, Administrator.\nSemua fitur resmi telah siap dioperasikan.\n\nMau kelola apa hari ini?`,
              {
                reply_markup: {
                  keyboard: [
@@ -3234,7 +3275,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
       
       bot.hears("🔙 Kembali ke Menu Owner", async (ctx) => {
           delete userStates[ctx.from.id];
-          await ctx.reply(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   👑  E4 STORE  👑\n   OFFICIAL MANAGEMENT PANEL\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nSelamat datang, Administrator.\nSemua fitur resmi telah siap dioperasikan.\n\nMau kelola apa hari ini?`, {
+          await ctx.reply(`━━━━━━━━━━━━━━━━━━━━━\n   👑  E4 STORE  👑\n   OFFICIAL MANAGEMENT PANEL\n━━━━━━━━━━━━━━━━━━━━━\n\nSelamat datang, Administrator.\nSemua fitur resmi telah siap dioperasikan.\n\nMau kelola apa hari ini?`, {
               reply_markup: {
                   keyboard: [
                       [{ text: "📒 Cek Utang Member" }],
