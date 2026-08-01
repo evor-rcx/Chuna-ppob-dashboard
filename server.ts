@@ -3953,6 +3953,28 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
           return next();
       });
 
+
+      bot.hears(["❌ Batal", "❌ Tidak"], async (ctx) => {
+          const userId = ctx.from.id;
+          const state = userStates[userId];
+          let kb = [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Fitur Download" }]];
+          if (db.owners.includes(userId)) {
+             kb.push([{ text: "👑 List Member" }, { text: "📒 Cek Utang Member" }]);
+             kb.push([{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }]);
+          }
+          if (state && state.data && state.data.memberId) {
+              userStates[userId] = { step: 'LOCKED_MEMBER', data: { memberId: state.data.memberId } };
+              await ctx.reply("❌ Dibatalkan. Kembali ke menu transaksi member offline.", {
+                  reply_markup: { keyboard: [[{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "🔙 Kembali ke Menu Owner" }]], resize_keyboard: true }
+              });
+              return;
+          }
+          delete userStates[userId];
+          await ctx.reply("❌ Dibatalkan. Kembali ke menu utama.", {
+              reply_markup: { keyboard: kb, resize_keyboard: true }
+          });
+      });
+
       bot.on("text", async (ctx, next) => {
         const userId = ctx.from.id;
         const text = ctx.message.text;
@@ -4016,6 +4038,17 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
 
                 case 'ASK_PIN_PREPAID': {
                     const pinEntered = text.trim();
+                    if (pinEntered === '❌ Batal' || pinEntered.toLowerCase() === 'batal') {
+                        delete userStates[userId];
+                        const isOwner = db.owners.includes(userId);
+                        let kb = [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Fitur Download" }]];
+                        if (isOwner) {
+                            kb.push([{ text: "👑 List Member" }, { text: "📒 Cek Utang Member" }]);
+                            kb.push([{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }]);
+                        }
+                        await ctx.reply("❌ Transaksi dibatalkan.", { reply_markup: { keyboard: kb, resize_keyboard: true } });
+                        return;
+                    }
                     const regUser = registeredUsers[userId];
                     if (!regUser || regUser.pin !== pinEntered) {
                         return ctx.reply("😡 HMM?! PIN-NYA SALAH! Hayoo, kamu siapa?! Jangan sembarangan pakai akun orang ya! Chuna gigit nih kalau berani macam-macam! 🔪👿");
@@ -4028,6 +4061,17 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                 }
                 case 'ASK_PIN_PASCA': {
                     const pinEntered = text.trim();
+                    if (pinEntered === '❌ Batal' || pinEntered.toLowerCase() === 'batal') {
+                        delete userStates[userId];
+                        const isOwner = db.owners.includes(userId);
+                        let kb = [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Fitur Download" }]];
+                        if (isOwner) {
+                            kb.push([{ text: "👑 List Member" }, { text: "📒 Cek Utang Member" }]);
+                            kb.push([{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }]);
+                        }
+                        await ctx.reply("❌ Transaksi dibatalkan.", { reply_markup: { keyboard: kb, resize_keyboard: true } });
+                        return;
+                    }
                     const regUser = registeredUsers[userId];
                     if (!regUser || regUser.pin !== pinEntered) {
                         return ctx.reply("😡 HMM?! PIN-NYA SALAH! Hayoo, kamu siapa?! Jangan sembarangan pakai akun orang ya! Chuna gigit nih kalau berani macam-macam! 🔪👿");
