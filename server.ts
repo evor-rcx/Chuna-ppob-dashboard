@@ -1793,6 +1793,90 @@ Yuk langsung belanja kak, banyak promo nunggu! 🛍️✨`;
     }
   });
 
+
+  app.post("/api/members/:id/reset-pin", async (req, res) => {
+    const { id } = req.params;
+    const memberIndex = members.findIndex(m => m.id === id);
+    if (memberIndex !== -1) {
+      const userId = id.replace('MBR-', '');
+      let found = false;
+      let matchedKey = userId;
+      
+      if (registeredUsers[userId]) {
+        found = true;
+      } else {
+        const keys = Object.keys(registeredUsers);
+        const matchingKey = keys.find(k => String(k) === String(userId));
+        if (matchingKey) {
+            matchedKey = matchingKey;
+            found = true;
+        }
+      }
+      
+      if (!found) {
+          return res.status(404).json({ success: false, error: 'User tidak memiliki akun bot (belum register).' });
+      }
+      
+      const userWa = registeredUsers[matchedKey].wa;
+      const userName = registeredUsers[matchedKey].username;
+      
+      // Set state for this user so they have to input a new PIN next time they chat
+      userStates[matchedKey] = {
+        step: 'AWAITING_PIN',
+        data: { username: userName, wa: userWa }
+      };
+      
+      // Set fallback pin to 123456 just in case
+      registeredUsers[matchedKey].pin = '123456';
+      db.registeredUsers = registeredUsers;
+      writeDB(db);
+      
+      const msgText = "⚠️ *INFO KEAMANAN*\n\nAdmin telah mereset PIN Anda ke *123456*. Silakan balas pesan ini dengan *PIN BARU* Anda (6 angka) untuk mengamankan kembali akun Anda.";
+      
+      // Try send to Telegram
+      try {
+        if (bot) await bot.telegram.sendMessage(matchedKey, msgText, { parse_mode: 'Markdown' });
+      } catch(e) {}
+      
+      // Try send to WhatsApp
+      try {
+        if (waSocket && waStatus.includes('Connected') && userWa) {
+           let cleanWa = userWa.replace(/\D/g, "");
+           if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
+           const jid = `${cleanWa}@s.whatsapp.net`;
+           await waSocket.sendMessage(jid, { text: msgText });
+        }
+      } catch(e) {}
+      
+      return res.json({ success: true, message: 'Permintaan reset PIN telah dikirim ke member' });
+    }
+    res.status(404).json({ success: false, error: 'Member tidak ditemukan' });
+  });
+
+  app.delete("/api/members/:id", (req, res) => {
+    const { id } = req.params;
+    const memberIndex = members.findIndex(m => m.id === id);
+    if (memberIndex !== -1) {
+      members.splice(memberIndex, 1);
+      db.members = members;
+      
+      const userId = id.replace('MBR-', '');
+      if (registeredUsers[userId]) {
+        delete registeredUsers[userId];
+      } else {
+        const keys = Object.keys(registeredUsers);
+        const matchingKey = keys.find(k => String(k) === String(userId));
+        if (matchingKey) {
+            delete registeredUsers[matchingKey];
+        }
+      }
+      db.registeredUsers = registeredUsers;
+      writeDB(db);
+      return res.json({ success: true, message: 'Member berhasil dihapus' });
+    }
+    res.status(404).json({ success: false, error: 'Member tidak ditemukan' });
+  });
+
   app.post("/api/members/:id/type", async (req, res) => {
     const { id } = req.params;
     const { type } = req.body;
