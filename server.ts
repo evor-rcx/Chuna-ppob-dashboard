@@ -466,7 +466,7 @@ function getProductFee(sku: string) {
     return { biasa: 0, vip: 0, owner: 0 };
 }
 
-const registeredUsers: Record<number, { username: string, wa: string, pin: string }> = db.registeredUsers || {};
+const registeredUsers: Record<number, { username: string, wa: string, pin: string, gmail?: string }> = db.registeredUsers || {};
 
 let transactions: any[] = db.transactions || [];
 let members: any[] = db.members || [];
@@ -879,6 +879,9 @@ function getWitaDate(dateInput?: string) {
 }
 
 const app = express();
+  app.get("/api/dump", (req, res) => {
+    res.json({ registeredUsers, dbRegistered: db.registeredUsers });
+  });
   const PORT = 3000;
 
   app.use(express.json());
@@ -2959,8 +2962,18 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
           console.log("Checking user registration. ctx.from.id:", userId);
           console.log("Is in registeredUsers?", !!registeredUsers[userId], registeredUsers[userId]);
           if (registeredUsers[userId]) {
-             ctx.reply("Mohon maaf kak, akun anda sudah terdaftar ");
-             return;
+             // Validate if they are actually in members
+             const memberId = `MBR-${userId}`;
+             const member = members.find(m => m.id === memberId || isTelegramMatch(m.telegram, userId, ctx.from?.username));
+             if (member) {
+                 ctx.reply("Mohon maaf kak, akun anda sudah terdaftar.");
+                 return;
+             } else {
+                 console.log("Found orphaned registeredUser, cleaning up:", userId);
+                 delete registeredUsers[userId];
+                 db.registeredUsers = registeredUsers;
+                 writeDB(db);
+             }
           }
           userStates[userId] = { step: 'AWAITING_USERNAME', data: {} };
         }
@@ -4730,8 +4743,18 @@ Status pesanan kakak sekarang: ⚠️ BELUM LUNAS`;
                    await ctx.reply(`❌ Yah kode OTP-nya salah kak. Coba cek lagi ya kodenya!`);
                    return;
                 }
+                state.step = 'AWAITING_GMAIL';
+                await ctx.reply(`Yeay kode OTP berhasil dikonfirmasi! 🎉\nSekarang kirim alamat Gmail aktif kakak ya (contoh: chuna@gmail.com) 📧`);
+                return;
+
+              case 'AWAITING_GMAIL':
+                if (!text.includes('@')) {
+                  await ctx.reply(`❌ Format Gmail sepertinya kurang tepat kak. Coba kirim ulang ya! (contoh: chuna@gmail.com)`);
+                  return;
+                }
+                state.data.gmail = text;
                 state.step = 'AWAITING_PIN';
-                await ctx.reply(`Yeay kode OTP berhasil dikonfirmasi! 🎉Satu langkah lagi nih kak. Yuk buat PIN rahasia kakak (6 angka) biar transaksi kakak aman bareng Chuna! 🔒`);
+                await ctx.reply(`Oke Gmail aman! 👌\nSatu langkah lagi nih kak. Yuk buat PIN rahasia kakak (6 angka) biar transaksi kakak aman bareng Chuna! 🔒`);
                 return;
                   
               case 'AWAITING_PIN':
@@ -4740,7 +4763,8 @@ Status pesanan kakak sekarang: ⚠️ BELUM LUNAS`;
                 registeredUsers[userId] = {
                   username: state.data.username,
                   wa: state.data.wa,
-                  pin: state.data.pin
+                  pin: state.data.pin,
+                  gmail: state.data.gmail
                 };
                 
                 let cleanUserWa = state.data.wa.replace(/\D/g, "");
@@ -4763,7 +4787,8 @@ Status pesanan kakak sekarang: ⚠️ BELUM LUNAS`;
                     whatsapp: state.data.wa,
                     telegram: `ID:${userId}`,
                     balance: 0,
-                    type: 'Biasa'
+                    type: 'Biasa',
+                    gmail: state.data.gmail
                   });
                 }
                 

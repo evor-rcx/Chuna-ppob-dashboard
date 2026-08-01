@@ -1,4 +1,6 @@
-const fs = require('fs');
-const code = fs.readFileSync('server.ts', 'utf8');
-const p1 = code.indexOf('// Check pasca brands');
-console.log(code.substring(p1 - 1000, p1 + 1000));
+const http = require('http');
+http.get('http://localhost:3000/api/members', (res) => {
+  let data = '';
+  res.on('data', chunk => data += chunk);
+  res.on('end', () => console.log("ONLINE:", data));
+});
