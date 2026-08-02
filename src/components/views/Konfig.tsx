@@ -137,7 +137,7 @@ export function Konfig({ onBack }: { onBack: () => void }) {
                       setBgUrl('file_loaded'); // trigger UI update
                       window.dispatchEvent(new Event('chuna_bg_update'));
                     } catch(err) {
-                      alert("Gagal menyimpan file ke penyimpanan lokal.");
+                      alert("Gagal menyimpan file: " + (err instanceof Error ? err.message : String(err)) + "\n\nJika file video terlalu besar, cobalah kompres ukurannya.");
                     }
                   } else {
                     await clearBgFile();

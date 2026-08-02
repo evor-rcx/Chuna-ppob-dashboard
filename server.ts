@@ -1404,7 +1404,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                         for(let i=0; i<3; i++) {
                             try {
                                 const audioBuffer = fs.readFileSync(vnPathOgg);
-                                await waSocket.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true }, { quoted: msg });
+                                await waSocket.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/mp4', ptt: true }, { quoted: msg });
                                 sent = true;
                                 break;
                             } catch (err: any) {

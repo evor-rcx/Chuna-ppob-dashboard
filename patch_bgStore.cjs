@@ -1,4 +1,6 @@
+const fs = require('fs');
 
+const newStore = `
 export const DB_NAME = 'chuna_bg_db';
 export const STORE_NAME = 'bg_store';
 
@@ -112,3 +114,6 @@ export async function clearBgFile(): Promise<void> {
     console.warn("clearBgFile: IndexedDB clear failed, ignored", err);
   }
 }
+`;
+
+fs.writeFileSync('src/lib/bgStore.ts', newStore);
