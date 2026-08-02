@@ -1090,14 +1090,22 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                                 await new Promise(r => setTimeout(r, 1200));
                                 await waSocket.sendPresenceUpdate("paused", jid);
                                 
+                                let edited = false;
+                                if (tx.waMsgKey) {
+                                    try {
+                                        await waSocket.sendMessage(jid, { text: msg, edit: tx.waMsgKey });
+                                        edited = true;
+                                    } catch (e) { console.log("Failed to edit msg", e); }
+                                }
+                                
                                 if (status === 'Sukses') {
                                     const buffer = await generateCanvasReceipt("nota", tx);
                                     if (buffer) {
                                         await waSocket.sendMessage(jid, { image: buffer, caption: "✅ *Transaksi Berhasil!* Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰" });
-                                    } else {
+                                    } else if (!edited) {
                                         await waSocket.sendMessage(jid, { text: msg });
                                     }
-                                } else {
+                                } else if (!edited) {
                                     await waSocket.sendMessage(jid, { text: msg });
                                 }
                                 
