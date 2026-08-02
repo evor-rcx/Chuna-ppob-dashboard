@@ -1090,32 +1090,65 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                                 await new Promise(r => setTimeout(r, 1200));
                                 await waSocket.sendPresenceUpdate("paused", jid);
                                 
-                                let edited = false;
-                                if (tx.waMsgKey) {
-                                    try {
-                                        await waSocket.sendMessage(jid, { text: msg, edit: tx.waMsgKey });
-                                        edited = true;
-                                    } catch (e) { }
-                                }
-                                
                                 if (status === 'Sukses') {
-                    
                                     const buffer = await generateCanvasReceipt("nota", tx);
                                     if (buffer) {
-                                        // Wait a little bit for realistic flow
-                                        await new Promise(r => setTimeout(r, 1000));
-                                        await waSocket.sendPresenceUpdate("composing", jid);
-                                        await new Promise(r => setTimeout(r, 1200));
-                                        await waSocket.sendPresenceUpdate("paused", jid);
                                         await waSocket.sendMessage(jid, { image: buffer, caption: "✅ *Transaksi Berhasil!* Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰" });
-                                        
-                                    } else if (!edited) {
+                                    } else {
                                         await waSocket.sendMessage(jid, { text: msg });
                                     }
-                                } else if (!edited) {
+                                } else {
                                     await waSocket.sendMessage(jid, { text: msg });
                                 }
                                 
+
+                if (status === 'Sukses' && member && member.gmail && db.gmailEmail && db.gmailAppPassword) {
+                    (async () => {
+                        try {
+                            const buffer = await generateCanvasReceipt("nota", tx);
+                            if (buffer) {
+                                const transporter = (await import('nodemailer')).default.createTransport({
+                                    service: 'gmail',
+                                    auth: {
+                                        user: db.gmailEmail,
+                                        pass: db.gmailAppPassword
+                                    }
+                                });
+                                
+                                const htmlContent = `<!DOCTYPE html>
+<html lang="id">
+<head>
+  <style>
+    body { font-family: 'Segoe UI', sans-serif; background-color: #121212; color: #ffffff; padding: 20px; }
+    .container { max-width: 600px; margin: auto; background-color: #1e1e1e; padding: 20px; border-radius: 12px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2 style="color: #34d399;">Transaksi Berhasil!</h2>
+    <p>Halo kak ${member.name || tx.target},</p>
+    <p>Pesanan kamu sudah kami proses. Berikut nota pembeliannya.</p>
+    <p>Terima kasih sudah berbelanja di E4 Store! 🥰</p>
+  </div>
+</body>
+</html>`;
+
+                                await transporter.sendMail({
+                                    from: `E4 Store <${db.gmailEmail}>`,
+                                    to: member.gmail,
+                                    subject: `Nota Pembelian Berhasil - E4 Store`,
+                                    html: htmlContent,
+                                    attachments: [{
+                                        filename: 'nota.jpg',
+                                        content: buffer
+                                    }]
+                                });
+                            }
+                        } catch (e) {
+                            console.log("Failed to send receipt to gmail:", e);
+                        }
+                    })();
+                }
                                 if (status === 'Sukses' || status === 'Gagal') {
                                     const tIndex = db.transactions.findIndex((t: any) => t.id === tx.id);
                                     if (tIndex >= 0) {
@@ -4049,9 +4082,20 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                         await ctx.reply("❌ Transaksi dibatalkan.", { reply_markup: { keyboard: kb, resize_keyboard: true } });
                         return;
                     }
+
                     const regUser = registeredUsers[userId];
                     if (!regUser || regUser.pin !== pinEntered) {
-                        return ctx.reply("😡 HMM?! PIN-NYA SALAH! Hayoo, kamu siapa?! Jangan sembarangan pakai akun orang ya! Chuna gigit nih kalau berani macam-macam! 🔪👿");
+                        const wrongMsg = "😡 HMM?! PIN-NYA SALAH! Hayoo, kamu siapa?! Jangan sembarangan pakai akun orang ya! Chuna gigit nih kalau berani macam-macam! 🔪👿";
+                        const sd = state.data;
+                        const memberIdForPrepaid = sd.memberId || `MBR-${userId}`;
+                        const memberForPrepaid = members.find(m => m.id === memberIdForPrepaid);
+                        if (waSocket && memberForPrepaid && memberForPrepaid.whatsapp) {
+                            let cleanWa = memberForPrepaid.whatsapp.replace(/\D/g, "");
+                            if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
+                            const jid = cleanWa + "@s.whatsapp.net";
+                            waSocket.sendMessage(jid, { text: wrongMsg }).catch(()=>{});
+                        }
+                        return ctx.reply(wrongMsg);
                     }
                     await ctx.reply("✅ Yey! PIN-nya benar. Chuna langsung proses transaksinya sekarang ya sayang! 🚀✨*(Demi keamanan, pesan berisi PIN-mu jangan lupa dihapus sendiri ya)*", { parse_mode: 'Markdown' });
                     const sd = state.data;
@@ -4072,9 +4116,20 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                         await ctx.reply("❌ Transaksi dibatalkan.", { reply_markup: { keyboard: kb, resize_keyboard: true } });
                         return;
                     }
+
                     const regUser = registeredUsers[userId];
                     if (!regUser || regUser.pin !== pinEntered) {
-                        return ctx.reply("😡 HMM?! PIN-NYA SALAH! Hayoo, kamu siapa?! Jangan sembarangan pakai akun orang ya! Chuna gigit nih kalau berani macam-macam! 🔪👿");
+                        const wrongMsg = "😡 HMM?! PIN-NYA SALAH! Hayoo, kamu siapa?! Jangan sembarangan pakai akun orang ya! Chuna gigit nih kalau berani macam-macam! 🔪👿";
+                        const sd = state.data;
+                        const memberIdForPrepaid = sd.memberId || `MBR-${userId}`;
+                        const memberForPrepaid = members.find(m => m.id === memberIdForPrepaid);
+                        if (waSocket && memberForPrepaid && memberForPrepaid.whatsapp) {
+                            let cleanWa = memberForPrepaid.whatsapp.replace(/\D/g, "");
+                            if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
+                            const jid = cleanWa + "@s.whatsapp.net";
+                            waSocket.sendMessage(jid, { text: wrongMsg }).catch(()=>{});
+                        }
+                        return ctx.reply(wrongMsg);
                     }
                     await ctx.reply("✅ Yey! PIN-nya benar. Chuna langsung proses transaksinya sekarang ya sayang! 🚀✨*(Demi keamanan, pesan berisi PIN-mu jangan lupa dihapus sendiri ya)*", { parse_mode: 'Markdown' });
                     const sd = state.data;
@@ -4698,7 +4753,16 @@ Tagihan kamu udah muncul nih, jangan sampai kelewat ya~
                 const methodMap: any = { "💵 Cash": "cash", "📝 Utang": "utang", "💳 Saldo": "saldo" };
                 const method = methodMap[text.trim()];
                 if (text.toLowerCase() === 'batal' || text === '❌ Batal' || text === '❌ Tidak') {
-                    if (state.data.memberId) {
+                    const sd = state.data || {};
+                    const memberIdForPrepaid = sd.memberId || `MBR-${userId}`;
+                    const memberForPrepaid = members.find(m => m.id === memberIdForPrepaid);
+                    if (waSocket && memberForPrepaid && memberForPrepaid.whatsapp) {
+                        let cleanWa = memberForPrepaid.whatsapp.replace(/\D/g, "");
+                        if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
+                        const jid = cleanWa + "@s.whatsapp.net";
+                        waSocket.sendMessage(jid, { text: "❌ Pembelian dibatalkan." }).catch(()=>{});
+                    }
+                    if (state.data?.memberId) {
                         userStates[userId] = { step: 'LOCKED_MEMBER', data: { memberId: state.data.memberId } };
                         await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: { keyboard: [[{ text: "🧾 Cek Tagihan" }],
               [{ text: "📋 Menu Produk" }],
@@ -4849,7 +4913,16 @@ Status pesanan kakak sekarang: ⚠️ BELUM LUNAS`;
                 const methodMap: any = { "💵 Cash": "cash", "📝 Utang": "utang", "💳 Saldo": "saldo" };
                 const method = methodMap[text.trim()];
                 if (text.toLowerCase() === 'batal' || text === '❌ Batal' || text === '❌ Tidak') {
-                    if (state.data.memberId) {
+                    const sd = state.data || {};
+                    const memberIdForPrepaid = sd.memberId || `MBR-${userId}`;
+                    const memberForPrepaid = members.find(m => m.id === memberIdForPrepaid);
+                    if (waSocket && memberForPrepaid && memberForPrepaid.whatsapp) {
+                        let cleanWa = memberForPrepaid.whatsapp.replace(/\D/g, "");
+                        if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
+                        const jid = cleanWa + "@s.whatsapp.net";
+                        waSocket.sendMessage(jid, { text: "❌ Pembelian dibatalkan." }).catch(()=>{});
+                    }
+                    if (state.data?.memberId) {
                         userStates[userId] = { step: 'LOCKED_MEMBER', data: { memberId: state.data.memberId } };
                         await ctx.reply("❌ Pembayaran dibatalkan.", { reply_markup: { keyboard: [[{ text: "🧾 Cek Tagihan" }],
               [{ text: "📋 Menu Produk" }],

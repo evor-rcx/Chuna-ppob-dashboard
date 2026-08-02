@@ -1,56 +1,56 @@
 const fs = require('fs');
 let code = fs.readFileSync('server.ts', 'utf8');
 
-const oldType = `const registeredUsers: Record<number, { username: string, wa: string, pin: string }> = db.registeredUsers || {};`;
-const newType = `const registeredUsers: Record<number, { username: string, wa: string, pin: string, gmail?: string }> = db.registeredUsers || {};`;
-code = code.replace(oldType, newType);
+const target = `                                if (status === 'Sukses' || status === 'Gagal') {`;
+const insert = `
+                if (status === 'Sukses' && member && member.gmail && db.gmailEmail && db.gmailAppPassword) {
+                    (async () => {
+                        try {
+                            const buffer = await generateCanvasReceipt("nota", tx);
+                            if (buffer) {
+                                const transporter = (await import('nodemailer')).default.createTransport({
+                                    service: 'gmail',
+                                    auth: {
+                                        user: db.gmailEmail,
+                                        pass: db.gmailAppPassword
+                                    }
+                                });
+                                
+                                const htmlContent = \`<!DOCTYPE html>
+<html lang="id">
+<head>
+  <style>
+    body { font-family: 'Segoe UI', sans-serif; background-color: #121212; color: #ffffff; padding: 20px; }
+    .container { max-width: 600px; margin: auto; background-color: #1e1e1e; padding: 20px; border-radius: 12px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2 style="color: #34d399;">Transaksi Berhasil!</h2>
+    <p>Halo kak \${member.name || tx.target},</p>
+    <p>Pesanan kamu sudah kami proses. Berikut nota pembeliannya.</p>
+    <p>Terima kasih sudah berbelanja di E4 Store! 🥰</p>
+  </div>
+</body>
+</html>\`;
 
-const oldCaseOtp = `              case 'AWAITING_OTP':
-                if (text !== state.data.generatedOtp) {
-                   await ctx.reply(\`❌ Yah kode OTP-nya salah kak. Coba cek lagi ya kodenya!\`);
-                   return;
+                                await transporter.sendMail({
+                                    from: \`E4 Store <\${db.gmailEmail}>\`,
+                                    to: member.gmail,
+                                    subject: \`Nota Pembelian Berhasil - E4 Store\`,
+                                    html: htmlContent,
+                                    attachments: [{
+                                        filename: 'nota.jpg',
+                                        content: buffer
+                                    }]
+                                });
+                            }
+                        } catch (e) {
+                            console.log("Failed to send receipt to gmail:", e);
+                        }
+                    })();
                 }
-                state.step = 'AWAITING_PIN';
-                await ctx.reply(\`Yeay kode OTP berhasil dikonfirmasi! 🎉\nSatu langkah lagi nih kak. Yuk buat PIN rahasia kakak (6 angka) biar transaksi kakak aman bareng Chuna! 🔒\`);
-                return;
-                  
-              case 'AWAITING_PIN':
-                state.data.pin = text;
-                state.step = 'REGISTERED';
-                registeredUsers[userId] = {
-                  username: state.data.username,
-                  wa: state.data.wa,
-                  pin: state.data.pin
-                };`;
+`;
 
-const newCaseOtp = `              case 'AWAITING_OTP':
-                if (text !== state.data.generatedOtp) {
-                   await ctx.reply(\`❌ Yah kode OTP-nya salah kak. Coba cek lagi ya kodenya!\`);
-                   return;
-                }
-                state.step = 'AWAITING_GMAIL';
-                await ctx.reply(\`Yeay kode OTP berhasil dikonfirmasi! 🎉\nSekarang kirim alamat Gmail aktif kakak ya (contoh: chuna@gmail.com) 📧\`);
-                return;
-
-              case 'AWAITING_GMAIL':
-                if (!text.includes('@')) {
-                  await ctx.reply(\`❌ Format Gmail sepertinya kurang tepat kak. Coba kirim ulang ya! (contoh: chuna@gmail.com)\`);
-                  return;
-                }
-                state.data.gmail = text;
-                state.step = 'AWAITING_PIN';
-                await ctx.reply(\`Oke Gmail aman! 👌\nSatu langkah lagi nih kak. Yuk buat PIN rahasia kakak (6 angka) biar transaksi kakak aman bareng Chuna! 🔒\`);
-                return;
-                  
-              case 'AWAITING_PIN':
-                state.data.pin = text;
-                state.step = 'REGISTERED';
-                registeredUsers[userId] = {
-                  username: state.data.username,
-                  wa: state.data.wa,
-                  pin: state.data.pin,
-                  gmail: state.data.gmail
-                };`;
-
-code = code.replace(oldCaseOtp, newCaseOtp);
+code = code.replace(target, insert + target);
 fs.writeFileSync('server.ts', code);
