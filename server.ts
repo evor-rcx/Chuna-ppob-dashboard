@@ -1366,14 +1366,17 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                 
                 const tx = db.transactions.slice().reverse().find((t: any) => t.waJid === jid || (member && t.memberId === member.id));
                 
-                console.log('Found tx:', tx?.id, 'status:', tx?.status, 'Already replied:', tx ? repliedThanks.has(tx.id) : false);
-                if (tx && (tx.status === 'Sukses' || tx.status === 'Gagal' || tx.status === 'Sukses (Manual)') && !repliedThanks.has(tx.id)) {
-                    repliedThanks.add(tx.id);
+                const isGroup = jid.endsWith('@g.us') || jid.endsWith('@newsletter');
+                const replyKey = tx ? tx.id : jid + '_' + new Date().toDateString();
+                console.log('Found tx:', tx?.id, 'status:', tx?.status, 'Already replied:', repliedThanks.has(replyKey));
+                
+                if (!isGroup && !repliedThanks.has(replyKey)) {
+                    repliedThanks.add(replyKey);
                     
                     let customerName = msg.pushName || "Kakak";
                     if (member && member.name) {
                         customerName = member.name;
-                    } else if (tx.target && !tx.target.match(/^\d+$/)) {
+                    } else if (tx && tx.target && !tx.target.match(/^\d+$/)) {
                         customerName = tx.target;
                     }
                     
@@ -3430,7 +3433,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
 
       
       bot.action(/^dl_(image|video|audio)$/, async (ctx) => {
-        await ctx.answerCbQuery();
+        try { await ctx.answerCbQuery().catch(() => {}); } catch(e) {}
         const type = ctx.match[1];
         const state = userStates[ctx.from?.id || 0];
         if (!state || state.step !== 'AWAITING_DOWNLOAD_TYPE') {
@@ -3465,7 +3468,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
                         const allImages = data.images.map((url: string, i: number) => ({
                             type: 'photo',
                             media: url,
-                            caption: i === 0 ? data.title : undefined
+                            caption: i === 0 && data.title ? (data.title.length > 1000 ? data.title.substring(0, 1000) + '...' : data.title) : undefined
                         }));
                         
                         // Send in chunks of 10 due to telegram limits
@@ -3473,19 +3476,45 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
                             await ctx.replyWithMediaGroup(allImages.slice(i, i + 10));
                         }
                     } else {
-                        await ctx.replyWithPhoto(data.cover || data.origin_cover, { caption: data.title });
+                        await ctx.replyWithPhoto(data.cover || data.origin_cover, { caption: data.title ? (data.title.length > 1000 ? data.title.substring(0, 1000) + '...' : data.title) : undefined });
                     }
                 } else if (type === 'video') {
                     const videoUrl = data.play || data.wmplay;
                     if (videoUrl) {
-                        await ctx.replyWithVideo(videoUrl, { caption: data.title });
+                        try {
+                            await ctx.replyWithVideo(videoUrl, { caption: data.title ? (data.title.length > 1000 ? data.title.substring(0, 1000) + '...' : data.title) : undefined });
+                        } catch (err: any) {
+                            if (err.message && err.message.includes('failed to get HTTP URL content')) {
+                                console.log("Direct video send failed, downloading buffer...");
+                                const fetch = require('node-fetch') || global.fetch;
+                                const response = await fetch(videoUrl);
+                                const arrayBuffer = await response.arrayBuffer();
+                                const buffer = Buffer.from(arrayBuffer);
+                                await ctx.replyWithVideo({ source: buffer }, { caption: data.title ? (data.title.length > 1000 ? data.title.substring(0, 1000) + '...' : data.title) : undefined });
+                            } else {
+                                throw err;
+                            }
+                        }
                     } else {
                         await ctx.reply("❌ Link ini sepertinya tidak berisi video.");
                     }
                 } else if (type === 'audio') {
                     const audioUrl = data.music || data.play;
                     if (audioUrl) {
-                        await ctx.replyWithAudio(audioUrl, { title: data.music_info?.title || "Tiktok Audio", performer: data.music_info?.author || "Tiktok" });
+                        try {
+                            await ctx.replyWithAudio(audioUrl, { title: data.music_info?.title || "Tiktok Audio", performer: data.music_info?.author || "Tiktok" });
+                        } catch (err: any) {
+                            if (err.message && err.message.includes('failed to get HTTP URL content')) {
+                                console.log("Direct audio send failed, downloading buffer...");
+                                const fetch = require('node-fetch') || global.fetch;
+                                const response = await fetch(audioUrl);
+                                const arrayBuffer = await response.arrayBuffer();
+                                const buffer = Buffer.from(arrayBuffer);
+                                await ctx.replyWithAudio({ source: buffer }, { title: data.music_info?.title || "Tiktok Audio", performer: data.music_info?.author || "Tiktok" });
+                            } else {
+                                throw err;
+                            }
+                        }
                     } else {
                         await ctx.reply("❌ Tidak ada audio ditemukan.");
                     }
@@ -3502,16 +3531,42 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
                 await ctx.telegram.deleteMessage(ctx.chat?.id, processMsg.message_id).catch(()=>null);
                 
                 if (type === 'image') {
-                    await ctx.replyWithPhoto(data.thumbnail, { caption: data.title });
+                    await ctx.replyWithPhoto(data.thumbnail, { caption: data.title ? (data.title.length > 1000 ? data.title.substring(0, 1000) + '...' : data.title) : undefined });
                 } else if (type === 'video') {
                     if (data.mp4) {
-                        await ctx.replyWithVideo(data.mp4, { caption: data.title });
+                        try {
+                            await ctx.replyWithVideo(data.mp4, { caption: data.title ? (data.title.length > 1000 ? data.title.substring(0, 1000) + '...' : data.title) : undefined });
+                        } catch (err: any) {
+                            if (err.message && err.message.includes('failed to get HTTP URL content')) {
+                                console.log("Direct YT video send failed, downloading buffer...");
+                                const fetch = require('node-fetch') || global.fetch;
+                                const response = await fetch(data.mp4);
+                                const arrayBuffer = await response.arrayBuffer();
+                                const buffer = Buffer.from(arrayBuffer);
+                                await ctx.replyWithVideo({ source: buffer }, { caption: data.title ? (data.title.length > 1000 ? data.title.substring(0, 1000) + '...' : data.title) : undefined });
+                            } else {
+                                throw err;
+                            }
+                        }
                     } else {
                         await ctx.reply("❌ Tidak dapat menemukan format video.");
                     }
                 } else if (type === 'audio') {
                     if (data.mp3) {
-                        await ctx.replyWithAudio(data.mp3, { title: data.title, performer: data.author });
+                        try {
+                            await ctx.replyWithAudio(data.mp3, { title: data.title, performer: data.author });
+                        } catch (err: any) {
+                            if (err.message && err.message.includes('failed to get HTTP URL content')) {
+                                console.log("Direct YT audio send failed, downloading buffer...");
+                                const fetch = require('node-fetch') || global.fetch;
+                                const response = await fetch(data.mp3);
+                                const arrayBuffer = await response.arrayBuffer();
+                                const buffer = Buffer.from(arrayBuffer);
+                                await ctx.replyWithAudio({ source: buffer }, { title: data.title, performer: data.author });
+                            } else {
+                                throw err;
+                            }
+                        }
                     } else {
                         await ctx.reply("❌ Tidak dapat menemukan format audio.");
                     }
@@ -3527,7 +3582,11 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
             }
         } catch (e) {
             console.error("Download Error:", e);
-            await ctx.telegram.editMessageText(ctx.chat?.id, processMsg.message_id, undefined, "❌ Terjadi kesalahan saat memproses link. Silakan coba lagi nanti.");
+            try {
+                await ctx.telegram.editMessageText(ctx.chat?.id, processMsg.message_id, undefined, "❌ Terjadi kesalahan saat memproses link. Silakan coba lagi nanti.");
+            } catch (editError) {
+                await ctx.reply("❌ Terjadi kesalahan saat memproses link. Silakan coba lagi nanti.");
+            }
         }
       });
       bot.action(/^sel_off_(.+)$/, async (ctx) => {

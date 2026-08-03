@@ -3,6 +3,7 @@ import axios from 'axios';
 export async function getRealUrl(shortUrl: string): Promise<string> {
     try {
         const response = await axios.get(shortUrl, {
+            timeout: 10000,
             maxRedirects: 0,
             validateStatus: (status) => status >= 200 && status < 400
         });
@@ -25,7 +26,7 @@ export async function fetchTiktok(url: string) {
             realUrl = await getRealUrl(url);
         }
         
-        const res = await axios.get(`https://www.tikwm.com/api/?url=${encodeURIComponent(realUrl)}`);
+        const res = await axios.get(`https://www.tikwm.com/api/?url=${encodeURIComponent(realUrl)}`, { timeout: 15000 });
         if (res.data && res.data.code === 0) {
             return res.data.data;
         }
