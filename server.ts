@@ -3521,10 +3521,9 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
                         } catch (err: any) {
                             if (err.message && err.message.includes('failed to get HTTP URL content')) {
                                 console.log("Direct video send failed, downloading buffer...");
-                                const fetch = require('node-fetch') || global.fetch;
-                                const response = await fetch(videoUrl);
-                                const arrayBuffer = await response.arrayBuffer();
-                                const buffer = Buffer.from(arrayBuffer);
+                                const axios = require('axios');
+                                const response = await axios.get(videoUrl, { responseType: 'arraybuffer' });
+                                const buffer = Buffer.from(response.data);
                                 await ctx.replyWithVideo({ source: buffer }, { caption: data.title ? (data.title.length > 1000 ? data.title.substring(0, 1000) + '...' : data.title) : undefined });
                             } else {
                                 throw err;
@@ -3541,10 +3540,9 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
                         } catch (err: any) {
                             if (err.message && err.message.includes('failed to get HTTP URL content')) {
                                 console.log("Direct audio send failed, downloading buffer...");
-                                const fetch = require('node-fetch') || global.fetch;
-                                const response = await fetch(audioUrl);
-                                const arrayBuffer = await response.arrayBuffer();
-                                const buffer = Buffer.from(arrayBuffer);
+                                const axios = require('axios');
+                                const response = await axios.get(audioUrl, { responseType: 'arraybuffer' });
+                                const buffer = Buffer.from(response.data);
                                 await ctx.replyWithAudio({ source: buffer }, { title: data.music_info?.title || "Tiktok Audio", performer: data.music_info?.author || "Tiktok" });
                             } else {
                                 throw err;
@@ -3557,7 +3555,13 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
             } 
             else if (isYoutube) {
                 const { youtube } = await import('btch-downloader');
-                const data = await youtube(link);
+                let data = await youtube(link);
+                for(let i=0; i<3; i++) {
+                    if (data && data.status) break;
+                    console.log("YT fetch failed, retrying...", data);
+                    await new Promise(r => setTimeout(r, 2000));
+                    data = await youtube(link);
+                }
                 if (!data || !data.status) {
                     await ctx.telegram.editMessageText(ctx.chat?.id, processMsg.message_id, undefined, "❌ Gagal mengambil data dari YouTube.");
                     return;
@@ -3574,10 +3578,9 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
                         } catch (err: any) {
                             if (err.message && err.message.includes('failed to get HTTP URL content')) {
                                 console.log("Direct YT video send failed, downloading buffer...");
-                                const fetch = require('node-fetch') || global.fetch;
-                                const response = await fetch(data.mp4);
-                                const arrayBuffer = await response.arrayBuffer();
-                                const buffer = Buffer.from(arrayBuffer);
+                                const axios = require('axios');
+                                const response = await axios.get(data.mp4, { responseType: 'arraybuffer' });
+                                const buffer = Buffer.from(response.data);
                                 await ctx.replyWithVideo({ source: buffer }, { caption: data.title ? (data.title.length > 1000 ? data.title.substring(0, 1000) + '...' : data.title) : undefined });
                             } else {
                                 throw err;
@@ -3593,10 +3596,9 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
                         } catch (err: any) {
                             if (err.message && err.message.includes('failed to get HTTP URL content')) {
                                 console.log("Direct YT audio send failed, downloading buffer...");
-                                const fetch = require('node-fetch') || global.fetch;
-                                const response = await fetch(data.mp3);
-                                const arrayBuffer = await response.arrayBuffer();
-                                const buffer = Buffer.from(arrayBuffer);
+                                const axios = require('axios');
+                                const response = await axios.get(data.mp3, { responseType: 'arraybuffer' });
+                                const buffer = Buffer.from(response.data);
                                 await ctx.replyWithAudio({ source: buffer }, { title: data.title, performer: data.author });
                             } else {
                                 throw err;

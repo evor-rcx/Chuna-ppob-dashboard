@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@bochilteam/scraper": "^5.0.1",
+    "@distube/ytdl-core": "^4.16.12",
     "@google/genai": "^2.4.0",
     "@mrnima/instagram-downloader": "^1.0.0",
     "@napi-rs/canvas": "^1.0.2",
@@ -48,6 +49,7 @@
     "snapsave-media-downloader": "^2.4.1",
     "telegraf": "^4.16.3",
     "vite": "^6.2.3",
+    "youtube-dl-exec": "^3.1.10",
     "zod": "^4.4.3"
   },
   "devDependencies": {

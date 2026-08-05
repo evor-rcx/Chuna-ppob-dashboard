@@ -1,10 +1,17 @@
-import { facebookdl, instagramdl, instagramdlv4 } from '@bochilteam/scraper';
-async function run() {
+import { youtubedl, youtubedlv2 } from '@bochilteam/scraper';
+
+async function test() {
     try {
-        console.log("FB:", await facebookdl('https://www.facebook.com/share/r/17QdMxWUX3/'));
-    } catch(e) { console.log("FB err", e); }
-    try {
-        console.log("IG:", await instagramdl('https://www.instagram.com/reel/C-k2y1Fv-cZ/?igsh=MWZjdzd3ZmlzOHp3OQ=='));
-    } catch(e) { console.log("IG err", e); }
+        const res = await youtubedl('https://youtu.be/yg3EXDKvUAw');
+        console.log(res);
+        const video = await Object.values(res.video)[0].download();
+        console.log("Video URL:", video);
+        
+        const res2 = await youtubedlv2('https://youtu.be/yg3EXDKvUAw');
+        console.log(res2);
+        
+    } catch (e) {
+        console.error("Error:", e.message);
+    }
 }
-run();
+test();

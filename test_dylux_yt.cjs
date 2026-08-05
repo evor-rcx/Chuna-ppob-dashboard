@@ -2,11 +2,11 @@ const fg = require('api-dylux');
 async function test() {
     try {
         const url = 'https://youtu.be/yg3EXDKvUAw';
-        const res = await fg.youtubedl(url);
-        console.log(res);
+        const res = await fg.ytv(url);
+        console.log("Video:", res);
         
-        const res2 = await fg.youtubedlv2(url);
-        console.log(res2);
+        const res2 = await fg.yta(url);
+        console.log("Audio:", res2);
     } catch (e) {
         console.error(e.message);
     }
