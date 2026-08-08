@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { PageContainer } from '../PageContainer';
-import { clearBgFile } from '../../lib/bgStore';
+import { clearBgFile, saveBgFile } from '../../lib/bgStore';
 
 export function Konfig({ onBack }: { onBack: () => void }) {
   const [username, setUsername] = useState('');
