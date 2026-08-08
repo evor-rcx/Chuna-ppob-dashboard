@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { PageContainer } from '../PageContainer';
+import { clearBgFile } from '../../lib/bgStore';
 
 export function Konfig({ onBack }: { onBack: () => void }) {
   const [username, setUsername] = useState('');
@@ -79,31 +80,6 @@ export function Konfig({ onBack }: { onBack: () => void }) {
             <div className="text-[10px] uppercase text-slate-500 font-bold">Tema Tampilan & Latar Belakang</div>
           </div>
           
-          <div className="flex flex-col gap-2 mt-2">
-            <label className="text-xs text-slate-400">Mode Tema</label>
-            <div className="flex gap-2">
-              <button 
-                onClick={() => {
-                  localStorage.setItem('chuna_theme', 'dark');
-                  document.documentElement.classList.remove('theme-light');
-                }}
-                className="flex-1 bg-slate-800 border border-slate-700 text-slate-300 py-2 rounded-lg text-sm font-medium hover:bg-slate-700 transition-colors"
-              >
-                🌙 Mode Gelap
-              </button>
-              <button 
-                onClick={() => {
-                  localStorage.setItem('chuna_theme', 'light');
-                  document.documentElement.classList.add('theme-light');
-                }}
-                className="flex-1 bg-slate-200 border border-slate-300 text-slate-800 py-2 rounded-lg text-sm font-medium hover:bg-white transition-colors"
-                data-no-invert
-              >
-                ☀️ Mode Terang
-              </button>
-            </div>
-          </div>
-
           <div className="flex flex-col gap-2 mt-2 border-t border-slate-700/50 pt-3">
             <label className="text-xs text-slate-400">Tipe Latar Belakang</label>
             <select

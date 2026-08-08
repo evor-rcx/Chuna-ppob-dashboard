@@ -14,6 +14,7 @@ import { Saldo } from './components/views/Saldo';
 import { MemberOffline } from './components/views/MemberOffline';
 import { KasirFisik } from './components/views/KasirFisik';
 import { Login } from './components/views/Login';
+import { CustomAlert } from './components/CustomAlert';
 import { Page } from './types';
 import { getBgFile } from './lib/bgStore';
 
@@ -106,6 +107,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#0a0f1d] text-slate-200 font-sans flex justify-center relative">
+      <CustomAlert />
       {bgType === 'image' && bgUrl && (
         <div className="absolute inset-0 z-0 overflow-hidden">
           <img src={bgUrl} className="w-full h-full object-cover opacity-20" alt="bg" data-no-invert />

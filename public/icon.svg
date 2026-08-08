@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="112" fill="#0f172a"/>
+  <!-- Shopping Bag/Store Icon -->
+  <path d="M128 160h256v256a48 48 0 0 1-48 48H176a48 48 0 0 1-48-48V160z" fill="url(#bgGrad)" opacity="0.1"/>
+  <path d="M160 160V128a96 96 0 0 1 192 0v32" fill="none" stroke="url(#accent)" stroke-width="32" stroke-linecap="round"/>
+  <rect x="128" y="160" width="256" height="256" rx="32" fill="url(#mainGrad)"/>
+  <text x="256" y="325" font-family="system-ui, -apple-system, sans-serif" font-size="120" font-weight="900" text-anchor="middle" fill="#ffffff" letter-spacing="-5">E4</text>
+  <defs>
+    <linearGradient id="mainGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#60a5fa"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#60a5fa"/>
+      <stop offset="100%" stop-color="#c084fc"/>
+    </linearGradient>
+  </defs>
+</svg>
