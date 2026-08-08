@@ -7,5 +7,9 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  // Simple pass-through fetch handler, required for PWA installability
+  e.respondWith(
+    fetch(e.request).catch(() => {
+      return new Response('Network error occurred.');
+    })
+  );
 });
