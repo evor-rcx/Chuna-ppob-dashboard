@@ -193,7 +193,12 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
         ctx.fillStyle = isSukses ? '#4caf50' : '#dc2626';
         if (type === 'nota' && data.status && data.status.toLowerCase() === 'pending') ctx.fillStyle = '#f59e0b';
         
-        const badgeText = type === 'nota' ? `Status: ${data.status.toUpperCase()} ${(isSukses?'(LUNAS)':'')}` : `Tagihan Ditemukan!`;
+        let lunasStr = '';
+        if (isSukses) {
+            if (data.method === 'utang') lunasStr = ' (TIDAK LUNAS)';
+            else lunasStr = ' (LUNAS)';
+        }
+        const badgeText = type === 'nota' ? `Status: ${data.status.toUpperCase()}${lunasStr}` : `Tagihan Ditemukan!`;
         ctx.beginPath();
         
             ctx.moveTo((width - 400) / 2 + 20, y);
@@ -638,7 +643,8 @@ async function startServer() {
                               await waSocket.sendPresenceUpdate("composing", jid);
                               await new Promise(r => setTimeout(r, 1200));
                               await waSocket.sendPresenceUpdate("paused", jid);
-                              await waSocket.sendMessage(jid, { image: buffer, caption: "✅ *Transaksi Berhasil!* Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰" });
+                              const waStatus = tx.method === 'utang' ? "(TIDAK LUNAS)" : "(LUNAS)";
+                                        await waSocket.sendMessage(jid, { image: buffer, caption: `✅ *Transaksi Berhasil ${waStatus}!* Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰` });
                                         
                               
                               const tIndex = db.transactions.findIndex((t: any) => t.id === tx.id);
@@ -1101,7 +1107,8 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                                 if (status === 'Sukses') {
                                     const buffer = await generateCanvasReceipt("nota", tx);
                                     if (buffer) {
-                                        await waSocket.sendMessage(jid, { image: buffer, caption: "✅ *Transaksi Berhasil!* Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰" });
+                                        const waStatus = tx.method === 'utang' ? "(TIDAK LUNAS)" : "(LUNAS)";
+                                        await waSocket.sendMessage(jid, { image: buffer, caption: `✅ *Transaksi Berhasil ${waStatus}!* Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰` });
                                     } else if (!edited) {
                                         await waSocket.sendMessage(jid, { text: msg });
                                     }
@@ -3518,17 +3525,16 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
                     if (videoUrl) {
                         try {
                             await ctx.replyWithVideo(videoUrl, { caption: data.title ? (data.title.length > 1000 ? data.title.substring(0, 1000) + '...' : data.title) : undefined });
-                        } catch (err: any) {
-                            if (err.message && err.message.includes('failed to get HTTP URL content')) {
-                                console.log("Direct video send failed, downloading buffer...");
-                                const axios = require('axios');
-                                const response = await axios.get(videoUrl, { responseType: 'arraybuffer' });
-                                const buffer = Buffer.from(response.data);
-                                await ctx.replyWithVideo({ source: buffer }, { caption: data.title ? (data.title.length > 1000 ? data.title.substring(0, 1000) + '...' : data.title) : undefined });
-                            } else {
-                                throw err;
+
+                            } catch (err: any) {
+                                console.log("TikTok Video send failed:", err.message);
+                                try {
+                                    await ctx.reply(`⚠️ Video tidak dapat dikirim langsung oleh bot.\n\n🔗 Silakan download melalui link ini:\n${videoUrl}`);
+                                } catch (e) {
+                                    throw err;
+                                }
                             }
-                        }
+
                     } else {
                         await ctx.reply("❌ Link ini sepertinya tidak berisi video.");
                     }
@@ -3537,17 +3543,16 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
                     if (audioUrl) {
                         try {
                             await ctx.replyWithAudio(audioUrl, { title: data.music_info?.title || "Tiktok Audio", performer: data.music_info?.author || "Tiktok" });
-                        } catch (err: any) {
-                            if (err.message && err.message.includes('failed to get HTTP URL content')) {
-                                console.log("Direct audio send failed, downloading buffer...");
-                                const axios = require('axios');
-                                const response = await axios.get(audioUrl, { responseType: 'arraybuffer' });
-                                const buffer = Buffer.from(response.data);
-                                await ctx.replyWithAudio({ source: buffer }, { title: data.music_info?.title || "Tiktok Audio", performer: data.music_info?.author || "Tiktok" });
-                            } else {
-                                throw err;
+
+                            } catch (err: any) {
+                                console.log("TikTok Audio send failed:", err.message);
+                                try {
+                                    await ctx.reply(`⚠️ Audio tidak dapat dikirim langsung oleh bot.\n\n🔗 Silakan download melalui link ini:\n${audioUrl}`);
+                                } catch (e) {
+                                    throw err;
+                                }
                             }
-                        }
+
                     } else {
                         await ctx.reply("❌ Tidak ada audio ditemukan.");
                     }
@@ -3575,17 +3580,16 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
                     if (data.mp4) {
                         try {
                             await ctx.replyWithVideo(data.mp4, { caption: data.title ? (data.title.length > 1000 ? data.title.substring(0, 1000) + '...' : data.title) : undefined });
-                        } catch (err: any) {
-                            if (err.message && err.message.includes('failed to get HTTP URL content')) {
-                                console.log("Direct YT video send failed, downloading buffer...");
-                                const axios = require('axios');
-                                const response = await axios.get(data.mp4, { responseType: 'arraybuffer' });
-                                const buffer = Buffer.from(response.data);
-                                await ctx.replyWithVideo({ source: buffer }, { caption: data.title ? (data.title.length > 1000 ? data.title.substring(0, 1000) + '...' : data.title) : undefined });
-                            } else {
-                                throw err;
+
+                            } catch (err: any) {
+                                console.log("YT Video send failed:", err.message);
+                                try {
+                                    await ctx.reply(`⚠️ Video tidak dapat dikirim langsung oleh bot (mungkin karena ukuran terlalu besar).\n\n🔗 Silakan download melalui link ini:\n${data.mp4}`);
+                                } catch (e) {
+                                    throw err;
+                                }
                             }
-                        }
+
                     } else {
                         await ctx.reply("❌ Tidak dapat menemukan format video.");
                     }
@@ -3593,17 +3597,16 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
                     if (data.mp3) {
                         try {
                             await ctx.replyWithAudio(data.mp3, { title: data.title, performer: data.author });
-                        } catch (err: any) {
-                            if (err.message && err.message.includes('failed to get HTTP URL content')) {
-                                console.log("Direct YT audio send failed, downloading buffer...");
-                                const axios = require('axios');
-                                const response = await axios.get(data.mp3, { responseType: 'arraybuffer' });
-                                const buffer = Buffer.from(response.data);
-                                await ctx.replyWithAudio({ source: buffer }, { title: data.title, performer: data.author });
-                            } else {
-                                throw err;
+
+                            } catch (err: any) {
+                                console.log("YT Audio send failed:", err.message);
+                                try {
+                                    await ctx.reply(`⚠️ Audio tidak dapat dikirim langsung oleh bot.\n\n🔗 Silakan download melalui link ini:\n${data.mp3}`);
+                                } catch (e) {
+                                    throw err;
+                                }
                             }
-                        }
+
                     } else {
                         await ctx.reply("❌ Tidak dapat menemukan format audio.");
                     }
