@@ -5730,13 +5730,18 @@ if (process.env.APPLET_ID || process.env.K_REVISION) {
     }
   });
 
-  if (db.telegramToken) {
+  const initialTelegramToken = db.telegramToken || process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN;
+  if (initialTelegramToken) {
+    if (!db.telegramToken) {
+      db.telegramToken = initialTelegramToken;
+      writeDB(db);
+    }
     console.log("Auto-starting Telegram bot...");
     const autoStart = async () => {
       let retries = 5;
       while (retries > 0) {
         try {
-          await startTelegramBot(db.telegramToken);
+          await startTelegramBot(initialTelegramToken);
           console.log("Telegram bot auto-started successfully.");
           break;
         } catch (e: any) {
