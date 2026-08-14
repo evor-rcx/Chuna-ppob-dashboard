@@ -107,8 +107,23 @@ export async function printReceiptBluetooth(transaction: any) {
         tokenVal = nicknameFromTarget;
     }
     let productName = (transaction.product || '-').replace(/[^\x00-\x7F]/g, "").trim();
-    let statusVal = transaction.status ? transaction.status.toUpperCase() : 'PENDING';
-    const isSukses = statusVal.includes('SUKSES');
+    let baseStatus = (transaction.status || '').replace(/\s*\(.*?\)/g, '').trim().toUpperCase();
+    if (!baseStatus) baseStatus = 'SUKSES';
+    const isSukses = (transaction.status || '').toLowerCase().includes('sukses');
+    
+    let lunasTag = '';
+    if (isSukses) {
+        const methodStr = (transaction.method || '').toString().toLowerCase().trim();
+        const statusStr = (transaction.status || '').toString().toLowerCase().trim();
+        const isUtang = methodStr === 'utang' || statusStr.includes('utang');
+        const isPaidOff = statusStr.includes('lunas') || transaction.isPaid === true;
+        
+        if (isUtang && !isPaidOff) {
+            lunasTag = '(TIDAK LUNAS)';
+        } else {
+            lunasTag = '(LUNAS)';
+        }
+    }
     
     let namaPlg = '';
     let golDaya = '';
@@ -131,7 +146,7 @@ export async function printReceiptBluetooth(transaction: any) {
       encoder.encode('E4 STORE\n'),
       new Uint8Array([ESC, 0x45, 0x00]), // Bold Off
       encoder.encode('Token Listrik / Struk Pembayaran\n\n'),
-      encoder.encode(`Status: ${statusVal} ${isSukses ? '(LUNAS)' : ''}\n\n`),
+      encoder.encode(`Status: ${baseStatus} ${lunasTag}\n\n`.trim() + '\n\n'),
       new Uint8Array([ESC, 0x61, 0x00]), // Align Left
       encoder.encode('--------------------------------\n'),
     ];

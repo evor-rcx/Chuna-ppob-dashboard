@@ -193,7 +193,33 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
         ctx.fillStyle = isSukses ? '#4caf50' : '#dc2626';
         if (type === 'nota' && data.status && data.status.toLowerCase() === 'pending') ctx.fillStyle = '#f59e0b';
         
-        const badgeText = type === 'nota' ? `Status: ${data.status.toUpperCase()} ${(isSukses?'(LUNAS)':'')}` : `Tagihan Ditemukan!`;
+        let methodStr = (data.method || '').toString().toLowerCase().trim();
+        if (!methodStr && data.id) {
+            try {
+                const foundTx = db.transactions.find((t: any) => t.id === data.id);
+                if (foundTx && foundTx.method) {
+                    methodStr = foundTx.method.toString().toLowerCase().trim();
+                }
+            } catch (e) {}
+        }
+        
+        let lunasTag = '';
+        if (isSukses) {
+            const statusStr = (data.status || '').toString().toLowerCase().trim();
+            const isUtang = methodStr === 'utang' || statusStr.includes('utang');
+            const isPaidOff = statusStr.includes('lunas') || data.isPaid === true;
+            
+            if (isUtang && !isPaidOff) {
+                lunasTag = '(TIDAK LUNAS)';
+            } else {
+                lunasTag = '(LUNAS)';
+            }
+        }
+        
+        let baseStatus = (data.status || '').replace(/\s*\(.*?\)/g, '').trim().toUpperCase();
+        if (!baseStatus) baseStatus = 'SUKSES';
+        
+        const badgeText = type === 'nota' ? `Status: ${baseStatus} ${lunasTag}`.trim() : `Tagihan Ditemukan!`;
         ctx.beginPath();
         
             ctx.moveTo((width - 400) / 2 + 20, y);
@@ -3307,7 +3333,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
           
           await ctx.reply("⏳ Chuna sedang mengecek ulang status transaksi " + ref_id + " ke Digiflazz pusat...");
           
-          let body = {
+          let body: any = {
               username: digiflazzUsername,
               buyer_sku_code: tx.sku,
               customer_no: tx.target.split(' ')[0],
@@ -5828,7 +5854,24 @@ E4 Store`,
     const isSukses = tx.status && tx.status.toLowerCase().includes('sukses');
     const isPending = tx.status && tx.status.toLowerCase() === 'pending';
     let statusColor = isSukses ? '#4caf50' : (isPending ? '#f59e0b' : '#dc2626');
-    let statusText = `Status: ${tx.status.toUpperCase()} ${isSukses ? '(LUNAS)' : ''}`;
+    
+    let baseStatus = (tx.status || '').replace(/\s*\(.*?\)/g, '').trim().toUpperCase();
+    if (!baseStatus) baseStatus = 'SUKSES';
+    
+    let lunasTag = '';
+    if (isSukses) {
+        const methodStr = (tx.method || '').toString().toLowerCase().trim();
+        const statusStr = (tx.status || '').toString().toLowerCase().trim();
+        const isUtang = methodStr === 'utang' || statusStr.includes('utang');
+        const isPaidOff = statusStr.includes('lunas') || tx.isPaid === true;
+        
+        if (isUtang && !isPaidOff) {
+            lunasTag = '(TIDAK LUNAS)';
+        } else {
+            lunasTag = '(LUNAS)';
+        }
+    }
+    let statusText = `Status: ${baseStatus} ${lunasTag}`.trim();
     
     let token = tx.sn || '-';
     
