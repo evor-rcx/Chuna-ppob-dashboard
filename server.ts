@@ -166,10 +166,6 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
             lines.push(['Nama', cleanName]);
             lines.push(['Nomor', data.no || data.target || '-']);
             lines.push(['Layanan', data.layanan || '-']);
-            if (data.tagihan !== undefined && data.adminFee !== undefined) {
-                lines.push(['Tagihan', `Rp ${Number(data.tagihan).toLocaleString('id-ID')}`]);
-                lines.push(['Admin', `Rp ${Number(data.adminFee).toLocaleString('id-ID')}`]);
-            }
             height = 800 + (lines.length * 35);
             if (data.detail) height += 250;
         }
@@ -4461,12 +4457,12 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          delete userStates[userId];
                     } else if (result.status === 'Sukses') {
                          const nama = result.customer_name || "-";
-                         const digiAdmin = Number(result.admin) || 0;
                          const digiCommission = Number(result.commission) || 0;
                          const digiSellingPrice = Number(result.selling_price) || 0;
-                         let tagihan = digiAdmin - digiCommission + digiSellingPrice;
-                         if (tagihan <= 0 && result.price) {
-                             tagihan = Number(result.price) || 0;
+                         // Tagihan Pelanggan (Tagihan Pel) dari Digiflazz
+                         let tagihanPel = Number(result.price) || (digiSellingPrice + digiCommission);
+                         if (tagihanPel <= 0) {
+                             tagihanPel = digiSellingPrice;
                          }
                          
                          const memberId = state.data.memberId || `MBR-${ctx.from?.id}`;
@@ -4476,7 +4472,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          const isOwnerCtx = db.owners.includes(ctx.from?.id);
                          const feeData = getProductFee(state.data.product.buyer_sku_code);
                          let adminFee = isOwnerCtx ? (feeData.owner || 0) : (memberType === 'VIP' ? (feeData.vip || 0) : (feeData.biasa || 0));
-                         let total = tagihan + adminFee;
+                         let total = tagihanPel + adminFee;
                          
                          let detail = selectedPkg.name;
                          
@@ -4484,7 +4480,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                              nama: nama,
                              no: state.data.customerNo, // The phone number instead of the giant base64 code
                              layanan: state.data.product.product_name + " - Omni",
-                             tagihan: tagihan,
+                             tagihan: tagihanPel,
                              adminFee: adminFee,
                              total: total,
                              detail: detail
@@ -4505,7 +4501,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                              keyboard.push([{ text: "❌ Batal" }]);
                          }
 
-                         userStates[userId] = { step: 'WAIT_PAYMENT_PASCA', data: { ...state.data, ref_id: result.ref_id, totalBayar: total, adminFee: adminFee, checkResult: result, targetNo: omniFinalCustomerNo } };
+                         userStates[userId] = { step: 'WAIT_PAYMENT_PASCA', data: { ...state.data, ref_id: result.ref_id, totalBayar: total, tagihanPel: tagihanPel, adminFee: adminFee, checkResult: result, targetNo: omniFinalCustomerNo } };
 
                          const buffer = await generateCanvasReceipt("tagihan", billData);
                          if (buffer) {
@@ -4520,9 +4516,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                              msg += `Detail: ${detail}\n`;
                              msg += `Nomor: ${billData.no}\n`;
                              msg += `Nama: ${billData.nama}\n\n`;
-                             msg += `Tagihan: Rp ${tagihan.toLocaleString('id-ID')}\n`;
-                             msg += `Admin: Rp ${adminFee.toLocaleString('id-ID')}\n`;
-                             msg += `*Total: Rp ${total.toLocaleString('id-ID')}*\n\n`;
+                             msg += `*Total Bayar: Rp ${total.toLocaleString('id-ID')}*\n\n`;
                              msg += `[Lihat Nota Web](${notaUrl})\n\n`;
                              msg += replyText;
                              await ctx.reply(msg, {
@@ -4585,12 +4579,12 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                     } else if (result.status === 'Sukses') {
                          let notaBuffer: any = null;
                          const nama = result.customer_name || "-";
-                         const digiAdmin = Number(result.admin) || 0;
                          const digiCommission = Number(result.commission) || 0;
                          const digiSellingPrice = Number(result.selling_price) || 0;
-                         let tagihan = digiAdmin - digiCommission + digiSellingPrice;
-                         if (tagihan <= 0 && result.price) {
-                             tagihan = Number(result.price) || 0;
+                         // Tagihan Pelanggan (Tagihan Pel) dari Digiflazz
+                         let tagihanPel = Number(result.price) || (digiSellingPrice + digiCommission);
+                         if (tagihanPel <= 0) {
+                             tagihanPel = digiSellingPrice;
                          }
                          
                          const memberId = state.data.memberId || `MBR-${ctx.from?.id}`;
@@ -4600,7 +4594,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          const isOwnerCtx = db.owners.includes(ctx.from?.id);
                          const feeData = getProductFee(state.data.product.buyer_sku_code);
                          let adminFee = isOwnerCtx ? (feeData.owner || 0) : (memberType === 'VIP' ? (feeData.vip || 0) : (feeData.biasa || 0));
-                         let total = tagihan + adminFee;
+                         let total = tagihanPel + adminFee;
                          
                          let detail = selectedPkg.name;
                          
@@ -4608,7 +4602,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                              nama: nama,
                              no: state.data.customerNo,
                              layanan: state.data.product.product_name + ` - ${pLabel}`,
-                             tagihan: tagihan,
+                             tagihan: tagihanPel,
                              adminFee: adminFee,
                              total: total,
                              detail: detail
@@ -4629,7 +4623,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                              keyboard.push([{ text: "❌ Batal" }]);
                          }
 
-                         userStates[userId] = { step: 'WAIT_PAYMENT_PASCA', data: { ...state.data, ref_id: result.ref_id, totalBayar: total, adminFee: adminFee, checkResult: result, targetNo: finalCustomerNoVal } };
+                         userStates[userId] = { step: 'WAIT_PAYMENT_PASCA', data: { ...state.data, ref_id: result.ref_id, totalBayar: total, tagihanPel: tagihanPel, adminFee: adminFee, checkResult: result, targetNo: finalCustomerNoVal } };
 
                          const buffer = await generateCanvasReceipt("tagihan", billData);
                          if (buffer) {
@@ -4644,9 +4638,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                              if (detail) msg += `Detail: ${detail}\n`;
                              msg += `Nomor: ${billData.no}\n`;
                              msg += `Nama: ${billData.nama}\n\n`;
-                             msg += `Tagihan: Rp ${tagihan.toLocaleString('id-ID')}\n`;
-                             msg += `Admin: Rp ${adminFee.toLocaleString('id-ID')}\n`;
-                             msg += `*Total: Rp ${total.toLocaleString('id-ID')}*\n\n`;
+                             msg += `*Total Bayar: Rp ${total.toLocaleString('id-ID')}*\n\n`;
                              msg += `[Lihat Nota Web](${notaUrl})\n\n`;
                              msg += replyText;
                              await ctx.reply(msg, {
@@ -4812,14 +4804,13 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          await ctx.reply(`❌ Pengecekan Gagal:${result.message}`);
                     } else if (result.status === 'Sukses') {
                          const nama = result.customer_name || "-";
-                         const digiAdmin = Number(result.admin) || 0;
                          const digiCommission = Number(result.commission) || 0;
                          const digiSellingPrice = Number(result.selling_price) || 0;
                          
-                         // Tagihan dari Digiflazz: Admin Digiflazz - Komisi + Harga Asli (selling_price)
-                         let tagihan = digiAdmin - digiCommission + digiSellingPrice;
-                         if (tagihan <= 0 && result.price) {
-                             tagihan = Number(result.price) || 0;
+                         // Tagihan Pelanggan (Tagihan Pel) dari Digiflazz
+                         let tagihanPel = Number(result.price) || (digiSellingPrice + digiCommission);
+                         if (tagihanPel <= 0) {
+                             tagihanPel = digiSellingPrice;
                          }
                          
                          // Determine member type
@@ -4830,7 +4821,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          const isOwnerCtx = db.owners.includes(ctx.from?.id);
                          const feeData = getProductFee(product.buyer_sku_code);
                          let adminFee = isOwnerCtx ? (feeData.owner || 0) : (memberType === 'VIP' ? (feeData.vip || 0) : (feeData.biasa || 0));
-                         let total = tagihan + adminFee;
+                         let total = tagihanPel + adminFee;
                          
                          // We can add our own markup here if needed, but for now we just pass through
                          let detail = "";
@@ -4842,7 +4833,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                                if (result.desc.tarif) parts.push(`⚡ Tarif: ${result.desc.tarif}`);
                                if (result.desc.daya) parts.push(`📊 Daya: ${result.desc.daya}`);
                                if (result.desc.lembar_tagihan) parts.push(`📄 Lembar: ${result.desc.lembar_tagihan}`);
-                               
+                                
                                if (Array.isArray(result.desc.detail)) {
                                    result.desc.detail.forEach((d: any, idx: number) => {
                                       parts.push(`📆 Bulan ${idx + 1}: ${d.periode || ''}`);
@@ -4859,7 +4850,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                              nama: nama,
                              no: result.customer_no,
                              layanan: product.product_name,
-                             tagihan: tagihan,
+                             tagihan: tagihanPel,
                              adminFee: adminFee,
                              total: total,
                              detail: detail
@@ -4886,7 +4877,7 @@ Tagihan kamu udah muncul nih, jangan sampai kelewat ya~
                              keyboard.push([{ text: "❌ Batal" }]);
                          }
 
-                         userStates[userId] = { step: 'WAIT_PAYMENT_PASCA', data: { ...state.data, ref_id: result.ref_id, totalBayar: total, adminFee: adminFee, checkResult: result, targetNo: finalCustomerNo } };
+                         userStates[userId] = { step: 'WAIT_PAYMENT_PASCA', data: { ...state.data, ref_id: result.ref_id, totalBayar: total, tagihanPel: tagihanPel, adminFee: adminFee, checkResult: result, targetNo: finalCustomerNo } };
 
                          const buffer = await generateCanvasReceipt("tagihan", billData);
                          if (buffer) {
@@ -4901,9 +4892,7 @@ Tagihan kamu udah muncul nih, jangan sampai kelewat ya~
                              if (detail) msg += `Detail: ${detail}\n`;
                              msg += `Nomor: ${billData.no}\n`;
                              msg += `Nama: ${billData.nama}\n\n`;
-                             msg += `Tagihan: Rp ${tagihan.toLocaleString('id-ID')}\n`;
-                             msg += `Admin: Rp ${adminFee.toLocaleString('id-ID')}\n`;
-                             msg += `*Total: Rp ${total.toLocaleString('id-ID')}*\n\n`;
+                             msg += `*Total Bayar: Rp ${total.toLocaleString('id-ID')}*\n\n`;
                              msg += `[Lihat Nota Web](${notaUrl})\n\n`;
                              msg += replyText;
                              await ctx.reply(msg, {
@@ -5779,10 +5768,6 @@ if (process.env.APPLET_ID || process.env.K_REVISION) {
             ['Nomor', data.no || data.target || '-'],
             ['Layanan', data.layanan || '-']
         ];
-        if (data.tagihan !== undefined && data.adminFee !== undefined) {
-            rawLines.push(['Tagihan', `Rp ${Number(data.tagihan).toLocaleString('id-ID')}`]);
-            rawLines.push(['Admin', `Rp ${Number(data.adminFee).toLocaleString('id-ID')}`]);
-        }
         if (data.detail) {
             rawLines.push(['Detail', String(data.detail)]);
         }
