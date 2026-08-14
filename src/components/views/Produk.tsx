@@ -142,7 +142,7 @@ export function Produk({ onBack }: { onBack: () => void }) {
       (p.brand && p.brand.toLowerCase()?.includes(q)) ||
       (p.buyer_sku_code && p.buyer_sku_code.toLowerCase()?.includes(q))
     );
-  }).sort((a, b) => (Number(a.price) || 0) - (Number(b.price) || 0));
+  });
 
   return (
     <PageContainer onBack={onBack} title="Kelola Harga Produk Digiflazz">

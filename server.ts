@@ -159,11 +159,7 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
             
             height = 1000 + (lines.length * 35);
         } else {
-            let cleanName = data.nama || '-';
-            if (cleanName.includes('*')) {
-                cleanName = cleanName.replace(/\*/g, '');
-            }
-            lines.push(['Nama', cleanName]);
+            lines.push(['Nama', data.nama || '-']);
             lines.push(['Nomor', data.no || data.target || '-']);
             lines.push(['Layanan', data.layanan || '-']);
             height = 800 + (lines.length * 35);
@@ -197,12 +193,7 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
         ctx.fillStyle = isSukses ? '#4caf50' : '#dc2626';
         if (type === 'nota' && data.status && data.status.toLowerCase() === 'pending') ctx.fillStyle = '#f59e0b';
         
-        let lunasStr = '';
-        if (isSukses) {
-            if (data.method === 'utang') lunasStr = ' (TIDAK LUNAS)';
-            else lunasStr = ' (LUNAS)';
-        }
-        const badgeText = type === 'nota' ? `Status: ${data.status.toUpperCase()}${lunasStr}` : `Tagihan Ditemukan!`;
+        const badgeText = type === 'nota' ? `Status: ${data.status.toUpperCase()} ${(isSukses?'(LUNAS)':'')}` : `Tagihan Ditemukan!`;
         ctx.beginPath();
         
             ctx.moveTo((width - 400) / 2 + 20, y);
@@ -396,19 +387,14 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
         drawDivider(y);
         y += 40;
         
-        ctx.fillStyle = '#888888';
+        ctx.fillStyle = '#333333';
         ctx.font = '16px Arial, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('Terima kasih telah berbelanja di E4 Store!', width / 2, y);
+        ctx.fillText('Chuna - Asisten Imutmu siap bantu 24 jam!', width / 2, y);
         y += 25;
-        ctx.fillText(`Cetak: ${formattedDate} | Kode: #${data.id || 'E4'}`, width / 2, y);
-        y += 25;
-        if (calendarInfo) {
-            ctx.fillText(calendarInfo, width / 2, y);
-        } else {
-            y -= 25;
-        }
-        y += 30;
+        ctx.fillText('Terimakasih telah berbelanja di E4 Store!', width / 2, y);
+        y += 20;
+        ctx.fillStyle = '#888888';
         ctx.fillText('◻  ◻  ◻  ◻  ◻', width / 2, y);
         
         return canvas.toBuffer('image/png');
@@ -652,8 +638,7 @@ async function startServer() {
                               await waSocket.sendPresenceUpdate("composing", jid);
                               await new Promise(r => setTimeout(r, 1200));
                               await waSocket.sendPresenceUpdate("paused", jid);
-                              const waStatus = tx.method === 'utang' ? "(TIDAK LUNAS)" : "(LUNAS)";
-                                        await waSocket.sendMessage(jid, { image: buffer, caption: `✅ *Transaksi Berhasil ${waStatus}!* Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰` });
+                              await waSocket.sendMessage(jid, { image: buffer, caption: "✅ *Transaksi Berhasil!* Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰" });
                                         
                               
                               const tIndex = db.transactions.findIndex((t: any) => t.id === tx.id);
@@ -1116,8 +1101,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                                 if (status === 'Sukses') {
                                     const buffer = await generateCanvasReceipt("nota", tx);
                                     if (buffer) {
-                                        const waStatus = tx.method === 'utang' ? "(TIDAK LUNAS)" : "(LUNAS)";
-                                        await waSocket.sendMessage(jid, { image: buffer, caption: `✅ *Transaksi Berhasil ${waStatus}!* Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰` });
+                                        await waSocket.sendMessage(jid, { image: buffer, caption: "✅ *Transaksi Berhasil!* Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰" });
                                     } else if (!edited) {
                                         await waSocket.sendMessage(jid, { text: msg });
                                     }
@@ -1610,54 +1594,6 @@ app.get("/api/summary", (req, res) => {
         statusServer: digiflazzStatus
       }
     });
-
-
-app.get("/api/monthly-summary", (req, res) => {
-  const monthsMap: Record<string, { month: string, digitalCuan: number, physicalCuan: number, expenses: number, totalCuan: number }> = {};
-
-  const getMonthKey = (dateStr: string) => {
-      const d = new Date(dateStr);
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      return `${yyyy}-${mm}`;
-  };
-
-  const ensureMonth = (key: string) => {
-      if (!monthsMap[key]) {
-          monthsMap[key] = { month: key, digitalCuan: 0, physicalCuan: 0, expenses: 0, totalCuan: 0 };
-      }
-      return monthsMap[key];
-  };
-
-  for (const t of db.transactions || []) {
-      if (t.status === 'Sukses' && t.cuan) {
-          const m = ensureMonth(getMonthKey(t.date));
-          m.digitalCuan += t.cuan;
-      }
-  }
-
-  for (const tx of (db.physicalTransactions || [])) {
-      const m = ensureMonth(getMonthKey(tx.date));
-      let modal = 0;
-      for (const item of tx.items) {
-          modal += (item.buyPrice || 0) * item.quantity;
-      }
-      m.physicalCuan += (tx.total - modal);
-  }
-
-  for (const exp of (db.expenses || [])) {
-      const m = ensureMonth(getMonthKey(exp.date));
-      m.expenses += exp.amount;
-  }
-
-  const data = Object.values(monthsMap).sort((a, b) => b.month.localeCompare(a.month));
-  for (const m of data) {
-      m.totalCuan = m.digitalCuan + m.physicalCuan - m.expenses;
-  }
-
-  res.json({ success: true, data });
-});
-
   });
 
   
@@ -3371,7 +3307,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
           
           await ctx.reply("⏳ Chuna sedang mengecek ulang status transaksi " + ref_id + " ke Digiflazz pusat...");
           
-          let body: any = {
+          let body = {
               username: digiflazzUsername,
               buyer_sku_code: tx.sku,
               customer_no: tx.target.split(' ')[0],
@@ -3582,16 +3518,17 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
                     if (videoUrl) {
                         try {
                             await ctx.replyWithVideo(videoUrl, { caption: data.title ? (data.title.length > 1000 ? data.title.substring(0, 1000) + '...' : data.title) : undefined });
-
-                            } catch (err: any) {
-                                console.log("TikTok Video send failed:", err.message);
-                                try {
-                                    await ctx.reply(`⚠️ Video tidak dapat dikirim langsung oleh bot.\n\n🔗 Silakan download melalui link ini:\n${videoUrl}`);
-                                } catch (e) {
-                                    throw err;
-                                }
+                        } catch (err: any) {
+                            if (err.message && err.message.includes('failed to get HTTP URL content')) {
+                                console.log("Direct video send failed, downloading buffer...");
+                                const axios = require('axios');
+                                const response = await axios.get(videoUrl, { responseType: 'arraybuffer' });
+                                const buffer = Buffer.from(response.data);
+                                await ctx.replyWithVideo({ source: buffer }, { caption: data.title ? (data.title.length > 1000 ? data.title.substring(0, 1000) + '...' : data.title) : undefined });
+                            } else {
+                                throw err;
                             }
-
+                        }
                     } else {
                         await ctx.reply("❌ Link ini sepertinya tidak berisi video.");
                     }
@@ -3600,16 +3537,17 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
                     if (audioUrl) {
                         try {
                             await ctx.replyWithAudio(audioUrl, { title: data.music_info?.title || "Tiktok Audio", performer: data.music_info?.author || "Tiktok" });
-
-                            } catch (err: any) {
-                                console.log("TikTok Audio send failed:", err.message);
-                                try {
-                                    await ctx.reply(`⚠️ Audio tidak dapat dikirim langsung oleh bot.\n\n🔗 Silakan download melalui link ini:\n${audioUrl}`);
-                                } catch (e) {
-                                    throw err;
-                                }
+                        } catch (err: any) {
+                            if (err.message && err.message.includes('failed to get HTTP URL content')) {
+                                console.log("Direct audio send failed, downloading buffer...");
+                                const axios = require('axios');
+                                const response = await axios.get(audioUrl, { responseType: 'arraybuffer' });
+                                const buffer = Buffer.from(response.data);
+                                await ctx.replyWithAudio({ source: buffer }, { title: data.music_info?.title || "Tiktok Audio", performer: data.music_info?.author || "Tiktok" });
+                            } else {
+                                throw err;
                             }
-
+                        }
                     } else {
                         await ctx.reply("❌ Tidak ada audio ditemukan.");
                     }
@@ -3637,16 +3575,17 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
                     if (data.mp4) {
                         try {
                             await ctx.replyWithVideo(data.mp4, { caption: data.title ? (data.title.length > 1000 ? data.title.substring(0, 1000) + '...' : data.title) : undefined });
-
-                            } catch (err: any) {
-                                console.log("YT Video send failed:", err.message);
-                                try {
-                                    await ctx.reply(`⚠️ Video tidak dapat dikirim langsung oleh bot (mungkin karena ukuran terlalu besar).\n\n🔗 Silakan download melalui link ini:\n${data.mp4}`);
-                                } catch (e) {
-                                    throw err;
-                                }
+                        } catch (err: any) {
+                            if (err.message && err.message.includes('failed to get HTTP URL content')) {
+                                console.log("Direct YT video send failed, downloading buffer...");
+                                const axios = require('axios');
+                                const response = await axios.get(data.mp4, { responseType: 'arraybuffer' });
+                                const buffer = Buffer.from(response.data);
+                                await ctx.replyWithVideo({ source: buffer }, { caption: data.title ? (data.title.length > 1000 ? data.title.substring(0, 1000) + '...' : data.title) : undefined });
+                            } else {
+                                throw err;
                             }
-
+                        }
                     } else {
                         await ctx.reply("❌ Tidak dapat menemukan format video.");
                     }
@@ -3654,16 +3593,17 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
                     if (data.mp3) {
                         try {
                             await ctx.replyWithAudio(data.mp3, { title: data.title, performer: data.author });
-
-                            } catch (err: any) {
-                                console.log("YT Audio send failed:", err.message);
-                                try {
-                                    await ctx.reply(`⚠️ Audio tidak dapat dikirim langsung oleh bot.\n\n🔗 Silakan download melalui link ini:\n${data.mp3}`);
-                                } catch (e) {
-                                    throw err;
-                                }
+                        } catch (err: any) {
+                            if (err.message && err.message.includes('failed to get HTTP URL content')) {
+                                console.log("Direct YT audio send failed, downloading buffer...");
+                                const axios = require('axios');
+                                const response = await axios.get(data.mp3, { responseType: 'arraybuffer' });
+                                const buffer = Buffer.from(response.data);
+                                await ctx.replyWithAudio({ source: buffer }, { title: data.title, performer: data.author });
+                            } else {
+                                throw err;
                             }
-
+                        }
                     } else {
                         await ctx.reply("❌ Tidak dapat menemukan format audio.");
                     }
@@ -4457,13 +4397,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          delete userStates[userId];
                     } else if (result.status === 'Sukses') {
                          const nama = result.customer_name || "-";
-                         const digiCommission = Number(result.commission) || 0;
-                         const digiSellingPrice = Number(result.selling_price) || 0;
-                         // Tagihan Pelanggan (Tagihan Pel) dari Digiflazz
-                         let tagihanPel = Number(result.price) || (digiSellingPrice + digiCommission);
-                         if (tagihanPel <= 0) {
-                             tagihanPel = digiSellingPrice;
-                         }
+                         const tagihan = result.selling_price || 0;
                          
                          const memberId = state.data.memberId || `MBR-${ctx.from?.id}`;
                          const member = members.find(m => m.id === memberId || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
@@ -4471,8 +4405,8 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          
                          const isOwnerCtx = db.owners.includes(ctx.from?.id);
                          const feeData = getProductFee(state.data.product.buyer_sku_code);
-                         let adminFee = isOwnerCtx ? (feeData.owner || 0) : (memberType === 'VIP' ? (feeData.vip || 0) : (feeData.biasa || 0));
-                         let total = tagihanPel + adminFee;
+                         let adminFee = isOwnerCtx ? feeData.owner : (memberType === 'VIP' ? feeData.vip : feeData.biasa);
+                         let total = tagihan + adminFee;
                          
                          let detail = selectedPkg.name;
                          
@@ -4480,8 +4414,6 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                              nama: nama,
                              no: state.data.customerNo, // The phone number instead of the giant base64 code
                              layanan: state.data.product.product_name + " - Omni",
-                             tagihan: tagihanPel,
-                             adminFee: adminFee,
                              total: total,
                              detail: detail
                          };
@@ -4501,7 +4433,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                              keyboard.push([{ text: "❌ Batal" }]);
                          }
 
-                         userStates[userId] = { step: 'WAIT_PAYMENT_PASCA', data: { ...state.data, ref_id: result.ref_id, totalBayar: total, tagihanPel: tagihanPel, adminFee: adminFee, checkResult: result, targetNo: omniFinalCustomerNo } };
+                         userStates[userId] = { step: 'WAIT_PAYMENT_PASCA', data: { ...state.data, ref_id: result.ref_id, totalBayar: total, checkResult: result, targetNo: omniFinalCustomerNo } };
 
                          const buffer = await generateCanvasReceipt("tagihan", billData);
                          if (buffer) {
@@ -4516,7 +4448,9 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                              msg += `Detail: ${detail}\n`;
                              msg += `Nomor: ${billData.no}\n`;
                              msg += `Nama: ${billData.nama}\n\n`;
-                             msg += `*Total Bayar: Rp ${total.toLocaleString('id-ID')}*\n\n`;
+                             msg += `Tagihan: Rp ${tagihan.toLocaleString('id-ID')}\n`;
+                             msg += `Admin: Rp ${adminFee.toLocaleString('id-ID')}\n`;
+                             msg += `*Total: Rp ${total.toLocaleString('id-ID')}*\n\n`;
                              msg += `[Lihat Nota Web](${notaUrl})\n\n`;
                              msg += replyText;
                              await ctx.reply(msg, {
@@ -4579,13 +4513,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                     } else if (result.status === 'Sukses') {
                          let notaBuffer: any = null;
                          const nama = result.customer_name || "-";
-                         const digiCommission = Number(result.commission) || 0;
-                         const digiSellingPrice = Number(result.selling_price) || 0;
-                         // Tagihan Pelanggan (Tagihan Pel) dari Digiflazz
-                         let tagihanPel = Number(result.price) || (digiSellingPrice + digiCommission);
-                         if (tagihanPel <= 0) {
-                             tagihanPel = digiSellingPrice;
-                         }
+                         const tagihan = result.selling_price || 0;
                          
                          const memberId = state.data.memberId || `MBR-${ctx.from?.id}`;
                          const member = members.find(m => m.id === memberId || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
@@ -4593,8 +4521,8 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          
                          const isOwnerCtx = db.owners.includes(ctx.from?.id);
                          const feeData = getProductFee(state.data.product.buyer_sku_code);
-                         let adminFee = isOwnerCtx ? (feeData.owner || 0) : (memberType === 'VIP' ? (feeData.vip || 0) : (feeData.biasa || 0));
-                         let total = tagihanPel + adminFee;
+                         let adminFee = isOwnerCtx ? feeData.owner : (memberType === 'VIP' ? feeData.vip : feeData.biasa);
+                         let total = tagihan + adminFee;
                          
                          let detail = selectedPkg.name;
                          
@@ -4602,8 +4530,6 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                              nama: nama,
                              no: state.data.customerNo,
                              layanan: state.data.product.product_name + ` - ${pLabel}`,
-                             tagihan: tagihanPel,
-                             adminFee: adminFee,
                              total: total,
                              detail: detail
                          };
@@ -4623,7 +4549,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                              keyboard.push([{ text: "❌ Batal" }]);
                          }
 
-                         userStates[userId] = { step: 'WAIT_PAYMENT_PASCA', data: { ...state.data, ref_id: result.ref_id, totalBayar: total, tagihanPel: tagihanPel, adminFee: adminFee, checkResult: result, targetNo: finalCustomerNoVal } };
+                         userStates[userId] = { step: 'WAIT_PAYMENT_PASCA', data: { ...state.data, ref_id: result.ref_id, totalBayar: total, checkResult: result, targetNo: finalCustomerNoVal } };
 
                          const buffer = await generateCanvasReceipt("tagihan", billData);
                          if (buffer) {
@@ -4633,15 +4559,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                                  reply_markup: { keyboard, resize_keyboard: true }
                              });
                          } else {
-                             let msg = `🧾 *Detail Tagihan*\n\n`;
-                             msg += `Layanan: ${billData.layanan}\n`;
-                             if (detail) msg += `Detail: ${detail}\n`;
-                             msg += `Nomor: ${billData.no}\n`;
-                             msg += `Nama: ${billData.nama}\n\n`;
-                             msg += `*Total Bayar: Rp ${total.toLocaleString('id-ID')}*\n\n`;
-                             msg += `[Lihat Nota Web](${notaUrl})\n\n`;
-                             msg += replyText;
-                             await ctx.reply(msg, {
+                             await ctx.reply(replyText, {
                                  parse_mode: 'Markdown',
                                  reply_markup: { keyboard, resize_keyboard: true }
                              });
@@ -4804,14 +4722,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          await ctx.reply(`❌ Pengecekan Gagal:${result.message}`);
                     } else if (result.status === 'Sukses') {
                          const nama = result.customer_name || "-";
-                         const digiCommission = Number(result.commission) || 0;
-                         const digiSellingPrice = Number(result.selling_price) || 0;
-                         
-                         // Tagihan Pelanggan (Tagihan Pel) dari Digiflazz
-                         let tagihanPel = Number(result.price) || (digiSellingPrice + digiCommission);
-                         if (tagihanPel <= 0) {
-                             tagihanPel = digiSellingPrice;
-                         }
+                         const tagihan = result.selling_price || 0;
                          
                          // Determine member type
                          const memberId = state.data.memberId || `MBR-${ctx.from?.id}`;
@@ -4820,9 +4731,8 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          
                          const isOwnerCtx = db.owners.includes(ctx.from?.id);
                          const feeData = getProductFee(product.buyer_sku_code);
-                         let adminFee = isOwnerCtx ? (feeData.owner || 0) : (memberType === 'VIP' ? (feeData.vip || 0) : (feeData.biasa || 0));
-                         let total = tagihanPel + adminFee;
-                         
+                         let adminFee = isOwnerCtx ? feeData.owner : (memberType === 'VIP' ? feeData.vip : feeData.biasa);
+                         let total = tagihan + adminFee;
                          // We can add our own markup here if needed, but for now we just pass through
                          let detail = "";
                          if (result.desc) {
@@ -4833,7 +4743,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                                if (result.desc.tarif) parts.push(`⚡ Tarif: ${result.desc.tarif}`);
                                if (result.desc.daya) parts.push(`📊 Daya: ${result.desc.daya}`);
                                if (result.desc.lembar_tagihan) parts.push(`📄 Lembar: ${result.desc.lembar_tagihan}`);
-                                
+                               
                                if (Array.isArray(result.desc.detail)) {
                                    result.desc.detail.forEach((d: any, idx: number) => {
                                       parts.push(`📆 Bulan ${idx + 1}: ${d.periode || ''}`);
@@ -4846,12 +4756,11 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                            }
                          }
                          
+                         
                          const billData = {
                              nama: nama,
                              no: result.customer_no,
                              layanan: product.product_name,
-                             tagihan: tagihanPel,
-                             adminFee: adminFee,
                              total: total,
                              detail: detail
                          };
@@ -4877,7 +4786,7 @@ Tagihan kamu udah muncul nih, jangan sampai kelewat ya~
                              keyboard.push([{ text: "❌ Batal" }]);
                          }
 
-                         userStates[userId] = { step: 'WAIT_PAYMENT_PASCA', data: { ...state.data, ref_id: result.ref_id, totalBayar: total, tagihanPel: tagihanPel, adminFee: adminFee, checkResult: result, targetNo: finalCustomerNo } };
+                         userStates[userId] = { step: 'WAIT_PAYMENT_PASCA', data: { ...state.data, ref_id: result.ref_id, totalBayar: total, checkResult: result, targetNo: finalCustomerNo } };
 
                          const buffer = await generateCanvasReceipt("tagihan", billData);
                          if (buffer) {
@@ -4887,15 +4796,7 @@ Tagihan kamu udah muncul nih, jangan sampai kelewat ya~
                                  reply_markup: { keyboard, resize_keyboard: true }
                              });
                          } else {
-                             let msg = `🧾 *Detail Tagihan*\n\n`;
-                             msg += `Layanan: ${billData.layanan}\n`;
-                             if (detail) msg += `Detail: ${detail}\n`;
-                             msg += `Nomor: ${billData.no}\n`;
-                             msg += `Nama: ${billData.nama}\n\n`;
-                             msg += `*Total Bayar: Rp ${total.toLocaleString('id-ID')}*\n\n`;
-                             msg += `[Lihat Nota Web](${notaUrl})\n\n`;
-                             msg += replyText;
-                             await ctx.reply(msg, {
+                             await ctx.reply(replyText, {
                                  parse_mode: 'Markdown',
                                  reply_markup: { keyboard, resize_keyboard: true }
                              });
@@ -5730,18 +5631,13 @@ if (process.env.APPLET_ID || process.env.K_REVISION) {
     }
   });
 
-  const initialTelegramToken = db.telegramToken || process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN;
-  if (initialTelegramToken) {
-    if (!db.telegramToken) {
-      db.telegramToken = initialTelegramToken;
-      writeDB(db);
-    }
+  if (db.telegramToken) {
     console.log("Auto-starting Telegram bot...");
     const autoStart = async () => {
       let retries = 5;
       while (retries > 0) {
         try {
-          await startTelegramBot(initialTelegramToken);
+          await startTelegramBot(db.telegramToken);
           console.log("Telegram bot auto-started successfully.");
           break;
         } catch (e: any) {
@@ -5768,16 +5664,11 @@ if (process.env.APPLET_ID || process.env.K_REVISION) {
         let statusColor = '#4caf50';
         let statusText = 'Tagihan Ditemukan!';
         
-        const rawLines: [string, string][] = [
+        const linesHtml = [
             ['Nama', data.nama || '-'],
             ['Nomor', data.no || data.target || '-'],
             ['Layanan', data.layanan || '-']
-        ];
-        if (data.detail) {
-            rawLines.push(['Detail', String(data.detail)]);
-        }
-
-        const linesHtml = rawLines.map(([label, val]) => `
+        ].map(([label, val]) => `
             <div class="line">
                 <span class="label">${label}</span>
                 <span class="val">${val}</span>
@@ -6048,7 +5939,7 @@ E4 Store`,
         </div>
         <div class="divider"></div>
         <div class="footer-small" style="color: #333; font-size: 12px; font-weight: normal;">
-            ◻  ◻  ◻  ◻  ◻
+            Chuna - Asisten Imutmu siap bantu 24 jam!<br/>Terimakasih telah berbelanja di E4 Store!
         </div>
     </div>
 </body>
