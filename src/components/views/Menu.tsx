@@ -49,7 +49,7 @@ export function Menu({ onNavigate }: MenuProps) {
       <header className="flex justify-between items-center mb-8">
         <div>
           <h2 className="text-2xl font-semibold text-white">Menu Utama</h2>
-          <p className="text-slate-400 text-sm">Selamat datang kembali, Admin.</p>
+          <p className="text-slate-400 text-sm">Selamat datang kembali, Owner.</p>
         </div>
         <div className="flex items-center gap-4">
           <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700"></div>
