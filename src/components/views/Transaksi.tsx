@@ -150,6 +150,17 @@ export function Transaksi({ onBack }: { onBack: () => void }) {
                       >
                         🖨️ Bluetooth
                       </button>
+                      {t.method === 'utang' && t.status?.includes('Lunas') && (
+                        <a 
+                          href={`/api/nota-pelunasan/${t.id}/image`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-1 bg-emerald-500/20 text-emerald-400 rounded-md text-xs font-semibold hover:bg-emerald-500/30 transition-colors flex items-center gap-1 w-fit"
+                          title="Lihat Gambar Nota Pelunasan Lunas"
+                        >
+                          🎉 Nota Lunas
+                        </a>
+                      )}
                     </div>
                   )}
                   {t.method === 'utang' && t.status === 'Sukses' && (

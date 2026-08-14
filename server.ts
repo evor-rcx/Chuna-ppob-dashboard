@@ -23,6 +23,7 @@ console.error = function(...args) {
 };
 
 import { fetchTiktok } from "./downloader";
+import { generateDebtSettlementReceipt } from "./debtReceipt";
 
 import path from 'path';
 
@@ -1828,18 +1829,46 @@ app.get("/api/summary", (req, res) => {
     if (tx.method !== 'utang' || tx.status !== 'Sukses') return res.status(400).json({ error: "Hanya utang yang sukses dapat dilunasi" });
     
     tx.status = 'Sukses (Lunas)';
+    tx.paidAmount = tx.price;
     db.transactions = transactions;
     writeDB(db);
 
     const member = members.find((m: any) => m.id === tx.memberId);
     if (member) {
-      const msg = `🎉 *Terima Kasih, Kesayangan!* 🎉Utang kamu untuk pembelian *${tx.product}* sebesar Rp ${tx.price.toLocaleString('id-ID')} sudah LUNAS ya! Makasih udah bayar tepat waktu, Chuna seneng banget! 💖🐾*Nota Pelunasan:*ID: ${tx.id}Produk: ${tx.product}Tujuan: ${tx.target}Tanggal: ${new Date().toLocaleString('id-ID')}Jangan lupa mampir belanja lagi di E4 Store!`;
+      const nama = member.name || "Kak";
+      const dUtang = new Date(tx.date || new Date());
+      const months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+      const tglUtangStr = `${dUtang.getDate()} ${months[dUtang.getMonth()]} ${dUtang.getFullYear()}`;
+      const today = new Date();
+      const tglBayarStr = `${today.getDate()} ${months[today.getMonth()]} ${today.getFullYear()}`;
+
+      const msg = `✅ LUNAS TOTAL! 🎉\nHalo Kak ${nama},\nDengan senang hati kami informasikan bahwa pembayaran utang kakak telah sukses dan lunas! Berikut detailnya ya:\n\n📦 *RINCIAN PRODUK*\nNama Produk: ${tx.product}\nHarga: Rp ${tx.price.toLocaleString('id-ID')}\nTotal Utang: Rp ${tx.price.toLocaleString('id-ID')}\n\n📅 *TANGGAL UTANG:* ${tglUtangStr}\n🗓️ *TANGGAL BAYAR:* ${tglBayarStr}\n\n💰 *RINCIAN PEMBAYARAN*\n• Total Utang: Rp ${tx.price.toLocaleString('id-ID')}\n• Dibayarkan: Rp ${tx.price.toLocaleString('id-ID')} 💵\n• Kembalian: Rp 0 🪙\n\n*STATUS PESANAN KAKAK SEKARANG:* ✅ LUNAS\n\nTerima kasih sudah percaya sama kami. Jangan lupa, Chuna - Asisten Imutmu siap bantu 24 jam! kalau ada yang mau ditanyain lagi ya, Kak 😊\n\nTerimakasih telah berbelanja di E4 Store! ❤️ Semoga produknya bermanfaat dan kami tunggu kunjungan berikutnya!`;
       
+      let imgBuffer: Buffer | null = null;
+      try {
+        imgBuffer = await generateDebtSettlementReceipt({
+          nama: `Kak ${nama}`,
+          isLunasTotal: true,
+          products: [{ name: tx.product, price: tx.price }],
+          totalDebt: tx.price,
+          dibayarkan: tx.price,
+          kembalian: 0,
+          tglUtang: tglUtangStr,
+          tglBayar: tglBayarStr
+        });
+      } catch (err) {
+        console.error("Failed to generate debt settlement image:", err);
+      }
+
       // Notify Telegram if possible
       if (bot && member.telegram && member.telegram.length > 0) {
         try {
           const tgId = Array.isArray(member.telegram) ? member.telegram[0] : member.telegram.replace(/\D/g, '');
-          await bot.telegram.sendMessage(tgId, msg, { parse_mode: 'Markdown' });
+          if (imgBuffer) {
+            await bot.telegram.sendPhoto(tgId, { source: imgBuffer }, { caption: msg });
+          } else {
+            await bot.telegram.sendMessage(tgId, msg);
+          }
         } catch(e){}
       }
       // Notify WhatsApp if possible
@@ -1852,7 +1881,11 @@ app.get("/api/summary", (req, res) => {
           await waSocket.sendPresenceUpdate('composing', jid);
           await new Promise(r => setTimeout(r, 1200));
           await waSocket.sendPresenceUpdate('paused', jid);
-          await waSocket?.sendMessage(jid, { text: msg });
+          if (imgBuffer) {
+            await waSocket.sendMessage(jid, { image: imgBuffer, caption: msg });
+          } else {
+            await waSocket?.sendMessage(jid, { text: msg });
+          }
         } catch(e) { console.error("Error:", e.message); }
       }
     }
@@ -4975,9 +5008,16 @@ Tagihan kamu udah muncul nih, jangan sampai kelewat ya~
                   const tglLunas = `${today.getDate()} ${['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'][today.getMonth()]} ${today.getFullYear()}`;
                   
                   let lunasText = "";
+                  let isLunasTotal = nominal >= totalDebt;
+                  let kembalian = isLunasTotal ? nominal - totalDebt : 0;
+                  let sisa = isLunasTotal ? 0 : totalDebt - nominal;
 
-                  if (nominal >= totalDebt) {
-                      const kembalian = nominal - totalDebt;
+                  const receiptProducts = utangTx.map((t: any) => ({
+                      name: t.product || 'Produk',
+                      price: t.price || 0
+                  }));
+
+                  if (isLunasTotal) {
                       lunasText = `✅ LUNAS TOTAL! 🎉
 Halo Kak ${nama},
 Dengan senang hati kami informasikan bahwa pembayaran utang kakak telah sukses dan lunas! Berikut detailnya ya:
@@ -4999,10 +5039,7 @@ Status pesanan kakak sekarang: ✅ LUNAS
 
 Terima kasih sudah percaya sama kami. Jangan lupa, Chuna - Asisten Imutmu siap bantu 24 jam! kalau ada yang mau ditanyain lagi ya, Kak 😊
 Terimakasih telah berbelanja di E4 Store! ❤️ Semoga produknya bermanfaat dan kami tunggu kunjungan berikutnya!`;
-                      
-                      await ctx.reply(lunasText);
                   } else {
-                      const sisa = totalDebt - nominal;
                       lunasText = `⚠️ PEMBAYARAN SEBAGIAN
 Halo Kak ${nama},
 Pembayaran utang kakak telah kami terima sebagian.
@@ -5021,7 +5058,28 @@ Total Utang Rp ${totalDebt.toLocaleString('id-ID')}
 · Sisa Utang : Rp ${sisa.toLocaleString('id-ID')} ⚠️
 
 Status pesanan kakak sekarang: ⚠️ BELUM LUNAS`;
-                      
+                  }
+
+                  let lunasImageBuffer: Buffer | null = null;
+                  try {
+                      lunasImageBuffer = await generateDebtSettlementReceipt({
+                          nama: `Kak ${nama}`,
+                          isLunasTotal: isLunasTotal,
+                          products: receiptProducts,
+                          totalDebt: totalDebt,
+                          dibayarkan: nominal,
+                          kembalian: kembalian,
+                          sisaUtang: sisa,
+                          tglUtang: datesUtang,
+                          tglBayar: tglLunas
+                      });
+                  } catch (imgErr) {
+                      console.error("Failed to generate lunas receipt image:", imgErr);
+                  }
+
+                  if (lunasImageBuffer) {
+                      await ctx.replyWithPhoto({ source: lunasImageBuffer }, { caption: lunasText });
+                  } else {
                       await ctx.reply(lunasText);
                   }
                   
@@ -5031,7 +5089,11 @@ Status pesanan kakak sekarang: ⚠️ BELUM LUNAS`;
                       if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
                       const jid = cleanWa + "@s.whatsapp.net";
                       try {
-                          await waSocket.sendMessage(jid, { text: lunasText });
+                          if (lunasImageBuffer) {
+                              await waSocket.sendMessage(jid, { image: lunasImageBuffer, caption: lunasText });
+                          } else {
+                              await waSocket.sendMessage(jid, { text: lunasText });
+                          }
                       } catch (err) {
                           console.error("Failed to send WA utang receipt:", err);
                       }
@@ -5841,6 +5903,44 @@ E4 Store`,
         res.send(buffer);
     } else {
         res.status(500).send("Gagal generate gambar");
+    }
+  });
+
+  app.get("/api/nota-pelunasan/:id/image", async (req, res) => {
+    const { id } = req.params;
+    const tx = db.transactions.find(t => t.id === id);
+    if (!tx) {
+        return res.status(404).send("Transaksi tidak ditemukan.");
+    }
+    const member = (db.members || []).find((m: any) => m.id === tx.memberId);
+    const nama = member ? (member.name || "Pelanggan") : (tx.target || "Pelanggan");
+    const dUtang = new Date(tx.date || new Date());
+    const months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+    const tglUtangStr = `${dUtang.getDate()} ${months[dUtang.getMonth()]} ${dUtang.getFullYear()}`;
+    const today = new Date();
+    const tglBayarStr = `${today.getDate()} ${months[today.getMonth()]} ${today.getFullYear()}`;
+
+    const isLunas = (tx.status || '').toLowerCase().includes('lunas');
+    try {
+        const buffer = await generateDebtSettlementReceipt({
+            nama: `Kak ${nama}`,
+            isLunasTotal: isLunas,
+            products: [{ name: tx.product || 'Produk', price: tx.price || 0 }],
+            totalDebt: tx.price || 0,
+            dibayarkan: tx.paidAmount || tx.price || 0,
+            kembalian: isLunas ? Math.max(0, (tx.paidAmount || tx.price) - tx.price) : 0,
+            sisaUtang: isLunas ? 0 : Math.max(0, tx.price - (tx.paidAmount || 0)),
+            tglUtang: tglUtangStr,
+            tglBayar: tglBayarStr
+        });
+        if (buffer) {
+            res.setHeader('Content-Type', 'image/png');
+            res.send(buffer);
+        } else {
+            res.status(500).send("Gagal generate gambar");
+        }
+    } catch (e: any) {
+        res.status(500).send("Error: " + e.message);
     }
   });
 
