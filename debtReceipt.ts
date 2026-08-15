@@ -1,4 +1,6 @@
-import { createCanvas } from '@napi-rs/canvas';
+import { createCanvas, loadImage } from '@napi-rs/canvas';
+import path from 'path';
+import fs from 'fs';
 
 export interface DebtSettlementItem {
     name: string;
@@ -15,6 +17,27 @@ export interface DebtSettlementReceiptData {
     sisaUtang?: number;
     tglUtang: string;
     tglBayar: string;
+}
+
+let cachedChunaImg: any = null;
+async function getChunaImage() {
+    if (cachedChunaImg) return cachedChunaImg;
+    const candidates = [
+        path.join(process.cwd(), 'Picsart_26-08-15_13-04-05-605.png'),
+        path.join(process.cwd(), 'Picsart_26-07-14_17-31-30-222.png'),
+    ];
+    for (const p of candidates) {
+        if (fs.existsSync(p)) {
+            try {
+                const img = await loadImage(p);
+                cachedChunaImg = img;
+                return img;
+            } catch (e) {
+                console.error("Failed to load image at " + p, e);
+            }
+        }
+    }
+    return null;
 }
 
 function roundRect(ctx: any, x: number, y: number, w: number, h: number, r: number | number[]) {
@@ -50,290 +73,116 @@ function drawSparkle(ctx: any, cx: number, cy: number, size: number, color: stri
 
 function drawGiftIcon(ctx: any, x: number, y: number, size: number) {
     ctx.save();
-    const boxSize = size * 0.8;
-    const lidHeight = size * 0.25;
+    const boxSize = size * 0.85;
+    const lidHeight = size * 0.28;
     
-    // Box body
-    ctx.fillStyle = '#60A5FA';
+    // Box body (Cyan / Blue)
+    ctx.fillStyle = '#38BDF8';
     roundRect(ctx, x - boxSize/2, y - boxSize/2 + lidHeight, boxSize, boxSize - lidHeight, 4);
     ctx.fill();
     
-    // Vertical ribbon
-    ctx.fillStyle = '#F87171';
-    ctx.fillRect(x - 3, y - boxSize/2 + lidHeight, 6, boxSize - lidHeight);
+    // Vertical ribbon (Red)
+    ctx.fillStyle = '#EF4444';
+    ctx.fillRect(x - 3.5, y - boxSize/2 + lidHeight, 7, boxSize - lidHeight);
     
     // Lid
-    ctx.fillStyle = '#3B82F6';
-    roundRect(ctx, x - (boxSize + 4)/2, y - boxSize/2, boxSize + 4, lidHeight, 3);
+    ctx.fillStyle = '#0284C7';
+    roundRect(ctx, x - (boxSize + 6)/2, y - boxSize/2, boxSize + 6, lidHeight, 3);
     ctx.fill();
     
     // Ribbon on lid
-    ctx.fillStyle = '#EF4444';
-    ctx.fillRect(x - 3, y - boxSize/2, 6, lidHeight);
+    ctx.fillStyle = '#DC2626';
+    ctx.fillRect(x - 3.5, y - boxSize/2, 7, lidHeight);
     
     // Bow
     ctx.beginPath();
-    ctx.arc(x - 4, y - boxSize/2 - 2, 4, 0, Math.PI * 2);
-    ctx.arc(x + 4, y - boxSize/2 - 2, 4, 0, Math.PI * 2);
+    ctx.arc(x - 4.5, y - boxSize/2 - 2, 4.5, 0, Math.PI * 2);
+    ctx.arc(x + 4.5, y - boxSize/2 - 2, 4.5, 0, Math.PI * 2);
     ctx.fillStyle = '#EF4444';
     ctx.fill();
     
     ctx.restore();
 }
 
-function drawChunaAvatar(ctx: any, x: number, y: number, size: number) {
+function drawCuteCoin(ctx: any, x: number, y: number, r: number) {
     ctx.save();
-    
-    // Outer glow / shadow
-    ctx.save();
+    // Outer coin ring
     ctx.beginPath();
-    ctx.arc(x, y, size / 2 + 2, 0, Math.PI * 2);
-    ctx.fillStyle = '#FFFFFF';
-    ctx.shadowColor = 'rgba(147, 197, 253, 0.5)';
-    ctx.shadowBlur = 12;
-    ctx.fill();
-    ctx.restore();
-
-    // Outer circle border
-    ctx.beginPath();
-    ctx.arc(x, y, size / 2, 0, Math.PI * 2);
-    ctx.fillStyle = '#F0F9FF';
-    ctx.fill();
-    ctx.lineWidth = 3.5;
-    ctx.strokeStyle = '#BAE6FD';
-    ctx.stroke();
-
-    // Clip to circle
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(x, y, size / 2 - 1.5, 0, Math.PI * 2);
-    ctx.clip();
-
-    // Background gradient inside avatar
-    const bgGrad = ctx.createLinearGradient(x, y - size/2, x, y + size/2);
-    bgGrad.addColorStop(0, '#E0F2FE');
-    bgGrad.addColorStop(1, '#BAE6FD');
-    ctx.fillStyle = bgGrad;
-    ctx.fillRect(x - size/2, y - size/2, size, size);
-
-    // Subtle background sparkles inside circle
-    drawSparkle(ctx, x - size * 0.32, y - size * 0.25, 4, 'rgba(255,255,255,0.8)');
-    drawSparkle(ctx, x + size * 0.32, y - size * 0.28, 5, 'rgba(255,255,255,0.8)');
-
-    // 1. Hoodie Body (Oversized White Techwear Zip Hoodie)
-    ctx.fillStyle = '#F8FAFC';
-    ctx.beginPath();
-    ctx.ellipse(x, y + size * 0.46, size * 0.44, size * 0.32, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = '#CBD5E1';
-    ctx.stroke();
-
-    // Zipper line
-    ctx.strokeStyle = '#94A3B8';
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.moveTo(x, y + size * 0.18);
-    ctx.lineTo(x, y + size * 0.52);
-    ctx.stroke();
-
-    // Zipper puller
-    ctx.fillStyle = '#64748B';
-    ctx.fillRect(x - 2, y + size * 0.22, 4, 6);
-
-    // Hoodie strings
-    ctx.strokeStyle = '#94A3B8';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(x - 10, y + size * 0.2);
-    ctx.lineTo(x - 12, y + size * 0.36);
-    ctx.moveTo(x + 10, y + size * 0.2);
-    ctx.lineTo(x + 12, y + size * 0.36);
-    ctx.stroke();
-
-    // --- LOGO E4 ON RIGHT SLEEVE / CHEST (Viewer's Left) ---
-    ctx.save();
-    const logoX = x - size * 0.26;
-    const logoY = y + size * 0.28;
-    // Colorful diamond/shield badge background for E4
-    ctx.fillStyle = '#0284C7';
-    ctx.beginPath();
-    ctx.moveTo(logoX, logoY - 7);
-    ctx.lineTo(logoX + 9, logoY - 2);
-    ctx.lineTo(logoX + 7, logoY + 7);
-    ctx.lineTo(logoX - 8, logoY + 7);
-    ctx.lineTo(logoX - 9, logoY - 2);
-    ctx.closePath();
-    ctx.fill();
-    ctx.strokeStyle = '#38BDF8';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    // E4 Text on badge
+    ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fillStyle = '#FDE047';
-    ctx.font = 'bold 7px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('E4', logoX, logoY + 1);
-    ctx.restore();
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#EAB308';
+    ctx.stroke();
 
-    // --- REI-Chuna BADGE ON LEFT CHEST (Viewer's Right) ---
+    // Inner ring
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.75, 0, Math.PI * 2);
+    ctx.strokeStyle = '#CA8A04';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Smiling face on coin
+    ctx.strokeStyle = '#854D0E';
+    ctx.lineWidth = 2;
+    // Left eye curve
+    ctx.beginPath();
+    ctx.arc(x - r * 0.28, y - r * 0.1, r * 0.15, Math.PI * 1.1, Math.PI * 1.9);
+    ctx.stroke();
+    // Right eye curve
+    ctx.beginPath();
+    ctx.arc(x + r * 0.28, y - r * 0.1, r * 0.15, Math.PI * 1.1, Math.PI * 1.9);
+    ctx.stroke();
+    // Cute smile
+    ctx.beginPath();
+    ctx.arc(x, y + r * 0.05, r * 0.35, 0.15 * Math.PI, 0.85 * Math.PI);
+    ctx.stroke();
+
+    ctx.restore();
+}
+
+function drawCardboardBox(ctx: any, x: number, y: number, size: number) {
     ctx.save();
-    const badgeNameX = x + size * 0.16;
-    const badgeNameY = y + size * 0.30;
-    // Black patch
-    ctx.fillStyle = '#0F172A';
-    roundRect(ctx, badgeNameX - 14, badgeNameY - 4.5, 28, 9, 2);
+    const w = size;
+    const h = size * 0.85;
+    
+    // Cardboard base
+    ctx.fillStyle = '#FDBA74';
+    roundRect(ctx, x - w/2, y - h/2, w, h, 4);
     ctx.fill();
-    // Border
-    ctx.strokeStyle = '#475569';
-    ctx.lineWidth = 0.8;
-    ctx.stroke();
-    // Text: REI-Chuna
-    ctx.fillStyle = '#F8FAFC';
-    ctx.font = 'bold 5.5px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('REI-Chuna', badgeNameX, badgeNameY + 0.5);
-    ctx.restore();
-
-    // 2. Neck & Head
-    ctx.fillStyle = '#FFE4DE';
-    ctx.beginPath();
-    ctx.ellipse(x, y + size * 0.12, size * 0.08, size * 0.09, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Choker necklace
-    ctx.strokeStyle = '#0F172A';
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.arc(x, y + size * 0.11, 8, 0.1 * Math.PI, 0.9 * Math.PI);
+    ctx.strokeStyle = '#EA580C';
+    ctx.lineWidth = 1.5;
     ctx.stroke();
 
-    // Choker cross / pendant
-    ctx.fillStyle = '#38BDF8';
-    ctx.beginPath();
-    ctx.arc(x, y + size * 0.15, 2, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Face / Head
-    ctx.fillStyle = '#FFF1EE';
-    ctx.beginPath();
-    ctx.arc(x, y - size * 0.05, size * 0.23, 0, Math.PI * 2);
-    ctx.fill();
-
-    // 3. Hair - Silver white short anime hair
-    ctx.fillStyle = '#F1F5F9';
-    ctx.beginPath();
-    // Back/side hair
-    ctx.arc(x, y - size * 0.07, size * 0.27, Math.PI * 0.8, Math.PI * 2.2);
-    ctx.fill();
-
-    // Bangs
-    ctx.beginPath();
-    ctx.moveTo(x - size * 0.22, y - size * 0.1);
-    ctx.quadraticCurveTo(x - size * 0.1, y + size * 0.04, x - size * 0.05, y - size * 0.02);
-    ctx.quadraticCurveTo(x, y + size * 0.06, x + size * 0.06, y - size * 0.03);
-    ctx.quadraticCurveTo(x + size * 0.14, y + size * 0.04, x + size * 0.22, y - size * 0.1);
-    ctx.quadraticCurveTo(x + size * 0.18, y - size * 0.3, x, y - size * 0.32);
-    ctx.quadraticCurveTo(x - size * 0.18, y - size * 0.3, x - size * 0.22, y - size * 0.1);
-    ctx.fill();
-    ctx.strokeStyle = '#CBD5E1';
+    // Tape across middle
+    ctx.fillStyle = '#FED7AA';
+    ctx.fillRect(x - w/2 + 2, y - 3, w - 4, 6);
+    ctx.strokeStyle = '#F97316';
     ctx.lineWidth = 1;
-    ctx.stroke();
+    ctx.strokeRect(x - w/2 + 2, y - 3, w - 4, 6);
 
-    // 4. Eyes - Crimson Red Anime Eyes
-    // Left eye
-    ctx.fillStyle = '#DC2626';
-    ctx.beginPath();
-    ctx.ellipse(x - 11, y - size * 0.05, 4.5, 6, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // Left eye pupil
-    ctx.fillStyle = '#7F1D1D';
-    ctx.beginPath();
-    ctx.arc(x - 11, y - size * 0.05, 2.5, 0, Math.PI * 2);
-    ctx.fill();
-    // Left eye highlights
-    ctx.fillStyle = '#FFFFFF';
-    ctx.beginPath();
-    ctx.arc(x - 12, y - size * 0.07, 1.8, 0, Math.PI * 2);
-    ctx.arc(x - 9.5, y - size * 0.03, 1, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Right eye
-    ctx.fillStyle = '#DC2626';
-    ctx.beginPath();
-    ctx.ellipse(x + 11, y - size * 0.05, 4.5, 6, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // Right eye pupil
-    ctx.fillStyle = '#7F1D1D';
-    ctx.beginPath();
-    ctx.arc(x + 11, y - size * 0.05, 2.5, 0, Math.PI * 2);
-    ctx.fill();
-    // Right eye highlights
-    ctx.fillStyle = '#FFFFFF';
-    ctx.beginPath();
-    ctx.arc(x + 10, y - size * 0.07, 1.8, 0, Math.PI * 2);
-    ctx.arc(x + 12.5, y - size * 0.03, 1, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Cute blush
-    ctx.fillStyle = 'rgba(244, 114, 182, 0.5)';
-    ctx.beginPath();
-    ctx.ellipse(x - 14, y + size * 0.02, 5, 2.5, 0, 0, Math.PI * 2);
-    ctx.ellipse(x + 14, y + size * 0.02, 5, 2.5, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Cute small smile
-    ctx.strokeStyle = '#E11D48';
-    ctx.lineWidth = 1.8;
-    ctx.beginPath();
-    ctx.arc(x, y + size * 0.03, 3.5, 0.1 * Math.PI, 0.9 * Math.PI);
-    ctx.stroke();
-
-    // 5. Mini Finger Heart Hand Pose (Viewer's Right / Character's Left Hand)
-    ctx.save();
-    const handX = x + size * 0.36;
-    const handY = y + size * 0.18;
-
-    // Sleeve cuff
-    ctx.fillStyle = '#E2E8F0';
-    ctx.beginPath();
-    ctx.ellipse(handX - 2, handY + 12, 6, 4, -0.3, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Hand skin
-    ctx.fillStyle = '#FFF1EE';
-    // Palm / base
-    ctx.beginPath();
-    ctx.ellipse(handX, handY + 6, 4.5, 5, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Thumb & Index finger crossing
-    ctx.beginPath();
-    // Index finger
-    ctx.ellipse(handX - 1.5, handY - 1, 2, 4, -0.2, 0, Math.PI * 2);
-    // Thumb crossed over
-    ctx.ellipse(handX + 1.5, handY, 2, 3.5, 0.3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#FBCFE8';
-    ctx.lineWidth = 0.8;
-    ctx.stroke();
-
-    // Cute floating mini heart above finger heart
-    ctx.fillStyle = '#EC4899';
-    ctx.beginPath();
-    const hx = handX;
-    const hy = handY - 9;
-    ctx.arc(hx - 2, hy - 2, 2.5, 0, Math.PI * 2);
-    ctx.arc(hx + 2, hy - 2, 2.5, 0, Math.PI * 2);
-    ctx.moveTo(hx - 4.5, hy - 1);
-    ctx.lineTo(hx, hy + 4);
-    ctx.lineTo(hx + 4.5, hy - 1);
-    ctx.fill();
     ctx.restore();
+}
 
-    ctx.restore(); // end clip
+function drawShoppingBag(ctx: any, x: number, y: number, size: number) {
+    ctx.save();
+    const w = size * 0.85;
+    const h = size;
+
+    ctx.fillStyle = '#BFDBFE';
+    roundRect(ctx, x - w/2, y - h/2, w, h, 4);
+    ctx.fill();
+    ctx.strokeStyle = '#60A5FA';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Handle
+    ctx.beginPath();
+    ctx.arc(x, y - h/2, w * 0.3, Math.PI, 0);
+    ctx.strokeStyle = '#3B82F6';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
     ctx.restore();
 }
 
@@ -342,332 +191,317 @@ export async function generateDebtSettlementReceipt(data: DebtSettlementReceiptD
     
     // Calculate required height based on products count
     const productCount = Math.max(1, data.products?.length || 1);
-    const productListHeight = productCount * 36;
-    const baseHeight = 1000;
-    const height = baseHeight + (productCount > 1 ? (productCount - 1) * 36 : 0);
+    const productListHeight = productCount * 38;
+    const baseHeight = 1060;
+    const height = baseHeight + (productCount > 1 ? (productCount - 1) * 38 : 0);
 
     const canvas = createCanvas(width, height);
     const ctx = canvas.getContext('2d');
 
-    // 1. Soft Blue Gradient Background
+    // 1. Soft Blue Clean Gradient Background
     const bgGrad = ctx.createLinearGradient(0, 0, 0, height);
-    bgGrad.addColorStop(0, '#EAF4FC');
-    bgGrad.addColorStop(0.5, '#F1F7FD');
+    bgGrad.addColorStop(0, '#EAF5FD');
+    bgGrad.addColorStop(0.5, '#F1F8FE');
     bgGrad.addColorStop(1, '#E8F3FA');
     ctx.fillStyle = bgGrad;
     ctx.fillRect(0, 0, width, height);
 
-    // Decorative floating elements (cute coins, shopping bags, sparkles)
-    // Gold coins
+    // Decorative floating elements in background
+    // 1. Coins with cute faces
     const coins = [
-        { x: 45, y: 55, r: 24 },
-        { x: 555, y: 70, r: 22 },
-        { x: 40, y: 440, r: 20 },
-        { x: 560, y: 430, r: 21 },
-        { x: 55, y: 760, r: 23 },
-        { x: 550, y: 770, r: 22 },
-        { x: 30, y: 960, r: 24 },
-        { x: 565, y: 970, r: 20 },
+        { x: 38, y: 38, r: 32 },
+        { x: 555, y: 48, r: 30 },
+        { x: 45, y: 440, r: 26 },
+        { x: 555, y: 435, r: 26 },
+        { x: 28, y: 760, r: 25 },
+        { x: 565, y: 760, r: 25 },
+        { x: 555, y: 980, r: 28 },
     ];
-    coins.forEach(c => {
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(253, 224, 71, 0.45)';
-        ctx.fill();
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = 'rgba(250, 204, 21, 0.6)';
-        ctx.stroke();
+    coins.forEach(c => drawCuteCoin(ctx, c.x, c.y, c.r));
 
-        // Inner coin ring
-        ctx.beginPath();
-        ctx.arc(c.x, c.y, c.r * 0.7, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(234, 179, 8, 0.5)';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
+    // 2. Cardboard boxes
+    const boxes = [
+        { x: 560, y: 135, s: 36 },
+        { x: 40, y: 330, s: 36 },
+        { x: 560, y: 320, s: 36 }
+    ];
+    boxes.forEach(b => drawCardboardBox(ctx, b.x, b.y, b.s));
 
-        // Dollar or star mark
-        ctx.fillStyle = 'rgba(202, 138, 4, 0.65)';
-        ctx.font = `bold ${Math.round(c.r * 0.85)}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('$', c.x, c.y + 1);
-        ctx.restore();
-    });
+    // 3. Shopping bags
+    const bags = [
+        { x: 40, y: 215, s: 32 },
+        { x: 40, y: 580, s: 32 },
+        { x: 555, y: 575, s: 32 },
+        { x: 30, y: 940, s: 32 },
+        { x: 555, y: 940, s: 32 }
+    ];
+    bags.forEach(b => drawShoppingBag(ctx, b.x, b.y, b.s));
 
-    // Sparkles
+    // 4. Sparkles
     const sparkles = [
-        { x: 80, y: 150, size: 8, color: 'rgba(147, 197, 253, 0.8)' },
-        { x: 520, y: 130, size: 7, color: 'rgba(147, 197, 253, 0.8)' },
-        { x: 70, y: 640, size: 9, color: 'rgba(147, 197, 253, 0.7)' },
-        { x: 540, y: 620, size: 8, color: 'rgba(147, 197, 253, 0.7)' },
-        { x: 525, y: 850, size: 8, color: 'rgba(147, 197, 253, 0.8)' },
-        { x: 85, y: 840, size: 7, color: 'rgba(147, 197, 253, 0.8)' }
+        { x: 75, y: 155, size: 9, color: 'rgba(56, 189, 248, 0.75)' },
+        { x: 520, y: 220, size: 8, color: 'rgba(56, 189, 248, 0.75)' },
+        { x: 75, y: 630, size: 9, color: 'rgba(56, 189, 248, 0.75)' },
+        { x: 535, y: 645, size: 9, color: 'rgba(56, 189, 248, 0.75)' },
+        { x: 80, y: 825, size: 8, color: 'rgba(56, 189, 248, 0.75)' },
+        { x: 530, y: 850, size: 8, color: 'rgba(56, 189, 248, 0.75)' }
     ];
     sparkles.forEach(s => drawSparkle(ctx, s.x, s.y, s.size, s.color));
 
-    // Shopping bag outlines
-    const bags = [
-        { x: 35, y: 220 },
-        { x: 550, y: 225 },
-        { x: 35, y: 580 },
-        { x: 550, y: 560 },
-        { x: 545, y: 920 }
-    ];
-    bags.forEach(b => {
-        ctx.save();
-        ctx.fillStyle = 'rgba(191, 219, 254, 0.4)';
-        roundRect(ctx, b.x - 12, b.y - 8, 24, 28, 4);
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(147, 197, 253, 0.6)';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        // Handle
-        ctx.beginPath();
-        ctx.arc(b.x, b.y - 8, 6, Math.PI, 0);
-        ctx.stroke();
-        ctx.restore();
-    });
-
-    let currentY = 42;
+    let currentY = 48;
 
     // 2. Top Header - Logo & Store Name
-    drawGiftIcon(ctx, 210, currentY + 12, 30);
+    drawGiftIcon(ctx, 215, currentY + 14, 34);
     ctx.fillStyle = '#1E3A8A';
-    ctx.font = 'bold 30px sans-serif';
+    ctx.font = 'bold 32px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText('E4 STORE', 235, currentY + 14);
+    ctx.fillText('E4 STORE', 242, currentY + 16);
 
-    currentY += 52;
+    currentY += 56;
 
     // Main Title
     ctx.fillStyle = '#0F172A';
-    ctx.font = 'bold 24px sans-serif';
+    ctx.font = 'bold 25px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(data.isLunasTotal ? 'NOTA PEMBAYARAN LUNAS' : 'NOTA PEMBAYARAN UTANG', width / 2, currentY);
 
-    currentY += 28;
+    currentY += 30;
 
-    const cardX = 52;
-    const cardW = width - 104; // 496px
+    const cardX = 58;
+    const cardW = width - 116; // 484px
 
     // 3. Card 1 - RINCIAN PRODUK
-    const headerHeight = 36;
-    const productBodyHeight = 36 + productListHeight + 36; // col headers + items + total utang
+    const headerHeight = 40;
+    const productBodyHeight = 36 + productListHeight + 36;
     const card1Height = headerHeight + productBodyHeight;
 
     // Card 1 container
     ctx.save();
-    // Shadow
-    ctx.shadowColor = 'rgba(148, 163, 184, 0.15)';
-    ctx.shadowBlur = 10;
+    ctx.shadowColor = 'rgba(148, 163, 184, 0.18)';
+    ctx.shadowBlur = 12;
     ctx.shadowOffsetY = 4;
     ctx.fillStyle = '#FFFFFF';
-    roundRect(ctx, cardX, currentY, cardW, card1Height, 14);
+    roundRect(ctx, cardX, currentY, cardW, card1Height, 16);
     ctx.fill();
     ctx.restore();
 
-    // Card 1 Header Pill (Light Blue)
+    // Card 1 Outer border
+    ctx.strokeStyle = '#BAE6FD';
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, cardX, currentY, cardW, card1Height, 16);
+    ctx.stroke();
+
+    // Card 1 Header Bar (Light Blue)
     ctx.fillStyle = '#BAE6FD';
-    roundRect(ctx, cardX, currentY, cardW, headerHeight, [14, 14, 0, 0]);
+    roundRect(ctx, cardX, currentY, cardW, headerHeight, [16, 16, 0, 0]);
     ctx.fill();
 
     ctx.fillStyle = '#0F172A';
-    ctx.font = 'bold 15px sans-serif';
+    ctx.font = 'bold 17px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText('📦 RINCIAN PRODUK', cardX + 16, currentY + headerHeight / 2);
 
     // Card 1 Body Content
-    let pY = currentY + headerHeight + 20;
+    let pY = currentY + headerHeight + 22;
 
     // Columns Header
-    ctx.fillStyle = '#64748B';
-    ctx.font = 'bold 14px sans-serif';
+    ctx.fillStyle = '#334155';
+    ctx.font = 'bold 15px sans-serif';
     ctx.textAlign = 'left';
     ctx.fillText('Nama Produk', cardX + 18, pY);
     ctx.textAlign = 'right';
     ctx.fillText('Harga', cardX + cardW - 18, pY);
 
-    pY += 24;
+    pY += 28;
 
     // Product rows
     ctx.fillStyle = '#0F172A';
-    ctx.font = 'bold 15px sans-serif';
+    ctx.font = 'bold 16px sans-serif';
     if (data.products && data.products.length > 0) {
         data.products.forEach(prod => {
             ctx.textAlign = 'left';
             ctx.fillText(prod.name || '-', cardX + 18, pY);
             ctx.textAlign = 'right';
             ctx.fillText(`Rp ${(prod.price || 0).toLocaleString('id-ID')}`, cardX + cardW - 18, pY);
-            pY += 32;
+            pY += 34;
         });
     } else {
         ctx.textAlign = 'left';
         ctx.fillText('Produk Transaksi', cardX + 18, pY);
         ctx.textAlign = 'right';
         ctx.fillText(`Rp ${(data.totalDebt || 0).toLocaleString('id-ID')}`, cardX + cardW - 18, pY);
-        pY += 32;
+        pY += 34;
     }
 
     // Total Utang in Card 1
     pY += 6;
     ctx.fillStyle = '#0F172A';
-    ctx.font = 'bold 16px sans-serif';
+    ctx.font = 'bold 17px sans-serif';
     ctx.textAlign = 'right';
     ctx.fillText(`Total Utang: Rp ${(data.totalDebt || 0).toLocaleString('id-ID')}`, cardX + cardW - 18, pY);
 
     currentY += card1Height + 16;
 
     // 4. Card 2 - TANGGAL TRANSAKSI
-    const card2Height = headerHeight + 66;
+    const card2Height = headerHeight + 70;
 
     ctx.save();
-    ctx.shadowColor = 'rgba(148, 163, 184, 0.15)';
-    ctx.shadowBlur = 10;
+    ctx.shadowColor = 'rgba(148, 163, 184, 0.18)';
+    ctx.shadowBlur = 12;
     ctx.shadowOffsetY = 4;
     ctx.fillStyle = '#FFFFFF';
-    roundRect(ctx, cardX, currentY, cardW, card2Height, 14);
+    roundRect(ctx, cardX, currentY, cardW, card2Height, 16);
     ctx.fill();
     ctx.restore();
 
+    ctx.strokeStyle = '#BAE6FD';
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, cardX, currentY, cardW, card2Height, 16);
+    ctx.stroke();
+
     // Card 2 Header
     ctx.fillStyle = '#BAE6FD';
-    roundRect(ctx, cardX, currentY, cardW, headerHeight, [14, 14, 0, 0]);
+    roundRect(ctx, cardX, currentY, cardW, headerHeight, [16, 16, 0, 0]);
     ctx.fill();
 
     ctx.fillStyle = '#0F172A';
-    ctx.font = 'bold 15px sans-serif';
+    ctx.font = 'bold 17px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText('📅 TANGGAL TRANSAKSI', cardX + 16, currentY + headerHeight / 2);
 
     // 2 Sub-boxes inside Card 2
-    const subBoxW = (cardW - 44) / 2;
-    const subBoxH = 48;
-    const subBoxY = currentY + headerHeight + 9;
+    const subBoxW = (cardW - 40) / 2;
+    const subBoxH = 52;
+    const subBoxY = currentY + headerHeight + 10;
 
     // Left Sub-box: TANGGAL UTANG
     ctx.fillStyle = '#F8FAFC';
-    roundRect(ctx, cardX + 14, subBoxY, subBoxW, subBoxH, 8);
+    roundRect(ctx, cardX + 12, subBoxY, subBoxW, subBoxH, 10);
     ctx.fill();
     ctx.strokeStyle = '#E2E8F0';
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    ctx.fillStyle = '#475569';
-    ctx.font = 'bold 11px sans-serif';
+    ctx.fillStyle = '#64748B';
+    ctx.font = 'bold 12px sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText('📅 TANGGAL UTANG:', cardX + 22, subBoxY + 16);
+    ctx.fillText('📅 TANGGAL UTANG:', cardX + 22, subBoxY + 18);
     ctx.fillStyle = '#0F172A';
-    ctx.font = 'bold 13px sans-serif';
-    ctx.fillText(data.tglUtang || '-', cardX + 22, subBoxY + 34);
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText(data.tglUtang || '-', cardX + 22, subBoxY + 38);
 
     // Right Sub-box: TANGGAL BAYAR
     ctx.fillStyle = '#F8FAFC';
-    roundRect(ctx, cardX + 14 + subBoxW + 16, subBoxY, subBoxW, subBoxH, 8);
+    roundRect(ctx, cardX + 12 + subBoxW + 16, subBoxY, subBoxW, subBoxH, 10);
     ctx.fill();
     ctx.strokeStyle = '#E2E8F0';
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    ctx.fillStyle = '#475569';
-    ctx.font = 'bold 11px sans-serif';
+    ctx.fillStyle = '#64748B';
+    ctx.font = 'bold 12px sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText('🗓️ TANGGAL BAYAR:', cardX + 14 + subBoxW + 24, subBoxY + 16);
+    ctx.fillText('📅 TANGGAL BAYAR:', cardX + 12 + subBoxW + 24, subBoxY + 18);
     ctx.fillStyle = '#0F172A';
-    ctx.font = 'bold 13px sans-serif';
-    ctx.fillText(data.tglBayar || '-', cardX + 14 + subBoxW + 24, subBoxY + 34);
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText(`✅ ${data.tglBayar || '-'}`, cardX + 12 + subBoxW + 24, subBoxY + 38);
 
     currentY += card2Height + 16;
 
     // 5. Card 3 - RINCIAN PEMBAYARAN
-    const card3Height = headerHeight + 104;
+    const card3Height = headerHeight + 112;
 
     ctx.save();
-    ctx.shadowColor = 'rgba(148, 163, 184, 0.15)';
-    ctx.shadowBlur = 10;
+    ctx.shadowColor = 'rgba(148, 163, 184, 0.18)';
+    ctx.shadowBlur = 12;
     ctx.shadowOffsetY = 4;
     ctx.fillStyle = '#FFFFFF';
-    roundRect(ctx, cardX, currentY, cardW, card3Height, 14);
+    roundRect(ctx, cardX, currentY, cardW, card3Height, 16);
     ctx.fill();
     ctx.restore();
 
+    ctx.strokeStyle = '#BAE6FD';
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, cardX, currentY, cardW, card3Height, 16);
+    ctx.stroke();
+
     // Card 3 Header
     ctx.fillStyle = '#BAE6FD';
-    roundRect(ctx, cardX, currentY, cardW, headerHeight, [14, 14, 0, 0]);
+    roundRect(ctx, cardX, currentY, cardW, headerHeight, [16, 16, 0, 0]);
     ctx.fill();
 
     ctx.fillStyle = '#0F172A';
-    ctx.font = 'bold 15px sans-serif';
+    ctx.font = 'bold 17px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText('💰 RINCIAN PEMBAYARAN', cardX + 16, currentY + headerHeight / 2);
 
     // Card 3 Lines
-    let payY = currentY + headerHeight + 20;
+    let payY = currentY + headerHeight + 22;
 
     // Row 1: Total Utang
     ctx.fillStyle = '#1E293B';
-    ctx.font = '15px sans-serif';
+    ctx.font = '16px sans-serif';
     ctx.textAlign = 'left';
     ctx.fillText('• Total Utang:', cardX + 18, payY);
-    ctx.font = 'bold 15px sans-serif';
+    ctx.font = 'bold 16px sans-serif';
     ctx.textAlign = 'right';
     ctx.fillText(`Rp ${(data.totalDebt || 0).toLocaleString('id-ID')}`, cardX + cardW - 18, payY);
 
-    payY += 28;
+    payY += 30;
 
     // Row 2: Dibayarkan
     ctx.fillStyle = '#1E293B';
-    ctx.font = '15px sans-serif';
+    ctx.font = '16px sans-serif';
     ctx.textAlign = 'left';
     ctx.fillText('• Dibayarkan:', cardX + 18, payY);
-    ctx.font = 'bold 15px sans-serif';
+    ctx.font = 'bold 16px sans-serif';
     ctx.textAlign = 'right';
     ctx.fillText(`Rp ${(data.dibayarkan || 0).toLocaleString('id-ID')} 💵`, cardX + cardW - 18, payY);
 
-    payY += 28;
+    payY += 30;
 
     // Row 3: Kembalian / Sisa Utang
     if (data.isLunasTotal) {
         ctx.fillStyle = '#1E293B';
-        ctx.font = '15px sans-serif';
+        ctx.font = '16px sans-serif';
         ctx.textAlign = 'left';
         ctx.fillText('• Kembalian:', cardX + 18, payY);
-        ctx.font = 'bold 15px sans-serif';
+        ctx.font = 'bold 16px sans-serif';
         ctx.textAlign = 'right';
-        ctx.fillText(`Rp ${(data.kembalian || 0).toLocaleString('id-ID')} 🪙`, cardX + cardW - 18, payY);
+        ctx.fillText(`🪙 Rp ${(data.kembalian || 0).toLocaleString('id-ID')} ✅`, cardX + cardW - 18, payY);
     } else {
         ctx.fillStyle = '#DC2626';
-        ctx.font = 'bold 15px sans-serif';
+        ctx.font = 'bold 16px sans-serif';
         ctx.textAlign = 'left';
         ctx.fillText('• Sisa Utang:', cardX + 18, payY);
         ctx.textAlign = 'right';
         ctx.fillText(`Rp ${(data.sisaUtang || 0).toLocaleString('id-ID')} ⚠️`, cardX + cardW - 18, payY);
     }
 
-    currentY += card3Height + 28;
+    currentY += card3Height + 30;
 
     // 6. Section 4 - STATUS PESANAN KAKAK SEKARANG
     ctx.fillStyle = '#0F172A';
-    ctx.font = 'bold 22px sans-serif';
+    ctx.font = 'bold 24px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('STATUS PESANAN', width / 2, currentY);
-    currentY += 26;
+    currentY += 28;
     ctx.fillText('KAKAK SEKARANG:', width / 2, currentY);
 
-    currentY += 18;
+    currentY += 20;
 
     // Big Green or Orange Badge
-    const badgeW = 320;
-    const badgeH = 64;
+    const badgeW = 340;
+    const badgeH = 68;
     const badgeX = (width - badgeW) / 2;
 
     ctx.save();
-    ctx.shadowColor = data.isLunasTotal ? 'rgba(22, 163, 74, 0.4)' : 'rgba(234, 88, 12, 0.4)';
-    ctx.shadowBlur = 14;
+    ctx.shadowColor = data.isLunasTotal ? 'rgba(22, 163, 74, 0.45)' : 'rgba(234, 88, 12, 0.45)';
+    ctx.shadowBlur = 16;
     ctx.shadowOffsetY = 6;
     ctx.fillStyle = data.isLunasTotal ? '#16A34A' : '#EA580C';
     roundRect(ctx, badgeX, currentY, badgeW, badgeH, 20);
@@ -675,11 +509,13 @@ export async function generateDebtSettlementReceipt(data: DebtSettlementReceiptD
     ctx.restore();
 
     // Sparkles beside badge
-    drawSparkle(ctx, badgeX - 20, currentY + badgeH / 2 - 8, 10, '#FACC15');
-    drawSparkle(ctx, badgeX + badgeW + 20, currentY + badgeH / 2 + 8, 10, '#FACC15');
+    drawSparkle(ctx, badgeX - 22, currentY + badgeH / 2 - 10, 12, '#FACC15');
+    drawSparkle(ctx, badgeX - 10, currentY + badgeH / 2 + 14, 7, '#FDE047');
+    drawSparkle(ctx, badgeX + badgeW + 22, currentY + badgeH / 2 + 10, 12, '#FACC15');
+    drawSparkle(ctx, badgeX + badgeW + 10, currentY + badgeH / 2 - 14, 7, '#FDE047');
 
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 30px sans-serif';
+    ctx.font = 'bold 34px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(data.isLunasTotal ? '✔ LUNAS' : '⚠️ BELUM LUNAS', width / 2, currentY + badgeH / 2);
@@ -687,41 +523,60 @@ export async function generateDebtSettlementReceipt(data: DebtSettlementReceiptD
     currentY += badgeH + 34;
 
     // 7. Section 5 - FOOTER / CHUNA AVATAR & MESSAGE
-    const avatarSize = 100;
-    const avatarX = 90;
-    const avatarY = currentY + 45;
+    const chunaImg = await getChunaImage();
+    if (chunaImg) {
+        // Draw real 3D Chuna Character standing at bottom-left corner!
+        ctx.save();
+        // Crop transparent padding: minX: 219, minY: 37, maxX: 850, maxY: 1023 (w: 631, h: 986)
+        const sX = 200;
+        const sY = 20;
+        const sW = 660;
+        const sH = 1004;
 
-    drawChunaAvatar(ctx, avatarX, avatarY, avatarSize);
+        const dW = 205;
+        const dH = (sH / sW) * dW; // ~311px
+        const dX = 15;
+        const dY = height - dH + 8; // stick to bottom edge
+
+        ctx.drawImage(chunaImg, sX, sY, sW, sH, dX, dY, dW, dH);
+        ctx.restore();
+    }
 
     // Right message box
-    const msgX = 155;
-    let msgY = currentY + 12;
+    const msgX = 220;
+    let msgY = currentY + 10;
 
-    ctx.fillStyle = '#1E293B';
+    ctx.fillStyle = '#0F172A';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
 
-    ctx.font = '12px sans-serif';
+    ctx.font = '13px sans-serif';
     ctx.fillText('Terima kasih sudah percaya sama kami.', msgX, msgY);
-    msgY += 18;
+    msgY += 20;
     
-    ctx.font = 'bold 12px sans-serif';
-    ctx.fillText('Chuna - Asisten Imutmu', msgX, msgY);
-    ctx.font = '12px sans-serif';
-    ctx.fillText(' siap bantu ', msgX + 144, msgY);
-    ctx.font = 'bold 12px sans-serif';
-    ctx.fillText('24 jam!', msgX + 215, msgY);
+    ctx.font = '13px sans-serif';
+    ctx.fillText('Jangan lupa, ', msgX, msgY);
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText('Chuna - Asisten Imutmu', msgX + 75, msgY);
     msgY += 18;
 
-    ctx.font = '12px sans-serif';
-    ctx.fillText('kalau ada yang mau ditanyain lagi ya, Kak 😊', msgX, msgY);
-    msgY += 26;
+    ctx.font = '13px sans-serif';
+    ctx.fillText('siap bantu ', msgX, msgY);
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText('24 jam!', msgX + 66, msgY);
+    ctx.font = '13px sans-serif';
+    ctx.fillText(' kalau ada yang mau', msgX + 114, msgY);
+    msgY += 18;
 
-    ctx.font = 'bold 12px sans-serif';
+    ctx.font = '13px sans-serif';
+    ctx.fillText('ditanyain lagi ya, Kak 😊', msgX, msgY);
+    msgY += 28;
+
+    ctx.font = 'bold 13px sans-serif';
     ctx.fillText('Terimakasih telah berbelanja di E4 Store! ❤️', msgX, msgY);
     msgY += 18;
 
-    ctx.font = '12px sans-serif';
+    ctx.font = '13px sans-serif';
     ctx.fillText('Semoga produknya bermanfaat dan kami', msgX, msgY);
     msgY += 16;
     ctx.fillText('tunggu kunjungan berikutnya!', msgX, msgY);

@@ -1842,7 +1842,7 @@ app.get("/api/summary", (req, res) => {
       const today = new Date();
       const tglBayarStr = `${today.getDate()} ${months[today.getMonth()]} ${today.getFullYear()}`;
 
-      const msg = `✅ LUNAS TOTAL! 🎉\nHalo Kak ${nama},\nDengan senang hati kami informasikan bahwa pembayaran utang kakak telah sukses dan lunas! Berikut detailnya ya:\n\n📦 *RINCIAN PRODUK*\nNama Produk: ${tx.product}\nHarga: Rp ${tx.price.toLocaleString('id-ID')}\nTotal Utang: Rp ${tx.price.toLocaleString('id-ID')}\n\n📅 *TANGGAL UTANG:* ${tglUtangStr}\n🗓️ *TANGGAL BAYAR:* ${tglBayarStr}\n\n💰 *RINCIAN PEMBAYARAN*\n• Total Utang: Rp ${tx.price.toLocaleString('id-ID')}\n• Dibayarkan: Rp ${tx.price.toLocaleString('id-ID')} 💵\n• Kembalian: Rp 0 🪙\n\n*STATUS PESANAN KAKAK SEKARANG:* ✅ LUNAS\n\nTerima kasih sudah percaya sama kami. Jangan lupa, Chuna - Asisten Imutmu siap bantu 24 jam! kalau ada yang mau ditanyain lagi ya, Kak 😊\n\nTerimakasih telah berbelanja di E4 Store! ❤️ Semoga produknya bermanfaat dan kami tunggu kunjungan berikutnya!`;
+      const msg = `✅ LUNAS TOTAL! 🎉\nHalo Kak ${nama},\nDengan senang hati kami informasikan bahwa pembayaran utang kakak telah sukses dan lunas! Berikut detailnya ya:`;
       
       let imgBuffer: Buffer | null = null;
       try {
@@ -5020,44 +5020,11 @@ Tagihan kamu udah muncul nih, jangan sampai kelewat ya~
                   if (isLunasTotal) {
                       lunasText = `✅ LUNAS TOTAL! 🎉
 Halo Kak ${nama},
-Dengan senang hati kami informasikan bahwa pembayaran utang kakak telah sukses dan lunas! Berikut detailnya ya:
-
-📦 RINCIAN PRODUK
-Nama Produk Harga
-${rincianProduk}
-Total Utang Rp ${totalDebt.toLocaleString('id-ID')}
-
-📅 TANGGAL UTANG : ${datesUtang}
-📆 TANGGAL BAYAR : ${tglLunas}
-
-💰 RINCIAN PEMBAYARAN
-· Total Utang : Rp ${totalDebt.toLocaleString('id-ID')}
-· Dibayarkan : Rp ${nominal.toLocaleString('id-ID')}
-· Kembalian : Rp ${kembalian.toLocaleString('id-ID')} ✅
-
-Status pesanan kakak sekarang: ✅ LUNAS
-
-Terima kasih sudah percaya sama kami. Jangan lupa, Chuna - Asisten Imutmu siap bantu 24 jam! kalau ada yang mau ditanyain lagi ya, Kak 😊
-Terimakasih telah berbelanja di E4 Store! ❤️ Semoga produknya bermanfaat dan kami tunggu kunjungan berikutnya!`;
+Dengan senang hati kami informasikan bahwa pembayaran utang kakak telah sukses dan lunas! Berikut detailnya ya:`;
                   } else {
                       lunasText = `⚠️ PEMBAYARAN SEBAGIAN
 Halo Kak ${nama},
-Pembayaran utang kakak telah kami terima sebagian.
-
-📦 RINCIAN PRODUK
-Nama Produk Harga
-${rincianProduk}
-Total Utang Rp ${totalDebt.toLocaleString('id-ID')}
-
-📅 TANGGAL UTANG : ${datesUtang}
-📆 TANGGAL BAYAR : ${tglLunas}
-
-💰 RINCIAN PEMBAYARAN
-· Total Utang : Rp ${totalDebt.toLocaleString('id-ID')}
-· Dibayarkan : Rp ${nominal.toLocaleString('id-ID')}
-· Sisa Utang : Rp ${sisa.toLocaleString('id-ID')} ⚠️
-
-Status pesanan kakak sekarang: ⚠️ BELUM LUNAS`;
+Dengan senang hati kami informasikan bahwa pembayaran utang kakak telah kami terima sebagian! Berikut detailnya ya:`;
                   }
 
                   let lunasImageBuffer: Buffer | null = null;
@@ -5903,6 +5870,26 @@ E4 Store`,
         res.send(buffer);
     } else {
         res.status(500).send("Gagal generate gambar");
+    }
+  });
+
+  // Route demo langsung untuk uji coba gambar nota pelunasan utang
+  app.get("/api/demo-nota-pelunasan", async (req, res) => {
+    try {
+        const buffer = await generateDebtSettlementReceipt({
+            nama: 'Kak Putri',
+            isLunasTotal: true,
+            products: [{ name: 'DANA 30.000', price: 34000 }],
+            totalDebt: 34000,
+            dibayarkan: 35000,
+            kembalian: 1000,
+            tglUtang: '12 AGUSTUS 2026',
+            tglBayar: '13 AGUSTUS 2026'
+        });
+        res.setHeader('Content-Type', 'image/png');
+        res.send(buffer);
+    } catch (e: any) {
+        res.status(500).send("Error: " + e.message);
     }
   });
 
