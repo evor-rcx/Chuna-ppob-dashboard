@@ -26,6 +26,7 @@
     "baileys": "^7.0.0-rc13",
     "btch-downloader": "^6.0.38",
     "cheerio": "^1.0.0-rc.10",
+    "date-holidays": "^3.35.0",
     "dotenv": "^17.4.2",
     "express": "^4.21.2",
     "express-rate-limit": "^8.6.1",
