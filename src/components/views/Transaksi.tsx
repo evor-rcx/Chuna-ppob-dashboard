@@ -14,19 +14,6 @@ export function Transaksi({ onBack }: { onBack: () => void }) {
 
   return (
     <PageContainer title="Daftar Transaksi Terakhir" onBack={onBack}>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 bg-slate-800/40 p-3 rounded-2xl border border-slate-700/40">
-        <div className="text-xs text-slate-400">
-          💡 Klik tombol di samping untuk menguji/melihat contoh gambar nota pelunasan utang yang baru.
-        </div>
-        <a 
-          href="/api/demo-nota-pelunasan" 
-          target="_blank" 
-          rel="noopener noreferrer"
-          className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-500/20 flex items-center gap-2 transition-all cursor-pointer"
-        >
-          <span>🎉</span> Lihat Contoh Gambar Nota Pelunasan
-        </a>
-      </div>
       <div className="-mx-6 -mt-2 overflow-x-auto">
         <table className="w-full text-left whitespace-nowrap">
           <thead>
