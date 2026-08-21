@@ -1814,6 +1814,106 @@ app.get("/api/summary", (req, res) => {
     res.json({ success: true, transactions: enriched });
   });
 
+  async function sendReminderToCustomer(tx: any, reminderType: '1_bulan' | '10_hari' = '1_bulan'): Promise<boolean> {
+    const member = db.members.find((m: any) => m.id === tx.memberId);
+    if (!member) return false;
+    
+    const nama = member.name || "Kak";
+    const product = tx.product || "Produk";
+    const priceStr = (tx.price || 0).toLocaleString('id-ID');
+
+    const dUtang = new Date(tx.date || new Date());
+    const months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+    const tglUtangStr = `${dUtang.getDate()} ${months[dUtang.getMonth()]} ${dUtang.getFullYear()}`;
+
+    const tunggakanText = reminderType === '1_bulan' 
+        ? "sudah masuk masa tunggakan 1 bulan" 
+        : "sudah berlarut-larut belum dilunasi";
+
+    const msg = `Halo Kak/Bapak/Ibu ${nama}! Saya Chuna, asisten bot dari E4 Store. 😊\n\nMau mengingatkan dengan hormat ya, Kak. Tagihan untuk pembelian ${product} sejak tanggal *${tglUtangStr}* ${tunggakanText} dengan total Rp ${priceStr}.\n\nSaat ini kami sedang agak darurat soal stok produk digital. Persediaan pulsa dan top-up kami sudah menipis, jadi banyak order dari pelanggan lain yang harus kami tunda karena kami belum bisa membeli produk baru. Padahal antrian top-up dan pascabayar dari customer lain sudah menumpuk, tapi modal untuk beli produk baru masih tertahan di tagihan Kakak untuk pembelian ${product} tersebut.\n\nSebagai asisten bot, saya sangat mengharapkan pengertian dari Kakak ${nama} untuk segera melunasi tagihan paling lambat 3 hari ke depan. Kalau ada kendala atau keberatan, tolong chat saya langsung ya.\n\nKalau ada keluhan, chat aja di owner saya ya, Kak, di 085169949218. Nanti beliau yang bantu handle lebih lanjut. 😊\n\nAtas kerjasama dan perhatiannya, saya ucapkan terima kasih banyak! 🙏\n\nSalam,\nChuna – Asisten Bot E4 Store`;
+    
+    let sent = false;
+    
+    if (member.whatsapp && waSocket) {
+      const cleanWa = member.whatsapp.replace(/\D/g, '');
+      const jid = `${cleanWa}@s.whatsapp.net`;
+      try {
+        await waSocket.sendMessage(jid, { text: msg });
+        sent = true;
+      } catch (e) {
+        console.error("Gagal mengirim WA reminder", e);
+      }
+    }
+    
+    if (!sent && member.telegram && bot) {
+      try {
+         await bot.telegram.sendMessage(member.telegram, msg);
+         sent = true;
+      } catch (e) {
+         console.error("Gagal mengirim TG reminder", e);
+      }
+    }
+
+    return sent;
+  }
+
+  app.post("/api/transactions/:id/remind", async (req, res) => {
+    const tx = db.transactions.find(t => t.id === req.params.id);
+    if (!tx) return res.status(404).json({ error: "Transaksi tidak ditemukan" });
+    if (tx.method !== 'utang' || tx.status !== 'Sukses') return res.status(400).json({ error: "Hanya utang yang sukses yang dapat di-remind" });
+    
+    const sent = await sendReminderToCustomer(tx, '1_bulan');
+
+    if (sent) {
+       tx.lastReminderSentAt = new Date().toISOString();
+       saveDb();
+       res.json({ success: true, message: "Pengingat berhasil dikirim ke pelanggan!" });
+    } else {
+       res.status(500).json({ error: "Gagal mengirim pengingat, pastikan kontak pelanggan terhubung ke bot WA/TG." });
+    }
+  });
+
+  // Background auto reminder logic
+  async function processAutoReminders() {
+    let updated = false;
+    const now = Date.now();
+    for (const tx of db.transactions) {
+        if (tx.method === 'utang' && tx.status === 'Sukses') {
+            const txDate = new Date(tx.date).getTime();
+            const daysSinceTx = Math.floor((now - txDate) / (1000 * 60 * 60 * 24));
+            
+            if (daysSinceTx >= 30) {
+                const lastReminder = tx.lastReminderSentAt ? new Date(tx.lastReminderSentAt).getTime() : 0;
+                const daysSinceLastReminder = lastReminder ? Math.floor((now - lastReminder) / (1000 * 60 * 60 * 24)) : Infinity;
+                
+                if (!tx.lastReminderSentAt) {
+                    // Send 1 month reminder
+                    const sent = await sendReminderToCustomer(tx, '1_bulan');
+                    if (sent) {
+                        tx.lastReminderSentAt = new Date().toISOString();
+                        updated = true;
+                    }
+                } else if (daysSinceLastReminder >= 10) {
+                    // Send subsequent 10 day reminder
+                    const sent = await sendReminderToCustomer(tx, '10_hari');
+                    if (sent) {
+                        tx.lastReminderSentAt = new Date().toISOString();
+                        updated = true;
+                    }
+                }
+            }
+        }
+    }
+    if (updated) {
+        saveDb();
+    }
+  }
+
+  // Check auto-reminders every 12 hours (43200000 ms)
+  setInterval(processAutoReminders, 12 * 60 * 60 * 1000);
+  // Also run once 30 seconds after boot to catch up
+  setTimeout(processAutoReminders, 30000);
+
   app.post("/api/transactions/:id/lunas", async (req, res) => {
     const tx = db.transactions.find(t => t.id === req.params.id);
     if (!tx) return res.status(404).json({ error: "Transaksi tidak ditemukan" });

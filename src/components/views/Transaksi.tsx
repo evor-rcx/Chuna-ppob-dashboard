@@ -177,25 +177,46 @@ export function Transaksi({ onBack }: { onBack: () => void }) {
                     </div>
                   )}
                   {t.method === 'utang' && t.status === 'Sukses' && (
-                    <button 
-                      onClick={() => {
-                        if (confirm('Tandai utang ini sebagai Lunas dan kirim notifikasi?')) {
-                          fetch(`/api/transactions/${t.id}/lunas`, { method: 'POST' })
-                            .then(res => res.json())
-                            .then(res => {
-                              if (res.success) {
-                                setTransactions(transactions.map(tr => tr.id === t.id ? { ...tr, status: 'Sukses (Lunas)' } : tr));
-                                alert('Utang berhasil dilunasi!');
-                              } else {
-                                alert('Gagal: ' + res.error);
-                              }
-                            });
-                        }
-                      }}
-                      className="px-3 py-1 bg-sky-500/20 text-sky-400 rounded-md text-xs font-semibold hover:bg-sky-500/30 transition-colors"
-                    >
-                      Bayar Utang
-                    </button>
+                    <div className="flex flex-col gap-2 w-full max-w-[140px] mx-auto">
+                      <button 
+                        onClick={() => {
+                          if (confirm('Tandai utang ini sebagai Lunas dan kirim notifikasi?')) {
+                            fetch(`/api/transactions/${t.id}/lunas`, { method: 'POST' })
+                              .then(res => res.json())
+                              .then(res => {
+                                if (res.success) {
+                                  setTransactions(transactions.map(tr => tr.id === t.id ? { ...tr, status: 'Sukses (Lunas)' } : tr));
+                                  alert('Utang berhasil dilunasi!');
+                                } else {
+                                  alert('Gagal: ' + res.error);
+                                }
+                              });
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-sky-500/20 text-sky-400 rounded-md text-xs font-semibold hover:bg-sky-500/30 transition-colors w-full"
+                      >
+                        ✅ Bayar Utang
+                      </button>
+                      
+                      <button 
+                        onClick={() => {
+                          if (confirm('Kirim pengingat utang 1 bulan ke WhatsApp pelanggan?')) {
+                            fetch(`/api/transactions/${t.id}/remind`, { method: 'POST' })
+                              .then(res => res.json())
+                              .then(res => {
+                                if (res.success) {
+                                  alert(res.message);
+                                } else {
+                                  alert('Gagal: ' + res.error);
+                                }
+                              });
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-amber-500/20 text-amber-400 rounded-md text-xs font-semibold hover:bg-amber-500/30 transition-colors w-full flex items-center justify-center gap-1"
+                      >
+                        ⚠️ Kirim Pengingat
+                      </button>
+                    </div>
                   )}
                 </td>
               </tr>
