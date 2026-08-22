@@ -1908,7 +1908,8 @@ app.get("/api/summary", (req, res) => {
     let sent = false;
     
     if (member.whatsapp && waSocket) {
-      const cleanWa = member.whatsapp.replace(/\D/g, '');
+      let cleanWa = member.whatsapp.replace(/\D/g, '');
+      if (cleanWa.startsWith('0')) cleanWa = '62' + cleanWa.substring(1);
       const jid = `${cleanWa}@s.whatsapp.net`;
       try {
         await waSocket.sendMessage(jid, { text: msg });
