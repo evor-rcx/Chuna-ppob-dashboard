@@ -519,8 +519,11 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
                         </select>
                     </div>
 
-                    <div className="bg-slate-900/50 border border-slate-700 p-4 rounded-xl space-y-4">
-                        <h4 className="text-sm font-medium text-slate-300">Data Pembelian (Grosir/Paketan)</h4>
+                    <div className="bg-blue-900/10 border-2 border-blue-500 p-4 rounded-xl space-y-4 shadow-lg shadow-blue-900/20">
+                        <div className="flex items-center gap-2">
+                            <span className="text-xl">📦</span>
+                            <h4 className="text-base font-bold text-blue-300">Data Pembelian (Grosir/Paketan) <span className="text-xs font-normal bg-blue-600 text-white px-2 py-0.5 rounded-full ml-2">Isi Modal Disini!</span></h4>
+                        </div>
                         
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
@@ -535,17 +538,34 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
                                 }} className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 text-white" placeholder="Ex: 10000" />
                             </div>
                             <div>
-                                <label className="block text-xs font-medium text-slate-400 mb-1">Belanja Berapa?</label>
-                                <div className="flex gap-2">
-                                    <input type="number" required value={formData.buyQty || ''} onChange={e => {
-                                        const qty = e.target.value;
-                                        const items = Number(formData.itemsPerUnit) || 1;
-                                        const totalItems = (Number(qty) || 1) * items;
-                                        const unitPrice = formData.buyPriceTotal ? Math.round(Number(formData.buyPriceTotal) / totalItems) : formData.buyPrice;
-                                        setFormData({...formData, buyQty: qty, buyPrice: unitPrice.toString(), stock: totalItems.toString()});
-                                    }} className="w-16 bg-slate-800 border border-slate-600 rounded-lg p-2 text-white text-center" placeholder="3" />
-                                    <input type="text" value={formData.buyUnit || ''} onChange={e => setFormData({...formData, buyUnit: e.target.value})} className="flex-1 min-w-0 bg-slate-800 border border-slate-600 rounded-lg p-2 text-white" placeholder="RTG / PAK" />
-                                </div>
+                                <label className="block text-xs font-medium text-slate-400 mb-1">Jumlah Belanja</label>
+                                <input type="number" required value={formData.buyQty || ''} onChange={e => {
+                                    const qty = e.target.value;
+                                    const items = Number(formData.itemsPerUnit) || 1;
+                                    const totalItems = (Number(qty) || 1) * items;
+                                    const unitPrice = formData.buyPriceTotal ? Math.round(Number(formData.buyPriceTotal) / totalItems) : formData.buyPrice;
+                                    setFormData({...formData, buyQty: qty, buyPrice: unitPrice.toString(), stock: totalItems.toString()});
+                                }} className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 text-white" placeholder="Contoh: 1, 2, 3..." />
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="block text-xs font-medium text-slate-400 mb-2">Pilih Satuan Belanja:</label>
+                            <div className="flex flex-wrap gap-2">
+                                {['PAK', 'Renteng', 'Dus', 'Karton', 'Liter', 'Botol', 'Lusin', 'Karung', 'Satuan'].map(unit => (
+                                    <button
+                                        key={unit}
+                                        type="button"
+                                        onClick={() => setFormData({...formData, buyUnit: unit})}
+                                        className={`px-3 py-1.5 text-xs font-medium rounded-full border transition-all ${
+                                            formData.buyUnit === unit 
+                                                ? 'bg-blue-500 border-blue-400 text-white shadow-[0_0_10px_rgba(59,130,246,0.5)]' 
+                                                : 'bg-slate-800/80 border-slate-600 text-slate-400 hover:bg-slate-700 hover:text-white'
+                                        }`}
+                                    >
+                                        {unit}
+                                    </button>
+                                ))}
                             </div>
                         </div>
 
@@ -572,14 +592,18 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div>
                             <label className="block text-sm font-medium text-slate-400 mb-1">Harga Jual per {formData.unit || 'Satuan'}</label>
                             <input type="number" required value={formData.price || ''} onChange={e => setFormData({...formData, price: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white" placeholder="Contoh: 2000" />
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-slate-400 mb-1">Modal per {formData.unit || 'Satuan'}</label>
-                            <input type="number" readOnly value={formData.buyPrice || ''} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-slate-400 cursor-not-allowed" placeholder="Otomatis dihitung" />
+                            <input type="text" readOnly value={formData.buyPrice ? `Rp ${formData.buyPrice}` : 'Isi form Grosir di atas 👆'} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-slate-400 text-sm cursor-not-allowed" placeholder="Isi form Grosir di atas 👆" />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Keuntungan per {formData.unit || 'Satuan'}</label>
+                            <input type="text" readOnly value={formData.price && formData.buyPrice ? (Number(formData.price) - Number(formData.buyPrice)).toString() : 'Otomatis dihitung'} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-emerald-400 font-bold cursor-not-allowed" placeholder="Otomatis dihitung" />
                         </div>
                     </div>
                     
@@ -606,7 +630,7 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
                     <span>Daftar Stok Produk Fisik</span>
                 </h3>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4 mb-6">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 mb-6">
                     <div className="bg-slate-900 border border-slate-700 rounded-xl p-4">
                         <div className="text-xs text-slate-400 mb-1">Modal Awal Keseluruhan</div>
                         <div className="text-lg font-bold text-slate-300">Rp {(stats.totalModalKeseluruhan || 0).toLocaleString('id-ID')}</div>
@@ -614,6 +638,10 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
                     <div className="bg-slate-900 border border-slate-700 rounded-xl p-4">
                         <div className="text-xs text-slate-400 mb-1">Nilai Stok Sisa (Uang Mati)</div>
                         <div className="text-lg font-bold text-yellow-400">Rp {(stats.totalNilaiStok || 0).toLocaleString('id-ID')}</div>
+                    </div>
+                    <div className="bg-slate-900 border border-emerald-900/50 rounded-xl p-4">
+                        <div className="text-xs text-emerald-400/70 mb-1">Potensi Keuntungan (Fee Stok)</div>
+                        <div className="text-lg font-bold text-emerald-400">Rp {(stats.totalPotensiLaba || 0).toLocaleString('id-ID')}</div>
                     </div>
                     <div className="bg-slate-900 border border-slate-700 rounded-xl p-4">
                         <div className="text-xs text-slate-400 mb-1">Total Penjualan Masuk</div>
@@ -627,8 +655,8 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
                         <div className="text-xs text-slate-400 mb-1">Piutang (Belum Lunas)</div>
                         <div className="text-lg font-bold text-orange-400">Rp {(stats.totalPiutang || 0).toLocaleString('id-ID')}</div>
                     </div>
-                    <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 col-span-2 sm:col-span-1">
-                        <div className="text-xs text-slate-400 mb-1">Laba Bersih Akhir</div>
+                    <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 col-span-2 sm:col-span-2 md:col-span-2">
+                        <div className="text-xs text-slate-400 mb-1">Keuntungan Bersih (Terjual)</div>
                         <div className={`text-lg font-bold ${stats.totalKeuntungan < 0 ? 'text-red-400' : 'text-green-400'}`}>Rp {(stats.totalKeuntungan || 0).toLocaleString('id-ID')}</div>
                     </div>
                 </div>
@@ -640,6 +668,7 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
                                 <th className="p-3 text-sm font-medium text-slate-400">Nama Produk</th>
                                 <th className="p-3 text-sm font-medium text-slate-400">Harga Jual</th>
                                 <th className="p-3 text-sm font-medium text-slate-400">Modal</th>
+                                <th className="p-3 text-sm font-medium text-slate-400">Laba/Pcs</th>
                                 <th className="p-3 text-sm font-medium text-slate-400">Stok</th>
                                 <th className="p-3 text-sm font-medium text-slate-400 text-right">Aksi</th>
                             </tr>
@@ -657,6 +686,7 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
                                         <td className="p-3 text-sm font-medium text-white">{product.name}</td>
                                         <td className="p-3 text-sm text-slate-300">Rp {product.price.toLocaleString('id-ID')}</td>
                                         <td className="p-3 text-sm text-slate-300">Rp {(product.buyPrice || 0).toLocaleString('id-ID')}</td>
+                                        <td className="p-3 text-sm font-bold text-emerald-400">Rp {(product.price - (product.buyPrice || 0)).toLocaleString('id-ID')}</td>
                                         <td className="p-3 text-sm">
                                             <span className={`px-2 py-1 rounded text-xs font-medium ${product.stock <= 5 ? 'bg-red-500/20 text-red-400' : 'bg-green-500/20 text-green-400'}`}>
                                                 {product.stock} {product.unit || 'pcs'}

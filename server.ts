@@ -1762,8 +1762,10 @@ app.get("/api/summary", (req, res) => {
 
   app.get("/api/physical-stats", (req, res) => {
     let totalNilaiStok = 0;
+    let totalPotensiLaba = 0;
     for (const p of db.physicalProducts) {
       totalNilaiStok += (p.buyPrice || 0) * (p.stock || 0);
+      totalPotensiLaba += ((p.price || 0) - (p.buyPrice || 0)) * (p.stock || 0);
     }
     
     let totalPendapatan = 0;
@@ -1790,6 +1792,7 @@ app.get("/api/summary", (req, res) => {
     res.json({
       totalModalKeseluruhan: totalNilaiStok + modalTerjual + totalPengeluaran,
       totalNilaiStok,
+      totalPotensiLaba,
       totalPendapatan,
       totalPengeluaran,
       totalKeuntungan: totalPendapatan - modalTerjual - totalPengeluaran,
