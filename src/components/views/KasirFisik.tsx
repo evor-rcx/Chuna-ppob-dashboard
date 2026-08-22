@@ -727,7 +727,7 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
                 </div>
 
                 <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
+                    <table className="w-full text-left border-collapse min-w-[500px]">
                         <thead>
                             <tr className="border-b border-slate-700">
                                 <th className="p-3 text-sm font-medium text-slate-400">Nama Produk</th>
@@ -798,8 +798,8 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
                             </form>
                         </div>
                         <div className="md:col-span-2">
-                            <div className="bg-slate-900/50 border border-slate-700 rounded-xl overflow-hidden">
-                                <table className="w-full text-left border-collapse">
+                            <div className="bg-slate-900/50 border border-slate-700 rounded-xl overflow-x-auto">
+                                <table className="w-full text-left border-collapse min-w-[500px]">
                                     <thead>
                                         <tr className="border-b border-slate-700 bg-slate-800/50">
                                             <th className="p-3 text-sm font-medium text-slate-400">Tanggal</th>
@@ -867,8 +867,8 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
                             </form>
                         </div>
                         <div className="md:col-span-2">
-                            <div className="bg-slate-900/50 border border-slate-700 rounded-xl overflow-hidden">
-                                <table className="w-full text-left border-collapse">
+                            <div className="bg-slate-900/50 border border-slate-700 rounded-xl overflow-x-auto">
+                                <table className="w-full text-left border-collapse min-w-[500px]">
                                     <thead>
                                         <tr className="border-b border-slate-700 bg-slate-800/50">
                                             <th className="p-3 text-sm font-medium text-slate-400">Tanggal</th>
@@ -912,7 +912,7 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
         </div>
       )}
       {activeTab === 'riwayat' && (
-        <div className="bg-slate-800/50 border border-slate-700 rounded-xl overflow-hidden">
+        <div className="bg-slate-800/50 border border-slate-700 rounded-xl overflow-x-auto">
           <div className="overflow-x-auto">
             <table className="w-full text-left whitespace-nowrap">
               <thead>
@@ -1080,7 +1080,7 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
       )}
 
       {activeTab === 'utang' && (
-        <div className="bg-slate-800/50 border border-slate-700 rounded-xl overflow-hidden">
+        <div className="bg-slate-800/50 border border-slate-700 rounded-xl overflow-x-auto">
           <div className="p-4 border-b border-slate-700 bg-slate-800/80">
             <h3 className="text-lg font-semibold text-white">Daftar Piutang Pelanggan</h3>
           </div>
