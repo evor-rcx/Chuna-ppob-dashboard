@@ -47,10 +47,13 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
   const [editId, setEditId] = useState<string | null>(null);
   const [formData, setFormData] = useState({ name: '', price: '', stock: '', buyPrice: '', unit: 'pcs', buyPriceTotal: '', buyQty: '1', buyUnit: 'PAK', itemsPerUnit: '1', category: 'Lainnya', promo: 'none', cupPrice: '' });
   
-  const [stats, setStats] = useState({ totalModalKeseluruhan: 0, totalNilaiStok: 0, totalPendapatan: 0, totalKeuntungan: 0, modalTerjual: 0, totalPengeluaran: 0, totalPiutang: 0 });
+  const [stats, setStats] = useState({ totalModalKeseluruhan: 0, totalNilaiStok: 0, totalPotensiLaba: 0, totalFeeTerjual: 0, totalPendapatan: 0, totalKeuntungan: 0, modalTerjual: 0, totalPengeluaran: 0, totalPiutang: 0 });
   const [expenses, setExpenses] = useState<any[]>([]);
   const [expenseName, setExpenseName] = useState('');
   const [expenseAmount, setExpenseAmount] = useState('');
+  
+  const [losses, setLosses] = useState<any[]>([]);
+  const [lossData, setLossData] = useState({ productId: '', quantity: '', reason: 'Rusak / Kadaluarsa' });
 
 
 
@@ -76,8 +79,14 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
       if (res.ok) setExpenses(await res.json());
     } catch(e) {}
   };
-
   
+  const fetchLosses = async () => {
+    try {
+      const res = await fetch('/api/losses');
+      if (res.ok) setLosses(await res.json());
+    } catch(e) {}
+  };
+
   const fetchStats = async () => {
     try {
       const res = await fetch('/api/physical-stats');
@@ -104,7 +113,7 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
   };
 
   useEffect(() => {
-    fetchProducts(); fetchStats(); fetchExpenses(); fetchTransactions();
+    fetchProducts(); fetchStats(); fetchExpenses(); fetchLosses(); fetchTransactions();
   }, []);
 
   const addToCart = (product: PhysicalProduct) => {
@@ -270,6 +279,58 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
       await fetch(`/api/expenses/${id}`, { method: 'DELETE' });
       fetchExpenses();
       fetchStats();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveLoss = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!lossData.productId || !lossData.quantity) return;
+    const prod = products.find(p => p.id === lossData.productId);
+    if (!prod) return;
+    if (Number(lossData.quantity) > prod.stock) {
+        alert('Jumlah melebihi stok yang ada!');
+        return;
+    }
+    const amount = Number(lossData.quantity) * (prod.buyPrice || 0);
+
+    setLoading(true);
+    try {
+      const res = await fetch('/api/losses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+            productId: prod.id, 
+            productName: prod.name, 
+            quantity: lossData.quantity, 
+            reason: lossData.reason, 
+            amount 
+        })
+      });
+      if (res.ok) {
+        setLossData({ productId: '', quantity: '', reason: 'Rusak / Kadaluarsa' });
+        fetchLosses();
+        fetchStats();
+        fetchProducts();
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteLoss = async (id: string) => {
+    if (!confirm('Hapus catatan kerugian ini? (Stok akan dikembalikan)')) return;
+    setLoading(true);
+    try {
+      await fetch(`/api/losses/${id}`, { method: 'DELETE' });
+      fetchLosses();
+      fetchStats();
+      fetchProducts();
     } catch (e) {
       console.error(e);
     } finally {
@@ -632,7 +693,7 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
 
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 mb-6">
                     <div className="bg-slate-900 border border-slate-700 rounded-xl p-4">
-                        <div className="text-xs text-slate-400 mb-1">Modal Awal Keseluruhan</div>
+                        <div className="text-xs text-slate-400 mb-1">Sisa Modal Aktif + Pengeluaran</div>
                         <div className="text-lg font-bold text-slate-300">Rp {(stats.totalModalKeseluruhan || 0).toLocaleString('id-ID')}</div>
                     </div>
                     <div className="bg-slate-900 border border-slate-700 rounded-xl p-4">
@@ -640,23 +701,27 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
                         <div className="text-lg font-bold text-yellow-400">Rp {(stats.totalNilaiStok || 0).toLocaleString('id-ID')}</div>
                     </div>
                     <div className="bg-slate-900 border border-emerald-900/50 rounded-xl p-4">
-                        <div className="text-xs text-emerald-400/70 mb-1">Potensi Keuntungan (Fee Stok)</div>
-                        <div className="text-lg font-bold text-emerald-400">Rp {(stats.totalPotensiLaba || 0).toLocaleString('id-ID')}</div>
+                        <div className="text-xs text-emerald-400/70 mb-1">Fee / Laba (Bulan Ini)</div>
+                        <div className="text-lg font-bold text-emerald-400">Rp {(stats.totalFeeTerjual || 0).toLocaleString('id-ID')}</div>
                     </div>
                     <div className="bg-slate-900 border border-slate-700 rounded-xl p-4">
-                        <div className="text-xs text-slate-400 mb-1">Total Penjualan Masuk</div>
-                        <div className="text-lg font-bold text-blue-400">Rp {(stats.totalPendapatan || 0).toLocaleString('id-ID')}</div>
+                        <div className="text-xs text-slate-400 mb-1">Sisa Uang Laci (Bulan Ini)</div>
+                        <div className="text-lg font-bold text-blue-400">Rp {((stats.totalPendapatan || 0) - (stats.totalPengeluaran || 0)).toLocaleString('id-ID')}</div>
                     </div>
                     <div className="bg-slate-900 border border-slate-700 rounded-xl p-4">
-                        <div className="text-xs text-slate-400 mb-1">Pengeluaran Lain</div>
+                        <div className="text-xs text-slate-400 mb-1">Pengeluaran Lain (Bulan Ini)</div>
                         <div className="text-lg font-bold text-red-400">Rp {(stats.totalPengeluaran || 0).toLocaleString('id-ID')}</div>
+                    </div>
+                    <div className="bg-slate-900 border border-slate-700 rounded-xl p-4">
+                        <div className="text-xs text-slate-400 mb-1">Kerugian (Bulan Ini)</div>
+                        <div className="text-lg font-bold text-yellow-500">Rp {((stats as any).totalKerugian || 0).toLocaleString('id-ID')}</div>
                     </div>
                     <div className="bg-slate-900 border border-slate-700 rounded-xl p-4">
                         <div className="text-xs text-slate-400 mb-1">Piutang (Belum Lunas)</div>
                         <div className="text-lg font-bold text-orange-400">Rp {(stats.totalPiutang || 0).toLocaleString('id-ID')}</div>
                     </div>
-                    <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 col-span-2 sm:col-span-2 md:col-span-2">
-                        <div className="text-xs text-slate-400 mb-1">Keuntungan Bersih (Terjual)</div>
+                    <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 col-span-2 sm:col-span-3 md:col-span-4">
+                        <div className="text-xs text-slate-400 mb-1">Keuntungan Bersih (Bulan Ini)</div>
                         <div className={`text-lg font-bold ${stats.totalKeuntungan < 0 ? 'text-red-400' : 'text-green-400'}`}>Rp {(stats.totalKeuntungan || 0).toLocaleString('id-ID')}</div>
                     </div>
                 </div>
@@ -715,7 +780,7 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
                 </div>
                 
                 <div className="mt-8 border-t border-slate-700 pt-8">
-                    <h3 className="text-lg font-semibold text-white mb-4">Pengeluaran Tambahan (Plastik Es, Bahan Lain)</h3>
+                    <h3 className="text-lg font-semibold text-white mb-4">Pengeluaran Tambahan Bulan Ini (Plastik Es, Bahan Lain)</h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div className="md:col-span-1 bg-slate-900/50 border border-slate-700 rounded-xl p-4">
                             <form onSubmit={handleSaveExpense} className="space-y-4">
@@ -756,6 +821,80 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
                                                     <td className="p-3 text-sm text-red-400">-Rp {exp.amount.toLocaleString('id-ID')}</td>
                                                     <td className="p-3 text-sm text-right">
                                                         <button type="button" onClick={() => handleDeleteExpense(exp.id)} className="p-1.5 bg-slate-800 hover:bg-red-600 rounded-lg text-slate-400 hover:text-white transition-colors">
+                                                            <Trash2 size={14} />
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="mt-8 border-t border-slate-700 pt-8">
+                    <h3 className="text-lg font-semibold text-white mb-4">Catatan Kerugian Bulan Ini (Rusak / Kadaluarsa / Dimakan)</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="md:col-span-1 bg-slate-900/50 border border-slate-700 rounded-xl p-4">
+                            <form onSubmit={handleSaveLoss} className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-400 mb-1">Pilih Produk</label>
+                                    <select required value={lossData.productId} onChange={e => setLossData({...lossData, productId: e.target.value})} className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 text-white">
+                                        <option value="">-- Pilih Produk --</option>
+                                        {products.map(p => (
+                                            <option key={p.id} value={p.id}>{p.name} (Stok: {p.stock})</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-400 mb-1">Jumlah Berkurang</label>
+                                    <input type="number" required min="1" value={lossData.quantity} onChange={e => setLossData({...lossData, quantity: e.target.value})} className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 text-white" placeholder="Berapa banyak?" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-400 mb-1">Keterangan / Alasan</label>
+                                    <select value={lossData.reason} onChange={e => setLossData({...lossData, reason: e.target.value})} className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 text-white">
+                                        <option value="Rusak">Rusak</option>
+                                        <option value="Kadaluarsa">Kadaluarsa</option>
+                                        <option value="Dimakan Sendiri">Dimakan Sendiri</option>
+                                        <option value="Lainnya">Lainnya</option>
+                                    </select>
+                                </div>
+                                <button type="submit" disabled={loading} className="w-full py-2 bg-yellow-600/80 hover:bg-yellow-600 text-white rounded-lg font-medium transition-colors disabled:opacity-50">
+                                    Catat Berkurang
+                                </button>
+                            </form>
+                        </div>
+                        <div className="md:col-span-2">
+                            <div className="bg-slate-900/50 border border-slate-700 rounded-xl overflow-hidden">
+                                <table className="w-full text-left border-collapse">
+                                    <thead>
+                                        <tr className="border-b border-slate-700 bg-slate-800/50">
+                                            <th className="p-3 text-sm font-medium text-slate-400">Tanggal</th>
+                                            <th className="p-3 text-sm font-medium text-slate-400">Produk</th>
+                                            <th className="p-3 text-sm font-medium text-slate-400">Alasan</th>
+                                            <th className="p-3 text-sm font-medium text-slate-400">Nilai Rugi (Modal)</th>
+                                            <th className="p-3 text-sm font-medium text-slate-400 text-right">Aksi</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {losses.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={5} className="p-4 text-center text-slate-500 text-sm">Belum ada catatan kerugian.</td>
+                                            </tr>
+                                        ) : (
+                                            losses.map(loss => (
+                                                <tr key={loss.id} className="border-b border-slate-700/50 hover:bg-slate-800/50">
+                                                    <td className="p-3 text-sm text-slate-400">{new Date(loss.date).toLocaleDateString('id-ID')}</td>
+                                                    <td className="p-3 text-sm text-white">
+                                                        {loss.productName} 
+                                                        <span className="text-slate-500 text-xs ml-1">(-{loss.quantity})</span>
+                                                    </td>
+                                                    <td className="p-3 text-sm text-yellow-400">{loss.reason}</td>
+                                                    <td className="p-3 text-sm text-red-400">-Rp {loss.amount.toLocaleString('id-ID')}</td>
+                                                    <td className="p-3 text-sm text-right">
+                                                        <button type="button" onClick={() => handleDeleteLoss(loss.id)} className="p-1.5 bg-slate-800 hover:bg-red-600 rounded-lg text-slate-400 hover:text-white transition-colors">
                                                             <Trash2 size={14} />
                                                         </button>
                                                     </td>

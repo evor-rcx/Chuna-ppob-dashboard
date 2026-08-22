@@ -901,6 +901,12 @@ function getWitaDate(dateInput?: string) {
     return new Date(witaTime).toISOString().split('T')[0];
 }
 
+function getWitaMonth(dateInput?: string) {
+    const d = dateInput ? new Date(dateInput) : new Date();
+    const witaTime = d.getTime() + (8 * 60 * 60 * 1000);
+    return new Date(witaTime).toISOString().substring(0, 7);
+}
+
 const app = express();
 // Menggunakan filter IP internal untuk trust proxy agar aman dari spoofing X-Forwarded-For
 app.set('trust proxy', 'loopback, linklocal, uniquelocal');
@@ -1618,8 +1624,8 @@ app.get("/api/summary", (req, res) => {
 
   // --- Expenses API ---
   app.get("/api/expenses", (req, res) => {
-    const todayWita = getWitaDate();
-    const filtered = (db.expenses || []).filter((e: any) => getWitaDate(e.date) === todayWita);
+    const currentMonth = getWitaMonth();
+    const filtered = (db.expenses || []).filter((e: any) => getWitaMonth(e.date) === currentMonth);
     res.json(filtered);
   });
 
@@ -1644,6 +1650,52 @@ app.get("/api/summary", (req, res) => {
     res.json({ success: true });
   });
   // --- End Expenses API ---
+
+  // --- Losses API ---
+  app.get("/api/losses", (req, res) => {
+    const currentMonth = getWitaMonth();
+    const filtered = (db.losses || []).filter((e: any) => getWitaMonth(e.date) === currentMonth);
+    res.json(filtered);
+  });
+
+  app.post("/api/losses", (req, res) => {
+    const { productId, productName, quantity, reason, amount } = req.body;
+    
+    // Deduct stock
+    const prod = db.physicalProducts.find((p: any) => p.id === productId);
+    if (prod) {
+        prod.stock = Math.max(0, prod.stock - Number(quantity));
+    }
+    
+    const newLoss = {
+      id: Date.now().toString(),
+      productId,
+      productName,
+      quantity: Number(quantity),
+      reason,
+      amount: Number(amount),
+      date: new Date().toISOString()
+    };
+    if (!db.losses) db.losses = [];
+    db.losses.push(newLoss);
+    writeDB(db);
+    res.json(newLoss);
+  });
+
+  app.delete("/api/losses/:id", (req, res) => {
+    if (!db.losses) db.losses = [];
+    const loss = db.losses.find((l: any) => l.id === req.params.id);
+    if (loss) {
+        const prod = db.physicalProducts.find((p: any) => p.id === loss.productId);
+        if (prod) {
+            prod.stock += loss.quantity;
+        }
+    }
+    db.losses = db.losses.filter((e: any) => e.id !== req.params.id);
+    writeDB(db);
+    res.json({ success: true });
+  });
+  // --- End Losses API ---
 
   // --- Physical Sales API ---
   app.get("/api/physical-products", (req, res) => {
@@ -1768,11 +1820,16 @@ app.get("/api/summary", (req, res) => {
       totalPotensiLaba += ((p.price || 0) - (p.buyPrice || 0)) * (p.stock || 0);
     }
     
+    const currentMonth = getWitaMonth();
+
     let totalPendapatan = 0;
     let modalTerjual = 0;
+    let totalFeeTerjual = 0;
     
     let totalPiutang = 0;
     for (const tx of db.physicalTransactions || []) {
+      if (getWitaMonth(tx.date) !== currentMonth) continue;
+      
       if (tx.method === 'cash') {
           totalPendapatan += tx.total;
       } else {
@@ -1781,21 +1838,31 @@ app.get("/api/summary", (req, res) => {
       }
       for (const item of tx.items) {
         modalTerjual += (item.buyPrice || 0) * item.quantity;
+        totalFeeTerjual += ((item.price || 0) - (item.buyPrice || 0)) * item.quantity;
       }
     }
     
     let totalPengeluaran = 0;
     for (const exp of db.expenses || []) {
+      if (getWitaMonth(exp.date) !== currentMonth) continue;
       totalPengeluaran += exp.amount;
     }
     
+    let totalKerugian = 0;
+    for (const loss of db.losses || []) {
+      if (getWitaMonth(loss.date) !== currentMonth) continue;
+      totalKerugian += loss.amount;
+    }
+    
     res.json({
-      totalModalKeseluruhan: totalNilaiStok + modalTerjual + totalPengeluaran,
+      totalModalKeseluruhan: totalNilaiStok + totalPengeluaran + totalKerugian,
       totalNilaiStok,
       totalPotensiLaba,
+      totalFeeTerjual,
       totalPendapatan,
       totalPengeluaran,
-      totalKeuntungan: totalPendapatan - modalTerjual - totalPengeluaran,
+      totalKerugian,
+      totalKeuntungan: totalPendapatan - modalTerjual - totalPengeluaran - totalKerugian,
       modalTerjual
     });
   });
