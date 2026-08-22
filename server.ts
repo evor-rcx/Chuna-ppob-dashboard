@@ -1829,9 +1829,12 @@ app.get("/api/summary", (req, res) => {
     const months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
     const tglUtangStr = `${dUtang.getDate()} ${months[dUtang.getMonth()]} ${dUtang.getFullYear()}`;
 
-    const tunggakanText = reminderType === '1_bulan' 
-        ? "sudah masuk masa tunggakan 1 bulan" 
-        : "sudah berlarut-larut belum dilunasi";
+    const now = new Date();
+    // Gunakan tanggal saat ini, hitung selisih hari
+    const diffTime = Math.abs(now.getTime() - dUtang.getTime());
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+    const tunggakanText = `sudah masuk masa tunggakan ${diffDays} hari`;
 
     const msg = `Halo Kak/Bapak/Ibu ${nama}! Saya Chuna, asisten bot dari E4 Store. 😊\n\nMau mengingatkan dengan hormat ya, Kak. Tagihan untuk pembelian ${product} sejak tanggal *${tglUtangStr}* ${tunggakanText} dengan total Rp ${priceStr}.\n\nSaat ini kami sedang agak darurat soal stok produk digital. Persediaan pulsa dan top-up kami sudah menipis, jadi banyak order dari pelanggan lain yang harus kami tunda karena kami belum bisa membeli produk baru. Padahal antrian top-up dan pascabayar dari customer lain sudah menumpuk, tapi modal untuk beli produk baru masih tertahan di tagihan Kakak untuk pembelian ${product} tersebut.\n\nSebagai asisten bot, saya sangat mengharapkan pengertian dari Kakak ${nama} untuk segera melunasi tagihan paling lambat 3 hari ke depan. Kalau ada kendala atau keberatan, tolong chat saya langsung ya.\n\nKalau ada keluhan, chat aja di owner saya ya, Kak, di 085169949218. Nanti beliau yang bantu handle lebih lanjut. 😊\n\nAtas kerjasama dan perhatiannya, saya ucapkan terima kasih banyak! 🙏\n\nSalam,\nChuna – Asisten Bot E4 Store`;
     
