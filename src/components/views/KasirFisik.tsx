@@ -22,6 +22,14 @@ interface CartItem extends PhysicalProduct {
   cartId?: string;
 }
 
+const getTambahanLabel = (cat?: string) => {
+    const c = (cat || '').toLowerCase();
+    if (c.includes('bensin')) return 'Botol';
+    if (c.includes('minuman')) return 'Gelas';
+    if (c.includes('makanan')) return 'Wadah/Plastik';
+    return 'Kemasan Lain';
+};
+
 export function KasirFisik({ onBack }: { onBack: () => void }) {
   const [products, setProducts] = useState<PhysicalProduct[]>([]);
   const [isNewCategory, setIsNewCategory] = useState(false);
@@ -116,29 +124,30 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
     fetchProducts(); fetchStats(); fetchExpenses(); fetchLosses(); fetchTransactions();
   }, []);
 
-  const addToCart = (product: PhysicalProduct) => {
+  const addToCart = (product: PhysicalProduct, withCup: boolean = false) => {
     if (product.stock <= 0) {
       alert('Stok habis!');
       return;
     }
     setCart(prev => {
-      const existing = prev.find(item => item.id === product.id);
+      const cartId = product.id + (withCup ? '-cup' : '');
+      const existing = prev.find(item => item.cartId === cartId || (item.id === product.id && !!item.withCup === withCup));
       if (existing) {
         if (existing.quantity >= product.stock) {
           alert('Maksimal stok tercapai!');
           return prev;
         }
         return prev.map(item => 
-          item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+          (item.cartId === cartId || (item.id === product.id && !!item.withCup === withCup)) ? { ...item, quantity: item.quantity + 1 } : item
         );
       }
-      return [...prev, { ...product, quantity: 1 }];
+      return [...prev, { ...product, quantity: 1, withCup, cartId }];
     });
   };
 
   const updateQuantity = (id: string, delta: number) => {
     setCart(prev => prev.map(item => {
-      if (item.id === id) {
+      if (item.cartId === id || item.id === id) {
         const newQ = item.quantity + delta;
         if (newQ > item.stock) {
             alert('Maksimal stok tercapai!');
@@ -152,7 +161,7 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
   };
 
   const removeFromCart = (id: string) => {
-    setCart(prev => prev.filter(item => item.id !== id));
+    setCart(prev => prev.filter(item => item.cartId !== id && item.id !== id));
   };
 
   const openCheckoutModal = (shouldPrint: boolean) => {
@@ -431,32 +440,53 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-              {filteredProducts.map(product => (
+              {filteredProducts.map(product => {
+                const hasTambahan = product.cupPrice && product.cupPrice > 0;
+                return (
                 <div
                   key={product.id}
-                  onClick={() => addToCart(product)}
-                  className={`bg-slate-800 border border-slate-700 rounded-xl p-4 text-left hover:border-blue-500 transition-colors cursor-pointer flex flex-col justify-between ${product.stock <= 0 ? 'opacity-50 pointer-events-none' : ''}`}
+                  className={`bg-slate-800 border border-slate-700 rounded-xl p-4 text-left flex flex-col justify-between transition-colors ${product.stock <= 0 ? 'opacity-50 pointer-events-none' : ''}`}
                 >
                   <div>
                       <h3 className="font-medium text-white mb-1 line-clamp-2">{product.name}</h3>
                       <div className="text-blue-400 font-semibold mb-2 flex justify-between items-center">
-                        <span>Rp {product.price.toLocaleString('id-ID')}</span>
+                        {!hasTambahan && <span></span>}
+                        {hasTambahan && <span className="text-slate-400 text-xs">Pilih Varian:</span>}
                         {product.promo === 'b2g1' && <span className="bg-amber-500/20 text-amber-400 text-[10px] px-2 py-0.5 rounded-full border border-amber-500/30">Beli 2 Gratis 1</span>}
                       </div>
-                      <div className="flex items-center text-xs text-slate-400 mb-3">
+                      <div className="flex items-center text-xs text-slate-400 mb-4">
                         <Package size={12} className="mr-1" /> Stok: {product.stock} {product.unit || 'pcs'}
                       </div>
                   </div>
-                  {product.cupPrice && product.cupPrice > 0 && (
+                  
+                  {hasTambahan ? (
+                      <div className="flex flex-col gap-2 mt-auto">
+                        <button 
+                            onClick={() => addToCart(product, false)}
+                            className="w-full bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs py-2 rounded-lg transition-colors border border-slate-600 flex justify-between px-3 items-center"
+                        >
+                            <span>Biasa</span>
+                            <span className="font-semibold">Rp {product.price.toLocaleString('id-ID')}</span>
+                        </button>
+                        <button 
+                            onClick={() => addToCart(product, true)}
+                            className="w-full bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white text-xs py-2 rounded-lg transition-colors border border-blue-500/30 flex justify-between px-3 items-center"
+                        >
+                            <span>+ {getTambahanLabel(product.category)}</span>
+                            <span className="font-semibold">Rp {product.cupPrice.toLocaleString('id-ID')}</span>
+                        </button>
+                      </div>
+                  ) : (
                       <button 
-                         onClick={(e) => { e.stopPropagation(); addToCart(product); }}
-                         className="w-full bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white text-xs py-1.5 rounded-lg transition-colors border border-blue-500/30"
+                          onClick={() => addToCart(product, false)}
+                          className="w-full bg-blue-600 hover:bg-blue-500 text-white text-sm py-2 rounded-lg transition-colors flex justify-between px-3 items-center mt-auto"
                       >
-                         + Pakai Gelas (Rp {product.cupPrice.toLocaleString('id-ID')})
+                          <span>Tambah</span>
+                          <span className="font-semibold">Rp {product.price.toLocaleString('id-ID')}</span>
                       </button>
                   )}
                 </div>
-              ))}
+              ) })}
             </div>
             {filteredProducts.length === 0 && (
                 <div className="text-center text-slate-400 py-10">
@@ -484,20 +514,20 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
                 </div>
               ) : (
                 cart.map(item => (
-                  <div key={item.id} className="flex justify-between items-center bg-slate-800/80 p-3 rounded-lg border border-slate-700/50">
+                  <div key={item.cartId || item.id} className="flex justify-between items-center bg-slate-800/80 p-3 rounded-lg border border-slate-700/50">
                     <div>
-                      <div className="text-sm font-medium text-white">{item.name}</div>
-                      <div className="text-xs text-slate-400">Rp {item.price.toLocaleString('id-ID')}</div>
+                      <div className="text-sm font-medium text-white">{item.name} {item.withCup ? <span className="text-blue-400 text-xs ml-1">(+{getTambahanLabel(item.category)})</span> : null}</div>
+                      <div className="text-xs text-slate-400">Rp {(item.withCup && item.cupPrice ? item.cupPrice : item.price).toLocaleString('id-ID')}</div>
                     </div>
                     <div className="flex items-center gap-3">
-                      <button onClick={() => updateQuantity(item.id, -1)} className="w-8 h-8 flex items-center justify-center bg-slate-700 rounded-lg text-slate-300 hover:text-white">
+                      <button onClick={() => updateQuantity(item.cartId || item.id, -1)} className="w-8 h-8 flex items-center justify-center bg-slate-700 rounded-lg text-slate-300 hover:text-white">
                         <Minus size={14} />
                       </button>
                       <span className="text-sm font-medium w-4 text-center">{item.quantity}</span>
-                      <button onClick={() => updateQuantity(item.id, 1)} className="w-8 h-8 flex items-center justify-center bg-slate-700 rounded-lg text-slate-300 hover:text-white">
+                      <button onClick={() => updateQuantity(item.cartId || item.id, 1)} className="w-8 h-8 flex items-center justify-center bg-slate-700 rounded-lg text-slate-300 hover:text-white">
                         <Plus size={14} />
                       </button>
-                      <button onClick={() => removeFromCart(item.id)} className="w-8 h-8 flex items-center justify-center text-red-400 hover:bg-red-400/10 rounded-lg ml-1">
+                      <button onClick={() => removeFromCart(item.cartId || item.id)} className="w-8 h-8 flex items-center justify-center text-red-400 hover:bg-red-400/10 rounded-lg ml-1">
                         <Trash2 size={16} />
                       </button>
                     </div>
@@ -569,7 +599,7 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
                         )}
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-slate-400 mb-1">Harga Pakai Gelas (Opsional)</label>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Harga +Pakai {getTambahanLabel(formData.category)} (Opsional)</label>
                         <input type="number" value={formData.cupPrice || ''} onChange={e => setFormData({...formData, cupPrice: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white" placeholder="Contoh: 5000" />
                     </div>
                     <div>
@@ -692,33 +722,40 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
                 </h3>
 
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 mb-6">
-                    <div className="bg-slate-900 border border-slate-700 rounded-xl p-4">
-                        <div className="text-xs text-slate-400 mb-1">Sisa Modal Aktif + Pengeluaran</div>
-                        <div className="text-lg font-bold text-slate-300">Rp {(stats.totalModalKeseluruhan || 0).toLocaleString('id-ID')}</div>
+                    <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 relative overflow-hidden">
+                        <div className="text-xs text-slate-400 mb-1">Total Modal di Barang</div>
+                        <div className="text-lg font-bold text-yellow-400">Rp {(stats.totalNilaiStok || 0).toLocaleString('id-ID')}</div>
+                        <div className="text-[10px] text-slate-500 mt-1">Turun jika produk laku</div>
                     </div>
                     <div className="bg-slate-900 border border-slate-700 rounded-xl p-4">
-                        <div className="text-xs text-slate-400 mb-1">Nilai Stok Sisa (Uang Mati)</div>
-                        <div className="text-lg font-bold text-yellow-400">Rp {(stats.totalNilaiStok || 0).toLocaleString('id-ID')}</div>
+                        <div className="text-xs text-slate-400 mb-1">Total Modal Sudah Balik</div>
+                        <div className="text-lg font-bold text-emerald-400">Rp {(stats.modalTerjual || 0).toLocaleString('id-ID')}</div>
+                        <div className="text-[10px] text-slate-500 mt-1">Modal dari barang yg laku</div>
+                    </div>
+                    <div className="bg-slate-900 border border-slate-700 rounded-xl p-4">
+                        <div className="text-xs text-slate-400 mb-1">Pengeluaran Tambahan</div>
+                        <div className="text-lg font-bold text-red-400">Rp {(stats.totalPengeluaran || 0).toLocaleString('id-ID')}</div>
+                        <div className="text-[10px] text-slate-500 mt-1">Plastik, es, operasional</div>
                     </div>
                     <div className="bg-slate-900 border border-emerald-900/50 rounded-xl p-4">
-                        <div className="text-xs text-emerald-400/70 mb-1">Fee / Laba (Bulan Ini)</div>
-                        <div className="text-lg font-bold text-emerald-400">Rp {(stats.totalFeeTerjual || 0).toLocaleString('id-ID')}</div>
+                        <div className="text-xs text-emerald-400/70 mb-1">Keuntungan / Laba Bersih</div>
+                        <div className="text-lg font-bold text-emerald-400">Rp {((stats as any).totalKeuntungan || 0).toLocaleString('id-ID')}</div>
+                        <div className="text-[10px] text-emerald-400/50 mt-1">Pendapatan - Modal - Biaya</div>
                     </div>
                     <div className="bg-slate-900 border border-slate-700 rounded-xl p-4">
-                        <div className="text-xs text-slate-400 mb-1">Sisa Uang Laci (Bulan Ini)</div>
+                        <div className="text-xs text-slate-400 mb-1">Estimasi Uang Laci (Cash)</div>
                         <div className="text-lg font-bold text-blue-400">Rp {((stats.totalPendapatan || 0) - (stats.totalPengeluaran || 0)).toLocaleString('id-ID')}</div>
+                        <div className="text-[10px] text-slate-500 mt-1">Uang tunai yg diterima</div>
                     </div>
                     <div className="bg-slate-900 border border-slate-700 rounded-xl p-4">
-                        <div className="text-xs text-slate-400 mb-1">Pengeluaran Lain (Bulan Ini)</div>
-                        <div className="text-lg font-bold text-red-400">Rp {(stats.totalPengeluaran || 0).toLocaleString('id-ID')}</div>
-                    </div>
-                    <div className="bg-slate-900 border border-slate-700 rounded-xl p-4">
-                        <div className="text-xs text-slate-400 mb-1">Kerugian (Bulan Ini)</div>
+                        <div className="text-xs text-slate-400 mb-1">Kerugian (Barang Rusak)</div>
                         <div className="text-lg font-bold text-yellow-500">Rp {((stats as any).totalKerugian || 0).toLocaleString('id-ID')}</div>
+                        <div className="text-[10px] text-slate-500 mt-1">Nilai modal terbuang</div>
                     </div>
                     <div className="bg-slate-900 border border-slate-700 rounded-xl p-4">
                         <div className="text-xs text-slate-400 mb-1">Piutang (Belum Lunas)</div>
                         <div className="text-lg font-bold text-orange-400">Rp {(stats.totalPiutang || 0).toLocaleString('id-ID')}</div>
+                        <div className="text-[10px] text-slate-500 mt-1">Hutang pelanggan</div>
                     </div>
                     <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 col-span-2 sm:col-span-3 md:col-span-4">
                         <div className="text-xs text-slate-400 mb-1">Keuntungan Bersih (Bulan Ini)</div>
