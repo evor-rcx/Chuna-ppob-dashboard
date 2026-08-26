@@ -1127,6 +1127,7 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
                 <tr className="text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-800/50 bg-slate-800/20">
                   <th className="px-6 py-3 font-semibold">Tanggal</th>
                   <th className="px-6 py-3 font-semibold">Pembeli</th>
+                  <th className="px-6 py-3 font-semibold">Item Pembelian</th>
                   <th className="px-6 py-3 font-semibold">Total Tagihan</th>
                   <th className="px-6 py-3 font-semibold">Telah Dibayar</th>
                   <th className="px-6 py-3 font-semibold">Sisa Tagihan</th>
@@ -1136,7 +1137,7 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
               <tbody className="divide-y divide-slate-800/50">
                 {transactions.filter(t => t.method === 'utang').length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-6 py-8 text-center text-slate-500">
+                    <td colSpan={7} className="px-6 py-8 text-center text-slate-500">
                       Tidak ada data utang yang belum lunas.
                     </td>
                   </tr>
@@ -1150,6 +1151,13 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
                         <div className="text-xs text-slate-500">{new Date(t.date).toLocaleTimeString('id-ID')}</div>
                       </td>
                       <td className="px-6 py-4 font-bold text-white">{t.customer}</td>
+                      <td className="px-6 py-4 text-sm text-slate-400">
+                        <ul className="list-disc list-inside">
+                          {t.items?.map((item: any, i: number) => (
+                            <li key={i}>{item.quantity}x {item.name}</li>
+                          ))}
+                        </ul>
+                      </td>
                       <td className="px-6 py-4 text-slate-300">Rp {t.total.toLocaleString('id-ID')}</td>
                       <td className="px-6 py-4 text-green-400">Rp {(t.paidAmount || 0).toLocaleString('id-ID')}</td>
                       <td className="px-6 py-4 font-bold text-yellow-400">Rp {sisa.toLocaleString('id-ID')}</td>
