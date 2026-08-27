@@ -1021,19 +1021,25 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam!
 Chuna tunggu Transaksi berikutnya dari Kakak! 😊💖`;
                 } else if (status === 'Gagal') {
                     let refundMsg = tx.method === 'saldo' ? '✅ Saldo sebesar Rp ' + tx.price.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (tx.method === 'utang' ? '✅ Utang sebesar Rp ' + tx.price.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + tx.price.toLocaleString('id-ID') + ' kepada pelanggan.');
+                    let isIpError = (data.message || '').toLowerCase().includes('ip');
+                    let customerErrorMsg = isIpError ? 'Sedang ada pemeliharaan' : (data.message || 'Transaksi Gagal');
+                    if (customerErrorMsg.toLowerCase().includes('saldo') || customerErrorMsg.toLowerCase().includes('balance')) {
+                        customerErrorMsg = 'Produk sedang kosong';
+                    }
+
                     msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.
 
-Kemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan${(data.message || '').toLowerCase().includes('ip') ? ' lebih lanjut' : ''}.
+Kemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan${isIpError ? ' lebih lanjut' : ''}.
 
-Keterangan : ${data.message || 'Transaksi Gagal'}
+Keterangan : ${customerErrorMsg}
 📦 Produk  : ${tx.product}
 🎯 Tujuan   : ${tx.target} (${nama})
 
 ${refundMsg}
 
-${(data.message || '').toLowerCase().includes('ip') ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Tenang saja, Kakak bisa mencoba ulang kapan pun.'}
+${isIpError ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Tenang saja, Kakak bisa mencoba ulang kapan pun.'}
 
-${(data.message || '').toLowerCase().includes('ip') ? `Chuna siap membantu dengan senyum! 😊💪` : `Chuna siap bantu! 😊💪`}`;
+${isIpError ? `Chuna siap membantu dengan senyum! 😊💪` : `Chuna siap bantu! 😊💪`}`;
                     
                     if (data.message && data.message.toLowerCase().includes("harga seller lebih besar dari ketentuan harga buyer")) {
                         const ownerMsg = `🚨 *INFO PENTING DARI CHUNA!* 🚨
@@ -2898,6 +2904,9 @@ Chuna tunggu Transaksi berikutnya dari Kakak! 😊💖`;
                     let refundMsg = method === 'saldo' ? '✅ Saldo sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (method === 'utang' ? '✅ Utang sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + total.toLocaleString('id-ID') + ' kepada pelanggan.');
                     let isIpError = (payJson.data.message || '').toLowerCase().includes('ip anda tidak kami kenali') || (payJson.data.message || '').toLowerCase().includes('ip');
                     let customerErrorMsg = isIpError ? 'Sedang ada pemeliharaan' : (payJson.data.message || 'Transaksi Gagal');
+                    if (customerErrorMsg.toLowerCase().includes('saldo') || customerErrorMsg.toLowerCase().includes('balance') || customerErrorMsg.toLowerCase().includes('cukup')) {
+                        customerErrorMsg = 'Produk sedang kosong';
+                    }
                     msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.
 
 Kemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan${isIpError ? ' lebih lanjut' : ''}.
@@ -3171,6 +3180,9 @@ Chuna tunggu Transaksi berikutnya dari Kakak! 😊💖`;
                     let refundMsg = method === 'saldo' ? '✅ Saldo sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (method === 'utang' ? '✅ Utang sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + total.toLocaleString('id-ID') + ' kepada pelanggan.');
                     let isIpError = (payJson.data.message || '').toLowerCase().includes('ip anda tidak kami kenali') || (payJson.data.message || '').toLowerCase().includes('ip');
                     let customerErrorMsg = isIpError ? 'Sedang ada pemeliharaan' : (payJson.data.message || 'Transaksi Gagal');
+                    if (customerErrorMsg.toLowerCase().includes('saldo') || customerErrorMsg.toLowerCase().includes('balance') || customerErrorMsg.toLowerCase().includes('cukup')) {
+                        customerErrorMsg = 'Produk sedang kosong';
+                    }
                     msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.
 
 Kemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan${isIpError ? ' lebih lanjut' : ''}.
