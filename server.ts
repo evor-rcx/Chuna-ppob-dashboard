@@ -1788,6 +1788,43 @@ app.get("/api/summary", (req, res) => {
   
 
 
+  app.put("/api/physical-transactions/pay-customer", (req, res) => {
+    const { customer, amount } = req.body || {};
+    
+    if (!customer || amount === undefined) {
+      return res.status(400).json({ error: "Customer and amount are required" });
+    }
+
+    let remainingAmount = Number(amount);
+    if (remainingAmount <= 0) {
+      return res.status(400).json({ error: "Amount must be positive" });
+    }
+
+    // Find all unpaid transactions for this customer, sort by date (oldest first)
+    const unpaidTxs = db.physicalTransactions
+      .filter((t: any) => t.method === 'utang' && t.customer === customer)
+      .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    for (const tx of unpaidTxs) {
+      if (remainingAmount <= 0) break;
+      
+      const sisa = tx.total - (tx.paidAmount || 0);
+      if (sisa <= 0) continue;
+
+      const payForTx = Math.min(sisa, remainingAmount);
+      tx.paidAmount = (tx.paidAmount || 0) + payForTx;
+      remainingAmount -= payForTx;
+
+      if (tx.paidAmount >= tx.total) {
+        tx.method = 'cash'; // Mark as fully paid
+        tx.paidAt = new Date().toISOString();
+      }
+    }
+
+    writeDB(db);
+    res.json({ success: true });
+  });
+
   app.put("/api/physical-transactions/:id/pay", (req, res) => {
     const { id } = req.params;
     const { amount } = req.body || {};

@@ -48,7 +48,7 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
   const [checkoutShouldPrint, setCheckoutShouldPrint] = useState(false);
   
   // Pay Partial State
-  const [payModalTx, setPayModalTx] = useState<any>(null);
+  const [payModalCustomer, setPayModalCustomer] = useState<any>(null);
   const [payAmount, setPayAmount] = useState('');
   
   // Manage Form State
@@ -1036,9 +1036,15 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
                             required={checkoutMethod === 'utang'}
                             value={checkoutCustomer || ''} 
                             onChange={e => setCheckoutCustomer(e.target.value)}
+                            list="customers-list"
                             className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
                             placeholder="Masukkan nama pelanggan"
                         />
+                        <datalist id="customers-list">
+                            {Array.from(new Set(transactions.filter(t => t.customer && t.customer !== 'Umum').map(t => t.customer))).map((c: any) => (
+                                <option key={c} value={c} />
+                            ))}
+                        </datalist>
                         {checkoutMethod === 'utang' && utangCustomers.length > 0 && (
                             <div className="mt-2">
                                 <p className="text-xs text-slate-500 mb-2">Pilih dari pelanggan utang sebelumnya:</p>
@@ -1125,9 +1131,8 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
             <table className="w-full text-left whitespace-nowrap">
               <thead>
                 <tr className="text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-800/50 bg-slate-800/20">
-                  <th className="px-6 py-3 font-semibold">Tanggal</th>
                   <th className="px-6 py-3 font-semibold">Pembeli</th>
-                  <th className="px-6 py-3 font-semibold">Item Pembelian</th>
+                  <th className="px-6 py-3 font-semibold">Rincian Hutang</th>
                   <th className="px-6 py-3 font-semibold">Total Tagihan</th>
                   <th className="px-6 py-3 font-semibold">Telah Dibayar</th>
                   <th className="px-6 py-3 font-semibold">Sisa Tagihan</th>
@@ -1135,84 +1140,92 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/50">
-                {transactions.filter(t => t.method === 'utang').length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="px-6 py-8 text-center text-slate-500">
-                      Tidak ada data utang yang belum lunas.
-                    </td>
-                  </tr>
-                ) : (
-                  transactions.filter(t => t.method === 'utang').map((t: any) => {
-                    const sisa = t.total - (t.paidAmount || 0);
+                {(() => {
+                  const utangTxs = transactions.filter(t => t.method === 'utang');
+                  if (utangTxs.length === 0) {
                     return (
-                    <tr key={t.id} className="hover:bg-slate-800/30 transition-colors">
-                      <td className="px-6 py-4">
-                        <div className="font-medium text-slate-300">{new Date(t.date).toLocaleDateString('id-ID')}</div>
-                        <div className="text-xs text-slate-500">{new Date(t.date).toLocaleTimeString('id-ID')}</div>
-                      </td>
-                      <td className="px-6 py-4 font-bold text-white">{t.customer}</td>
-                      <td className="px-6 py-4 text-sm text-slate-400">
-                        <ul className="list-disc list-inside">
-                          {t.items?.map((item: any, i: number) => (
-                            <li key={i}>{item.quantity}x {item.name}</li>
-                          ))}
-                        </ul>
-                      </td>
-                      <td className="px-6 py-4 text-slate-300">Rp {t.total.toLocaleString('id-ID')}</td>
-                      <td className="px-6 py-4 text-green-400">Rp {(t.paidAmount || 0).toLocaleString('id-ID')}</td>
-                      <td className="px-6 py-4 font-bold text-yellow-400">Rp {sisa.toLocaleString('id-ID')}</td>
-                      <td className="px-6 py-4 text-right">
-                          <button 
-                            onClick={() => { setPayModalTx(t); setPayAmount(sisa.toString()); }} 
-                            className="px-3 py-1.5 bg-yellow-600/20 hover:bg-yellow-600 text-yellow-400 hover:text-white rounded-lg text-sm transition-colors border border-yellow-600/50 hover:border-yellow-600"
-                          >
-                            Cicil / Bayar
-                          </button>
-                      </td>
-                    </tr>
+                      <tr>
+                        <td colSpan={6} className="px-6 py-8 text-center text-slate-500">
+                          Tidak ada data utang yang belum lunas.
+                        </td>
+                      </tr>
                     );
-                  })
-                )}
+                  }
+                  
+                  const groupedUtang = utangTxs.reduce((acc, t) => {
+                    if (!acc[t.customer]) acc[t.customer] = [];
+                    acc[t.customer].push(t);
+                    return acc;
+                  }, {} as Record<string, any[]>);
+
+                  return Object.keys(groupedUtang).map((customer) => {
+                    const txs = groupedUtang[customer];
+                    const totalTagihan = txs.reduce((sum, t) => sum + t.total, 0);
+                    const totalDibayar = txs.reduce((sum, t) => sum + (t.paidAmount || 0), 0);
+                    const sisaTagihan = totalTagihan - totalDibayar;
+                    
+                    return (
+                      <tr key={customer} className="hover:bg-slate-800/30 transition-colors">
+                        <td className="px-6 py-4 font-bold text-white text-base align-top">{customer}</td>
+                        <td className="px-6 py-4 text-sm text-slate-400 align-top">
+                          <div className="flex flex-col gap-2">
+                            {txs.map((t, idx) => (
+                              <div key={idx} className="bg-slate-900/50 rounded-lg p-2 border border-slate-700/50 min-w-[200px]">
+                                <div className="text-xs font-semibold text-slate-300 mb-1 border-b border-slate-700/50 pb-1">
+                                  {new Date(t.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
+                                </div>
+                                <ul className="list-disc list-inside text-xs space-y-0.5 mt-1">
+                                  {t.items?.map((item: any, i: number) => (
+                                    <li key={i}>{item.quantity}x {item.name}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-slate-300 align-top">Rp {totalTagihan.toLocaleString('id-ID')}</td>
+                        <td className="px-6 py-4 text-green-400 align-top">Rp {totalDibayar.toLocaleString('id-ID')}</td>
+                        <td className="px-6 py-4 font-bold text-yellow-400 align-top">Rp {sisaTagihan.toLocaleString('id-ID')}</td>
+                        <td className="px-6 py-4 text-right align-top">
+                          <div className="flex flex-col gap-2 items-end">
+                              <button 
+                                onClick={() => { setPayModalCustomer({ customer, totalSisa: sisaTagihan, txs }); setPayAmount(sisaTagihan.toString()); }} 
+                                className="px-4 py-2 bg-yellow-600/20 hover:bg-yellow-600 text-yellow-400 hover:text-white rounded-lg text-sm font-semibold transition-colors border border-yellow-600/50 hover:border-yellow-600 whitespace-nowrap"
+                              >
+                                💳 Bayar Utang
+                              </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  });
+                })()}
               </tbody>
             </table>
           </div>
         </div>
       )}
 
-      {payModalTx && (
+      {payModalCustomer && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md my-auto flex flex-col">
             <div className="p-6 border-b border-slate-800 flex justify-between items-center">
                 <h3 className="text-xl font-bold text-white">Bayar / Cicil Utang</h3>
-                <button onClick={() => setPayModalTx(null)} className="text-slate-400 hover:text-white">✕</button>
+                <button onClick={() => setPayModalCustomer(null)} className="text-slate-400 hover:text-white">✕</button>
             </div>
             
             <div className="p-6 space-y-4">
                 <div>
                   <p className="text-sm text-slate-400">Pembeli</p>
-                  <p className="text-lg font-bold text-white">{payModalTx.customer}</p>
+                  <p className="text-lg font-bold text-white">{payModalCustomer.customer}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-slate-400">Item Dibeli</p>
-                  <ul className="list-disc list-inside text-slate-300 text-sm mt-1">
-                    {payModalTx.items?.map((item: any, i: number) => (
-                      <li key={i}>{item.quantity}x {item.name}</li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="flex justify-between items-center bg-slate-800 p-3 rounded-lg">
-                  <div>
-                    <p className="text-xs text-slate-400">Total Utang</p>
-                    <p className="text-sm font-semibold text-white">Rp {payModalTx.total.toLocaleString('id-ID')}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs text-slate-400">Sisa Tagihan</p>
-                    <p className="text-sm font-bold text-yellow-400">Rp {(payModalTx.total - (payModalTx.paidAmount || 0)).toLocaleString('id-ID')}</p>
-                  </div>
+                  <p className="text-sm text-slate-400">Total Sisa Tagihan (Seluruh Utang)</p>
+                  <p className="text-2xl font-bold text-yellow-400">Rp {payModalCustomer.totalSisa.toLocaleString('id-ID')}</p>
                 </div>
                 
                 <div>
-                    <label className="block text-sm font-medium text-slate-400 mb-1">Nominal Pembayaran (Angsuran)</label>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">Nominal Pembayaran</label>
                     <div className="relative">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                             <span className="text-slate-500">Rp</span>
@@ -1229,6 +1242,20 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
                             placeholder="0"
                         />
                     </div>
+                    {(() => {
+                        const amount = parseInt(payAmount.replace(/\D/g, '')) || 0;
+                        const sisa = payModalCustomer.totalSisa;
+                        if (amount > 0) {
+                            if (amount > sisa) {
+                                return <p className="text-sm text-green-400 mt-2">Kembalian: Rp {(amount - sisa).toLocaleString('id-ID')} (Lunas Semua)</p>;
+                            } else if (amount === sisa) {
+                                return <p className="text-sm text-green-400 mt-2">Semua Tagihan akan Lunas</p>;
+                            } else {
+                                return <p className="text-sm text-yellow-400 mt-2">Sisa Tagihan Setelah Dibayar: Rp {(sisa - amount).toLocaleString('id-ID')}</p>;
+                            }
+                        }
+                        return null;
+                    })()}
                 </div>
             </div>
             
@@ -1236,26 +1263,24 @@ export function KasirFisik({ onBack }: { onBack: () => void }) {
                 <button 
                     onClick={async () => {
                         const amount = parseInt(payAmount.replace(/\D/g, '')) || 0;
-                        const sisa = payModalTx.total - (payModalTx.paidAmount || 0);
                         if (amount <= 0) {
                             alert("Masukkan nominal pembayaran");
                             return;
                         }
-                        if (amount > sisa) {
-                            alert("Nominal pembayaran melebihi sisa tagihan!");
-                            return;
-                        }
+                        
                         try {
-                            const res = await fetch(`/api/physical-transactions/${payModalTx.id}/pay`, {
+                            const res = await fetch(`/api/physical-transactions/pay-customer`, {
                                 method: 'PUT',
                                 headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ amount })
+                                body: JSON.stringify({ customer: payModalCustomer.customer, amount })
                             });
                             if (res.ok) {
-                                setPayModalTx(null);
+                                setPayModalCustomer(null);
                                 setPayAmount('');
                                 fetchTransactions();
                                 fetchStats();
+                            } else {
+                                alert("Gagal memproses pembayaran");
                             }
                         } catch (e) {}
                     }}
