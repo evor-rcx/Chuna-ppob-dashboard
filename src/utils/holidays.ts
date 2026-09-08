@@ -1,5 +1,16 @@
 import Holidays from 'date-holidays';
 
+const customHolidays = [
+  { month: 3, date: 21, name: 'Hari Kartini' },
+  { month: 4, date: 2, name: 'Hari Pendidikan Nasional' },
+  { month: 4, date: 20, name: 'Hari Kebangkitan Nasional' },
+  { month: 9, date: 1, name: 'Hari Kesaktian Pancasila' },
+  { month: 9, date: 2, name: 'Hari Batik Nasional' },
+  { month: 9, date: 28, name: 'Hari Sumpah Pemuda' },
+  { month: 10, date: 10, name: 'Hari Pahlawan' },
+  { month: 11, date: 22, name: 'Hari Ibu' }
+];
+
 export const getHolidayInfo = (currentDate: Date) => {
   const hd = new Holidays('ID');
   const currentYear = currentDate.getFullYear();
@@ -13,6 +24,17 @@ export const getHolidayInfo = (currentDate: Date) => {
     date: new Date(h.date),
     type: h.type
   }));
+
+  // Inject custom national days
+  [currentYear, currentYear + 1].forEach(year => {
+    customHolidays.forEach(c => {
+      allHolidays.push({
+        name: c.name,
+        date: new Date(year, c.month, c.date),
+        type: 'custom'
+      });
+    });
+  });
 
   // Find today's holiday
   const todayHoliday = allHolidays.find(h => {

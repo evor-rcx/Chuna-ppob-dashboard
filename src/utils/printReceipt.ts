@@ -1,52 +1,29 @@
+import { getHolidayInfo } from './holidays';
+
 function getCalendarInfo(date: Date) {
     const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+    const months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+    
     const witaStr = date.toLocaleString('en-US', { timeZone: 'Asia/Makassar' });
     const witaDate = new Date(witaStr);
+    
     const dayName = days[witaDate.getDay()];
+    const dateNum = witaDate.getDate().toString().padStart(2, '0');
+    const monthName = months[witaDate.getMonth()];
+    const yearNum = witaDate.getFullYear();
+    const fullDateStr = `${dayName}, ${dateNum} ${monthName} ${yearNum}`;
     
-    const holidays = [
-        { month: 0, date: 1, name: 'Tahun Baru Masehi' },
-        { month: 4, date: 1, name: 'Hari Buruh Internasional' },
-        { month: 5, date: 1, name: 'Hari Lahir Pancasila' },
-        { month: 7, date: 17, name: 'Hari Kemerdekaan RI' },
-        { month: 9, date: 1, name: 'Hari Kesaktian Pancasila' },
-        { month: 9, date: 28, name: 'Hari Sumpah Pemuda' },
-        { month: 10, date: 10, name: 'Hari Pahlawan' },
-        { month: 11, date: 22, name: 'Hari Ibu' },
-        { month: 11, date: 25, name: 'Hari Raya Natal' }
-    ];
+    const holidayData = getHolidayInfo(witaDate);
     
-    let nextHoliday = null;
-    let minDiff = Infinity;
-    const currentYear = witaDate.getFullYear();
-    
-    for (const h of holidays) {
-        let hDate = new Date(currentYear, h.month, h.date);
-        if (hDate < witaDate && hDate.toDateString() !== witaDate.toDateString()) {
-            hDate = new Date(currentYear + 1, h.month, h.date);
-        }
-        
-        const todayStart = new Date(witaDate.getFullYear(), witaDate.getMonth(), witaDate.getDate());
-        const hStart = new Date(hDate.getFullYear(), hDate.getMonth(), hDate.getDate());
-        const diffTime = Math.abs(hStart.getTime() - todayStart.getTime());
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        
-        if (diffDays >= 0 && diffDays < minDiff) {
-            minDiff = diffDays;
-            nextHoliday = { ...h, daysLeft: diffDays };
-        }
-    }
-    
-    let eventText = '';
-    if (nextHoliday) {
-        if (nextHoliday.daysLeft === 0) {
-            eventText = nextHoliday.name + ' (Hari Ini)';
+    if (holidayData) {
+        if (holidayData.isToday) {
+            return `${fullDateStr} | ${holidayData.text} (Hari Ini)`;
         } else {
-            eventText = nextHoliday.name + ' (' + nextHoliday.daysLeft + ' hari lagi)';
+            return `${fullDateStr} | Menuju ${holidayData.text}`;
         }
     }
     
-    return `${dayName}, ${eventText}`;
+    return fullDateStr;
 }
 
 export async function printReceiptBluetooth(transaction: any) {

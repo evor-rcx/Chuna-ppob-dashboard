@@ -60,11 +60,16 @@ import Holidays from 'date-holidays';
 
 function getCalendarInfo(date: Date) {
     const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+    const months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
     
     // We want the time in Makassar timezone to get the right day
     const witaStr = date.toLocaleString('en-US', { timeZone: 'Asia/Makassar' });
     const witaDate = new Date(witaStr);
     const dayName = days[witaDate.getDay()];
+    const dateNum = witaDate.getDate().toString().padStart(2, '0');
+    const monthName = months[witaDate.getMonth()];
+    const yearNum = witaDate.getFullYear();
+    const fullDateStr = `${dayName}, ${dateNum} ${monthName} ${yearNum}`;
     
     const hd = new Holidays('ID');
     const currentYear = witaDate.getFullYear();
@@ -79,6 +84,27 @@ function getCalendarInfo(date: Date) {
         type: h.type
     }));
 
+    const customHolidays = [
+        { month: 3, date: 21, name: 'Hari Kartini' },
+        { month: 4, date: 2, name: 'Hari Pendidikan Nasional' },
+        { month: 4, date: 20, name: 'Hari Kebangkitan Nasional' },
+        { month: 9, date: 1, name: 'Hari Kesaktian Pancasila' },
+        { month: 9, date: 2, name: 'Hari Batik Nasional' },
+        { month: 9, date: 28, name: 'Hari Sumpah Pemuda' },
+        { month: 10, date: 10, name: 'Hari Pahlawan' },
+        { month: 11, date: 22, name: 'Hari Ibu' }
+    ];
+
+    [currentYear, currentYear + 1].forEach(year => {
+        customHolidays.forEach(c => {
+            allHolidays.push({
+                name: c.name,
+                date: new Date(year, c.month, c.date),
+                type: 'custom'
+            });
+        });
+    });
+
     // Find today's holiday
     const todayHoliday = allHolidays.find(h => {
         return h.date.getDate() === witaDate.getDate() && 
@@ -87,7 +113,7 @@ function getCalendarInfo(date: Date) {
     });
 
     if (todayHoliday) {
-        return `${dayName}, ${todayHoliday.name} (Hari Ini)`;
+        return `${fullDateStr} - ${todayHoliday.name} (Hari Ini)`;
     }
 
     // Find next holiday
@@ -99,10 +125,10 @@ function getCalendarInfo(date: Date) {
     if (upcomingHolidays.length > 0) {
         const next = upcomingHolidays[0];
         const diffDays = Math.ceil((next.date.getTime() - witaDateOnly.getTime()) / (1000 * 3600 * 24));
-        return `${dayName}, ${next.name} (${diffDays} hari lagi)`;
+        return `${fullDateStr} - Menuju ${next.name} (${diffDays} hari lagi)`;
     }
     
-    return `${dayName}`;
+    return fullDateStr;
 }
 
 export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any): Promise<Buffer | null> {
