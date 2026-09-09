@@ -1397,6 +1397,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
     });
 
     const repliedThanks = new Set<string>();
+    const repliedGeneral = new Set<string>();
     waSocket.ev.on("messages.upsert", async (m) => {
       const msg = m.messages[0];
       if (!msg.key.fromMe && m.type === "notify" && msg.message) {
@@ -1479,6 +1480,70 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                         }, 5000);
                     } catch (e) {
                         console.error("Gagal kirim balasan makasih VN:", e);
+                    }
+                }
+            }
+        } else {
+            const jid = msg.key.remoteJid;
+            if (jid && !jid.endsWith('@g.us') && !jid.endsWith('@newsletter') && !jid.includes('status@broadcast')) {
+                const replyKey = jid + '_' + new Date().toDateString();
+                if (!repliedGeneral.has(replyKey)) {
+                    repliedGeneral.add(replyKey);
+                    
+                    const cleanJid = jid.split('@')[0];
+                    const member = db.members.find((m: any) => m.whatsapp && m.whatsapp.replace(/\D/g, '').includes(cleanJid));
+                    let customerName = msg.pushName || "";
+                    if (member && member.name) {
+                        customerName = " " + member.name;
+                    } else if (customerName) {
+                        customerName = " " + customerName;
+                    }
+
+                    try {
+                        const vnText = `Halo Kak${customerName}, mohon maaf mengganggu waktunya. Saya Chuna, asisten otomatis E4 Store. Nomor ini dioperasikan oleh sistem bot, jadi tidak bisa membalas pesan atau menerima telepon. Apabila Kakak mau memesan produk atau ada yang ingin ditanyakan, silakan kontak langsung ke Owner kami lewat link berikut. Sekian dari Chuna, mohon maaf sebesar-besarnya dan terima kasih!`;
+                        
+                        const baseVnName = path.join(process.cwd(), `tmp_gen_vn_${Date.now()}_${Math.floor(Math.random()*1000)}`);
+                        const vnPathMp3 = `${baseVnName}.mp3`;
+                        const vnPathOgg = `${baseVnName}.ogg`;
+                        const tts = new EdgeTTS({ voice: 'id-ID-GadisNeural', lang: 'id-ID', outputFormat: 'audio-24khz-48kbitrate-mono-mp3', pitch: '+20Hz', rate: '+15%' });
+                        await tts.ttsPromise(vnText, vnPathMp3);
+                        await waSocket.sendPresenceUpdate("recording", jid);
+                        await new Promise(r => setTimeout(r, 4500));
+                        await waSocket.sendPresenceUpdate("paused", jid);
+                        
+                        const { exec } = await import('child_process');
+                        await new Promise((resolve, reject) => {
+                            exec(`ffmpeg -y -i ${vnPathMp3} -c:a libopus -b:a 48k -vbr on -compression_level 10 -frame_duration 20 -application voip ${vnPathOgg}`, (error) => {
+                                if (error) {
+                                    console.error("FFmpeg error:", error);
+                                    reject(error);
+                                } else {
+                                    resolve(true);
+                                }
+                            });
+                        });
+                        let sent = false;
+                        for(let i=0; i<3; i++) {
+                            try {
+                                const audioBuffer = fs.readFileSync(vnPathOgg);
+                                await waSocket.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/mp4', ptt: true }, { quoted: msg });
+                                sent = true;
+                                break;
+                            } catch (err: any) {
+                                console.log("Upload failed, retrying...", err.message);
+                                await new Promise(r => setTimeout(r, 2000));
+                            }
+                        }
+                        if(sent) {
+                            await waSocket.sendMessage(jid, { text: "📞 Link WA Owner: https://wa.me/6285169949218" });
+                        }
+                        
+                        setTimeout(() => { 
+                             try { fs.unlinkSync(vnPathMp3); } catch(e){} 
+                             try { fs.unlinkSync(vnPathOgg); } catch(e){} 
+                         }, 5000);
+                    } catch (e) {
+                        console.error("Gagal kirim VN general:", e);
                     }
                 }
             }
