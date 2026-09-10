@@ -192,7 +192,7 @@ export async function generateDebtSettlementReceipt(data: DebtSettlementReceiptD
     // Calculate required height based on products count
     const productCount = Math.max(1, data.products?.length || 1);
     const productListHeight = productCount * 38;
-    const baseHeight = 1060;
+    const baseHeight = 1092;
     const height = baseHeight + (productCount > 1 ? (productCount - 1) * 38 : 0);
 
     const canvas = createCanvas(width, height);
@@ -265,6 +265,11 @@ export async function generateDebtSettlementReceipt(data: DebtSettlementReceiptD
     ctx.font = 'bold 25px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(data.isLunasTotal ? 'NOTA PEMBAYARAN LUNAS' : 'NOTA PEMBAYARAN UTANG', width / 2, currentY);
+
+    currentY += 32;
+    ctx.fillStyle = '#334155';
+    ctx.font = 'bold 18px sans-serif';
+    ctx.fillText('Atas Nama: ' + (data.nama || '-'), width / 2, currentY);
 
     currentY += 30;
 
