@@ -102,17 +102,17 @@ export async function printReceiptBluetooth(transaction: any) {
         }
     }
     
-    let namaPlg = '';
-    let golDaya = '';
-    
-    if (tokenVal.includes('/')) {
-        const parts = tokenVal.split('/');
+    let namaPlg = "";
+    let golDaya = "";
+    let isPln = (productName || "").toLowerCase().includes("pln") || (productName || "").toLowerCase().includes("listrik");
+    if (isPln && tokenVal.includes("/")) {
+        const parts = tokenVal.split("/");
         tokenVal = parts[0].trim();
-        namaPlg = (parts[1] || '').trim();
+        namaPlg = (parts[1] || "").trim();
         if (parts.length > 3) {
             golDaya = `${parts[2].trim()} / ${parts[3].trim()}`;
         } else {
-            golDaya = parts.slice(2).join(' / ').trim();
+            golDaya = parts.slice(2).join(" / ").trim();
         }
     }
 

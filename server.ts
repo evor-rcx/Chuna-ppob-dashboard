@@ -141,7 +141,9 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
         let golDaya = '';
         let kwh = '';
         
-        if (token && token.includes('/')) {
+        let isPln = (data.product || '').toLowerCase().includes('pln') || (data.product || '').toLowerCase().includes('listrik');
+        
+        if (isPln && token && token.includes('/')) {
             const parts = token.split('/');
             token = parts[0];
             namaPlg = parts[1] || '';
@@ -284,43 +286,40 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
             ctx.textAlign = 'left';
             y += 45;
         }
-        
-        if (type === 'nota') {
+        if (type === "nota") {
             y += 20;
-            // Token Box
-            ctx.strokeStyle = '#ca8a04';
+            const maxTokenLen = 22;
+            const tokenLines = [];
+            for (let i = 0; i < token.length; i += maxTokenLen) {
+                tokenLines.push(token.substring(i, i + maxTokenLen));
+            }
+            let boxHeight = Math.max(100, 40 + (tokenLines.length * 30));
+            ctx.strokeStyle = "#ca8a04";
             ctx.lineWidth = 2;
             ctx.beginPath();
-        
             ctx.moveTo(50 + 10, y);
             ctx.lineTo(50 + width - 100 - 10, y);
             ctx.quadraticCurveTo(50 + width - 100, y, 50 + width - 100, y + 10);
-            ctx.lineTo(50 + width - 100, y + 100 - 10);
-            ctx.quadraticCurveTo(50 + width - 100, y + 100, 50 + width - 100 - 10, y + 100);
-            ctx.lineTo(50 + 10, y + 100);
-            ctx.quadraticCurveTo(50, y + 100, 50, y + 100 - 10);
+            ctx.lineTo(50 + width - 100, y + boxHeight - 10);
+            ctx.quadraticCurveTo(50 + width - 100, y + boxHeight, 50 + width - 100 - 10, y + boxHeight);
+            ctx.lineTo(50 + 10, y + boxHeight);
+            ctx.quadraticCurveTo(50, y + boxHeight, 50, y + boxHeight - 10);
             ctx.lineTo(50, y + 10);
             ctx.quadraticCurveTo(50, y, 50 + 10, y);
-
             ctx.stroke();
-            
-            ctx.fillStyle = '#000000';
-            ctx.fillText('Token / SN', 70, y + 40);
-            
-            ctx.fillStyle = '#ef4444';
-            ctx.textAlign = 'right';
-            ctx.font = 'bold 20px Arial, sans-serif';
-            // Wrap token if long
-            if (token.length > 25) {
-                ctx.fillText(token.substring(0, 25), width - 70, y + 40);
-                ctx.fillText(token.substring(25), width - 70, y + 75);
-            } else {
-                ctx.fillText(token, width - 70, y + 55);
+            ctx.fillStyle = "#000000";
+            ctx.fillText("Token / SN", 70, y + (boxHeight / 2) + 7);
+            ctx.fillStyle = "#ef4444";
+            ctx.textAlign = "right";
+            ctx.font = "bold 20px Arial, sans-serif";
+            let ty = y + (boxHeight / 2) - ((tokenLines.length - 1) * 15);
+            for (const tl of tokenLines) {
+                ctx.fillText(tl, width - 70, ty + 7);
+                ty += 30;
             }
-            ctx.textAlign = 'left';
-            y += 140;
+            ctx.textAlign = "left";
+            y += boxHeight + 40;
         }
-        
         y += 20;
         // Total Box
         ctx.strokeStyle = '#ca8a04';
@@ -6282,18 +6281,17 @@ E4 Store`,
 
     let namaPlg = '';
     let golDaya = '';
-    
-    if (token && token.includes('/')) {
-        const parts = token.split('/');
+    let isPln = (tx.product || "").toLowerCase().includes("pln") || (tx.product || "").toLowerCase().includes("listrik");
+    if (isPln && token && token.includes("/")) {
+        const parts = token.split("/");
         token = parts[0];
-        namaPlg = parts[1] || '';
+        namaPlg = parts[1] || "";
         if (parts.length > 3) {
             golDaya = `${parts[2]} / ${parts[3]}`;
         } else {
-            golDaya = parts.slice(2).join(' / ');
+            golDaya = parts.slice(2).join(" / ");
         }
     }
-    
     const txDate = new Date(tx.date || new Date());
     const dateStr = txDate.toLocaleString('en-GB', { timeZone: 'Asia/Makassar', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).replace(',', '');
     const formattedDate = `${dateStr} WITA`;
