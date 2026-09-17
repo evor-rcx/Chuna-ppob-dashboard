@@ -1400,6 +1400,48 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
     waSocket.ev.on("messages.upsert", async (m) => {
       const msg = m.messages[0];
       if (!msg.key.fromMe && m.type === "notify" && msg.message) {
+        // Anti View Once Logic
+        const isViewOnce = msg.message?.viewOnceMessage || msg.message?.viewOnceMessageV2 || msg.message?.viewOnceMessageV2Extension;
+        if (isViewOnce) {
+            try {
+                const messageType = Object.keys(isViewOnce.message)[0];
+                const mediaMessage = isViewOnce.message[messageType];
+                
+                const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+                const stream = await downloadContentFromMessage(mediaMessage, messageType.replace('Message', ''));
+                let buffer = Buffer.from([]);
+                for await(const chunk of stream) {
+                    buffer = Buffer.concat([buffer, chunk]);
+                }
+                
+                if (db.waAnnouncementTarget && waSocket) {
+                    const senderJid = msg.key.remoteJid;
+                    const senderNum = senderJid ? senderJid.split('@')[0] : 'Tidak diketahui';
+                    const senderName = msg.pushName || 'Pelanggan';
+                    
+                    const caption = `🤫 *ANTI VIEW ONCE DETECTED*\n👤 Dari: ${senderName} (${senderNum})\n\nPelanggan mengirim pesan sekali lihat, ini adalah salinannya.`;
+                    
+                    if (messageType === 'imageMessage') {
+                        await waSocket.sendMessage(db.waAnnouncementTarget, { image: buffer, caption: caption });
+                        try {
+                            for (const ownerId of db.owners) {
+                                await bot.telegram.sendPhoto(ownerId, { source: buffer }, { caption: caption });
+                            }
+                        } catch(e) {}
+                    } else if (messageType === 'videoMessage') {
+                        await waSocket.sendMessage(db.waAnnouncementTarget, { video: buffer, caption: caption });
+                        try {
+                            for (const ownerId of db.owners) {
+                                await bot.telegram.sendVideo(ownerId, { source: buffer }, { caption: caption });
+                            }
+                        } catch(e) {}
+                    }
+                }
+            } catch (error) {
+                console.error("Gagal memproses view once message:", error);
+            }
+        }
+
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         const lowerText = text.toLowerCase();
         
