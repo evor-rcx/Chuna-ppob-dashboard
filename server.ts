@@ -1403,6 +1403,8 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         const lowerText = text.toLowerCase();
         
+        if (!text.trim()) return;
+        
         const thankYouWords = [
             "makasih", "mksih", "makasi", "terima kasih", "terimakasih", "suwun", "hatur nuhun", "trmks", "mksi", "mks", "trimakasih", "thx", "tq", "terimakasi", "trmksi", "terima kasi", "maksi", "teq", "terima kask",
             "thanks", "thank you", "ty", "thankyou",
