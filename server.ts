@@ -4753,7 +4753,17 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                 try {
                     const result = await checkPascaBill(state.data.product.buyer_sku_code, omniFinalCustomerNo);
                     if (result.status === 'Gagal') {
-                         await ctx.reply(`❌ Pengecekan Gagal:${result.message}`, {
+                         let errMsg = result.message || "";
+                         let displayMsg = `❌ Pengecekan Gagal:\n${errMsg}`;
+                         if (errMsg.toLowerCase().includes("ip anda tidak kami kenali")) {
+                             displayMsg = `❌ Maaf Kak, pengecekan untuk pesanan Anda gagal diproses.\n\nKemungkinan ada kesalahan data atau jaringan. Silakan cek kembali, atau hubungi Chuna untuk bantuan lebih lanjut.\n\nKeterangan : Sedang ada pemeliharaan\n📦 Produk  : ${state.data.product.product_name}\n🎯 Tujuan   : ${omniFinalCustomerNo}\n\nJangan khawatir, Kakak bisa mencoba ulang kapan saja.\n\nChuna siap bantu! 😊💪`;
+                             if (waSocket && db.waAnnouncementTarget) {
+                                 const custName = ctx.from?.first_name || "Pelanggan";
+                                 const ownerMsg = `🚨 INFO PENTING DARI CHUNA! 🚨\nIP Digiflazz tidak dikenali!\nPelanggan mencoba memesan namun gagal karena error IP.\n👤 Pelanggan: ${custName} (${omniFinalCustomerNo})\n📦 Produk: ${state.data.product.product_name}\n⚠️ Error: ${errMsg}\n\nSegera cek dan update whitelist IP di dashboard Digiflazz Kakak!`;
+                                 waSocket.sendMessage(db.waAnnouncementTarget, { text: ownerMsg }).catch(()=>{});
+                             }
+                         }
+                         await ctx.reply(displayMsg, {
                              reply_markup: {
                                 keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Fitur Download" }]],
                                 resize_keyboard: true
@@ -4868,7 +4878,17 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                 try {
                     const result = await checkPascaBill(state.data.product.buyer_sku_code, finalCustomerNoVal);
                     if (result.status === 'Gagal') {
-                         await ctx.reply(`❌ Pengecekan Gagal:${result.message}`, {
+                         let errMsg = result.message || "";
+                         let displayMsg = `❌ Pengecekan Gagal:\n${errMsg}`;
+                         if (errMsg.toLowerCase().includes("ip anda tidak kami kenali")) {
+                             displayMsg = `❌ Maaf Kak, pengecekan untuk pesanan Anda gagal diproses.\n\nKemungkinan ada kesalahan data atau jaringan. Silakan cek kembali, atau hubungi Chuna untuk bantuan lebih lanjut.\n\nKeterangan : Sedang ada pemeliharaan\n📦 Produk  : ${state.data.product.product_name}\n🎯 Tujuan   : ${finalCustomerNoVal}\n\nJangan khawatir, Kakak bisa mencoba ulang kapan saja.\n\nChuna siap bantu! 😊💪`;
+                             if (waSocket && db.waAnnouncementTarget) {
+                                 const custName = ctx.from?.first_name || "Pelanggan";
+                                 const ownerMsg = `🚨 INFO PENTING DARI CHUNA! 🚨\nIP Digiflazz tidak dikenali!\nPelanggan mencoba memesan namun gagal karena error IP.\n👤 Pelanggan: ${custName} (${finalCustomerNoVal})\n📦 Produk: ${state.data.product.product_name}\n⚠️ Error: ${errMsg}\n\nSegera cek dan update whitelist IP di dashboard Digiflazz Kakak!`;
+                                 waSocket.sendMessage(db.waAnnouncementTarget, { text: ownerMsg }).catch(()=>{});
+                             }
+                         }
+                         await ctx.reply(displayMsg, {
                              reply_markup: {
                                 keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Fitur Download" }]],
                                 resize_keyboard: true
@@ -5084,7 +5104,17 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                 try {
                     const result = await checkPascaBill(product.buyer_sku_code, finalCustomerNo);
                     if (result.status === 'Gagal') {
-                         await ctx.reply(`❌ Pengecekan Gagal:${result.message}`);
+                         let errMsg = result.message || "";
+                         let displayMsg = `❌ Pengecekan Gagal:\n${errMsg}`;
+                         if (errMsg.toLowerCase().includes("ip anda tidak kami kenali")) {
+                             displayMsg = `❌ Maaf Kak, pengecekan untuk pesanan Anda gagal diproses.\n\nKemungkinan ada kesalahan data atau jaringan. Silakan cek kembali, atau hubungi Chuna untuk bantuan lebih lanjut.\n\nKeterangan : Sedang ada pemeliharaan\n📦 Produk  : ${product.product_name}\n🎯 Tujuan   : ${finalCustomerNo}\n\nJangan khawatir, Kakak bisa mencoba ulang kapan saja.\n\nChuna siap bantu! 😊💪`;
+                             if (waSocket && db.waAnnouncementTarget) {
+                                 const custName = ctx.from?.first_name || "Pelanggan";
+                                 const ownerMsg = `🚨 INFO PENTING DARI CHUNA! 🚨\nIP Digiflazz tidak dikenali!\nPelanggan mencoba memesan namun gagal karena error IP.\n👤 Pelanggan: ${custName} (${finalCustomerNo})\n📦 Produk: ${product.product_name}\n⚠️ Error: ${errMsg}\n\nSegera cek dan update whitelist IP di dashboard Digiflazz Kakak!`;
+                                 waSocket.sendMessage(db.waAnnouncementTarget, { text: ownerMsg }).catch(()=>{});
+                             }
+                         }
+                         await ctx.reply(displayMsg);
                     } else if (result.status === 'Sukses') {
                          const nama = result.customer_name || "-";
                          const tagihan = result.selling_price || 0;
