@@ -4799,10 +4799,10 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          let displayMsg = `❌ Pengecekan Gagal:\n${errMsg}`;
                          if (errMsg.toLowerCase().includes("ip anda tidak kami kenali")) {
                              displayMsg = `❌ Maaf Kak, pengecekan untuk pesanan Anda gagal diproses.\n\nKemungkinan ada kesalahan data atau jaringan. Silakan cek kembali, atau hubungi Chuna untuk bantuan lebih lanjut.\n\nKeterangan : Sedang ada pemeliharaan\n📦 Produk  : ${state.data.product.product_name}\n🎯 Tujuan   : ${omniFinalCustomerNo}\n\nJangan khawatir, Kakak bisa mencoba ulang kapan saja.\n\nChuna siap bantu! 😊💪`;
-                             if (waSocket && db.waAnnouncementTarget) {
-                                 const custName = ctx.from?.first_name || "Pelanggan";
-                                 const ownerMsg = `🚨 INFO PENTING DARI CHUNA! 🚨\nIP Digiflazz tidak dikenali!\nPelanggan mencoba memesan namun gagal karena error IP.\n👤 Pelanggan: ${custName} (${omniFinalCustomerNo})\n📦 Produk: ${state.data.product.product_name}\n⚠️ Error: ${errMsg}\n\nSegera cek dan update whitelist IP di dashboard Digiflazz Kakak!`;
-                                 waSocket.sendMessage(db.waAnnouncementTarget, { text: ownerMsg }).catch(()=>{});
+                             const custName = ctx.from?.first_name || "Pelanggan";
+                             const ownerMsg = `🚨 INFO PENTING DARI CHUNA! 🚨\nIP Digiflazz tidak dikenali!\nPelanggan mencoba memesan namun gagal karena error IP.\n👤 Pelanggan: ${custName} (${omniFinalCustomerNo})\n📦 Produk: ${state.data.product.product_name}\n⚠️ Error: ${errMsg}\n\nSegera cek dan update whitelist IP di dashboard Digiflazz Kakak!`;
+                             for (const ownerId of db.owners) {
+                                 bot.telegram.sendMessage(ownerId, ownerMsg).catch(()=>{});
                              }
                          }
                          await ctx.reply(displayMsg, {
@@ -4924,10 +4924,10 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          let displayMsg = `❌ Pengecekan Gagal:\n${errMsg}`;
                          if (errMsg.toLowerCase().includes("ip anda tidak kami kenali")) {
                              displayMsg = `❌ Maaf Kak, pengecekan untuk pesanan Anda gagal diproses.\n\nKemungkinan ada kesalahan data atau jaringan. Silakan cek kembali, atau hubungi Chuna untuk bantuan lebih lanjut.\n\nKeterangan : Sedang ada pemeliharaan\n📦 Produk  : ${state.data.product.product_name}\n🎯 Tujuan   : ${finalCustomerNoVal}\n\nJangan khawatir, Kakak bisa mencoba ulang kapan saja.\n\nChuna siap bantu! 😊💪`;
-                             if (waSocket && db.waAnnouncementTarget) {
-                                 const custName = ctx.from?.first_name || "Pelanggan";
-                                 const ownerMsg = `🚨 INFO PENTING DARI CHUNA! 🚨\nIP Digiflazz tidak dikenali!\nPelanggan mencoba memesan namun gagal karena error IP.\n👤 Pelanggan: ${custName} (${finalCustomerNoVal})\n📦 Produk: ${state.data.product.product_name}\n⚠️ Error: ${errMsg}\n\nSegera cek dan update whitelist IP di dashboard Digiflazz Kakak!`;
-                                 waSocket.sendMessage(db.waAnnouncementTarget, { text: ownerMsg }).catch(()=>{});
+                             const custName = ctx.from?.first_name || "Pelanggan";
+                             const ownerMsg = `🚨 INFO PENTING DARI CHUNA! 🚨\nIP Digiflazz tidak dikenali!\nPelanggan mencoba memesan namun gagal karena error IP.\n👤 Pelanggan: ${custName} (${finalCustomerNoVal})\n📦 Produk: ${state.data.product.product_name}\n⚠️ Error: ${errMsg}\n\nSegera cek dan update whitelist IP di dashboard Digiflazz Kakak!`;
+                             for (const ownerId of db.owners) {
+                                 bot.telegram.sendMessage(ownerId, ownerMsg).catch(()=>{});
                              }
                          }
                          await ctx.reply(displayMsg, {
@@ -5150,10 +5150,10 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          let displayMsg = `❌ Pengecekan Gagal:\n${errMsg}`;
                          if (errMsg.toLowerCase().includes("ip anda tidak kami kenali")) {
                              displayMsg = `❌ Maaf Kak, pengecekan untuk pesanan Anda gagal diproses.\n\nKemungkinan ada kesalahan data atau jaringan. Silakan cek kembali, atau hubungi Chuna untuk bantuan lebih lanjut.\n\nKeterangan : Sedang ada pemeliharaan\n📦 Produk  : ${product.product_name}\n🎯 Tujuan   : ${finalCustomerNo}\n\nJangan khawatir, Kakak bisa mencoba ulang kapan saja.\n\nChuna siap bantu! 😊💪`;
-                             if (waSocket && db.waAnnouncementTarget) {
-                                 const custName = ctx.from?.first_name || "Pelanggan";
-                                 const ownerMsg = `🚨 INFO PENTING DARI CHUNA! 🚨\nIP Digiflazz tidak dikenali!\nPelanggan mencoba memesan namun gagal karena error IP.\n👤 Pelanggan: ${custName} (${finalCustomerNo})\n📦 Produk: ${product.product_name}\n⚠️ Error: ${errMsg}\n\nSegera cek dan update whitelist IP di dashboard Digiflazz Kakak!`;
-                                 waSocket.sendMessage(db.waAnnouncementTarget, { text: ownerMsg }).catch(()=>{});
+                             const custName = ctx.from?.first_name || "Pelanggan";
+                             const ownerMsg = `🚨 INFO PENTING DARI CHUNA! 🚨\nIP Digiflazz tidak dikenali!\nPelanggan mencoba memesan namun gagal karena error IP.\n👤 Pelanggan: ${custName} (${finalCustomerNo})\n📦 Produk: ${product.product_name}\n⚠️ Error: ${errMsg}\n\nSegera cek dan update whitelist IP di dashboard Digiflazz Kakak!`;
+                             for (const ownerId of db.owners) {
+                                 bot.telegram.sendMessage(ownerId, ownerMsg).catch(()=>{});
                              }
                          }
                          await ctx.reply(displayMsg);
