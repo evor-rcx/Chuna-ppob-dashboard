@@ -92,9 +92,28 @@ export function Transaksi({ onBack }: { onBack: () => void }) {
                   ) : null}
                 </td>
                 <td className="px-6 py-4">
-                  <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase ${t.status?.includes('Sukses') ? 'bg-emerald-500/10 text-emerald-500' : t.status === 'Pending' ? 'bg-amber-500/10 text-amber-500' : 'bg-red-500/10 text-red-500'}`}>
-                    {t.status}
-                  </span>
+                  {(() => {
+                    const isUtangUnpaid = (t.method === 'utang' && !t.status?.toLowerCase().includes('lunas') && !t.isPaid) || t.status?.toLowerCase().includes('tidak lunas');
+                    const isPending = t.status?.toLowerCase() === 'pending';
+                    const isSukses = t.status?.toLowerCase().includes('sukses');
+                    
+                    let badgeColor = 'bg-red-500/10 text-red-500 border border-red-500/20';
+                    if (isPending) {
+                      badgeColor = 'bg-amber-500/10 text-amber-500 border border-amber-500/20';
+                    } else if (isSukses) {
+                      if (isUtangUnpaid) {
+                        badgeColor = 'bg-red-500/10 text-red-500 border border-red-500/20';
+                      } else {
+                        badgeColor = 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20';
+                      }
+                    }
+                    
+                    return (
+                      <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase ${badgeColor}`}>
+                        {t.status} {isUtangUnpaid && !t.status?.toLowerCase().includes('tidak lunas') ? '(TIDAK LUNAS)' : ''}
+                      </span>
+                    );
+                  })()}
                   {t.method === 'utang' && t.status === 'Sukses' && t.paidAmount > 0 && (
                     <div className="mt-1 text-[10px] text-amber-400">
                       Cicil: Rp {t.paidAmount.toLocaleString('id-ID')}
