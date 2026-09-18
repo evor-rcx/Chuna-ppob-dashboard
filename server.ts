@@ -2565,9 +2565,24 @@ app.get("/api/summary", (req, res) => {
     const productNames = Array.from(new Set(utangList.map((t: any) => t.product))).join(', ');
     
     const waDetails = await getCustomerWaDetails(member);
-    const nama = (waDetails.waProfile && waDetails.waProfile !== '-') ? waDetails.waProfile : (member.name || "Kak");
+    const namaWaProfile = (waDetails.waProfile && waDetails.waProfile !== '-') ? waDetails.waProfile : (member.name || "Kak");
+    const namaMember = member.name || "Pelanggan";
 
-    const msg = `Halo Kak/Bapak/Ibu ${nama}! Saya Chuna, asisten bot dari E4 Store. 😊\n\nMau mengingatkan dengan hormat ya, Kak. Tagihan untuk pembelian ${productNames} sejak tanggal *${tglUtangStr}* ${tunggakanText} dengan total Rp ${totalUtang.toLocaleString('id-ID')}.\n\nSaat ini kami sedang agak darurat soal stok produk digital. Persediaan pulsa dan top-up kami sudah menipis, jadi banyak order dari pelanggan lain yang harus kami tunda karena kami belum bisa membeli produk baru. Padahal antrian top-up dan pascabayar dari customer lain sudah menumpuk, tapi modal untuk beli produk baru masih tertahan di tagihan Kakak untuk pembelian ${productNames} tersebut.\n\nSebagai asisten bot, saya sangat mengharapkan pengertian dari Kakak ${nama} untuk segera melunasi tagihan paling lambat 3 hari ke depan. Kalau ada kendala atau keberatan, tolong chat saya langsung ya.\n\nKalau ada keluhan, chat aja di owner saya ya, Kak, di 085169949218. Nanti beliau yang bantu handle lebih lanjut. 😊\n\nAtas kerjasama dan perhatiannya, saya ucapkan terima kasih banyak! 🙏\n\nSalam,\nChuna – Asisten Bot E4 Store`;
+    const msg = `Halo Kak ${namaWaProfile}! 😊
+Saya Chuna dari E4 Store.
+
+Pengingat tagihan:
+• Costumer : ${namaMember}
+• Produk: ${productNames}
+• Total: Rp${totalUtang.toLocaleString('id-ID')}
+• Tunggakan: ${diffDays} hari
+
+Mohon pelunasan maksimal 3 hari ke depan ya, Kak. Kami sedang butuh dana untuk stok produk.
+
+Jika ada kendala, hubungi owner: 085169949218.
+
+Terima kasih 🙏
+Chuna – E4 Store`;
     
     let sent = false;
     let debtReceiptBuffer: Buffer | null = null;
@@ -4846,22 +4861,24 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
               const daysPast = Math.max(1, Math.floor((Date.now() - earliestDate.getTime()) / (1000 * 60 * 60 * 24)));
 
               const productNames = Array.from(new Set(utangTx.map((t: any) => t.product))).join(', ');
-              const namaCust = (waDetails.waProfile && waDetails.waProfile !== '-') ? waDetails.waProfile : nama;
+              const namaWaProfile = (waDetails.waProfile && waDetails.waProfile !== '-') ? waDetails.waProfile : nama;
+              const namaMember = member ? (member.name || "-") : nama;
 
-              const reminderMsg = `Halo Kak/Bapak/Ibu ${namaCust}! Saya Chuna, asisten bot dari E4 Store. 😊
+              const reminderMsg = `Halo Kak ${namaWaProfile}! 😊
+Saya Chuna dari E4 Store.
 
-Mau mengingatkan dengan hormat ya, Kak. Tagihan untuk pembelian ${productNames} sejak tanggal *${dateStr}* sudah masuk masa tunggakan ${daysPast} hari dengan total Rp ${totalUtang.toLocaleString('id-ID')}.
+Pengingat tagihan:
+• Costumer : ${namaMember}
+• Produk: ${productNames}
+• Total: Rp${totalUtang.toLocaleString('id-ID')}
+• Tunggakan: ${daysPast} hari
 
-Saat ini kami sedang agak darurat soal stok produk digital. Persediaan pulsa dan top-up kami sudah menipis, jadi banyak order dari pelanggan lain yang harus kami tunda karena kami belum bisa membeli produk baru. Padahal antrian top-up dan pascabayar dari customer lain sudah menumpuk, tapi modal untuk beli produk baru masih tertahan di tagihan Kakak untuk pembelian ${productNames} tersebut.
+Mohon pelunasan maksimal 3 hari ke depan ya, Kak. Kami sedang butuh dana untuk stok produk.
 
-Sebagai asisten bot, saya sangat mengharapkan pengertian dari Kakak ${namaCust} untuk segera melunasi tagihan paling lambat 3 hari ke depan. Kalau ada kendala atau keberatan, tolong chat saya langsung ya.
+Jika ada kendala, hubungi owner: 085169949218.
 
-Kalau ada keluhan, chat aja di owner saya ya, Kak, di 085169949218. Nanti beliau yang bantu handle lebih lanjut. 😊
-
-Atas kerjasama dan perhatiannya, saya ucapkan terima kasih banyak! 🙏
-
-Salam,
-Chuna – Asisten Bot E4 Store`;
+Terima kasih 🙏
+Chuna – E4 Store`;
 
               const debtReceiptBuffer = await generateCanvasDebtReceipt(member, utangTx);
 
