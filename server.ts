@@ -683,6 +683,316 @@ let waStatus = "Disconnected";
 let waPairingCode = "";
 let isRequestingPairingCode = false;
 
+export async function generateCanvasDebtReceipt(member: any, utangTxs: any[]): Promise<Buffer | null> {
+    try {
+        const width = 600;
+        let memberName = member?.name || '-';
+        let waProfileName = '';
+        let waPhone = '';
+        let waPhotoUrl: string | null = null;
+        let waAvatarImg: any = null;
+
+        try {
+            const waDetails = await getCustomerWaDetails(member);
+            waPhone = waDetails.waPhone !== '-' ? waDetails.waPhone : (member?.whatsapp || '-');
+            waProfileName = waDetails.waProfile !== '-' ? waDetails.waProfile : '';
+            waPhotoUrl = waDetails.waPhotoUrl;
+        } catch (e) {}
+
+        if (waPhotoUrl) {
+            try {
+                waAvatarImg = await loadImage(waPhotoUrl).catch(() => null);
+            } catch (e) {}
+        }
+
+        // Calculate totals
+        let totalUtang = 0;
+        utangTxs.forEach((t: any) => {
+            const sisa = t.price - (t.paidAmount || 0);
+            totalUtang += sisa;
+        });
+
+        // Earliest or latest date
+        const firstTx = utangTxs[0];
+        const txDate = new Date(firstTx?.date || new Date());
+        const dateStr = txDate.toLocaleString('id-ID', {
+            timeZone: 'Asia/Makassar',
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+
+        const itemRowsCount = Math.max(1, utangTxs.length);
+        const hasWaProfile = Boolean(waProfileName && waProfileName !== '-');
+        const height = 750 + (itemRowsCount * 42) + (hasWaProfile ? 35 : 0);
+
+        const canvas = createCanvas(width, height);
+        const ctx = canvas.getContext('2d');
+
+        // Draw soft card background with rounded corners
+        const cardX = 16;
+        const cardY = 16;
+        const cardW = width - 32;
+        const cardH = height - 32;
+        const cardR = 26;
+
+        // Clip to rounded card for clean ribbon edges
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(cardX + cardR, cardY);
+        ctx.lineTo(cardX + cardW - cardR, cardY);
+        ctx.arcTo(cardX + cardW, cardY, cardX + cardW, cardY + cardR, cardR);
+        ctx.lineTo(cardX + cardW, cardY + cardH - cardR);
+        ctx.arcTo(cardX + cardW, cardY + cardH, cardX + cardW - cardR, cardY + cardH, cardR);
+        ctx.lineTo(cardX + cardR, cardY + cardH);
+        ctx.arcTo(cardX, cardY + cardH, cardX, cardY + cardH - cardR, cardR);
+        ctx.lineTo(cardX, cardY + cardR);
+        ctx.arcTo(cardX, cardY, cardX + cardR, cardY, cardR);
+        ctx.closePath();
+
+        // Card fill & subtle border
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.clip(); // clip contents inside card
+
+        // Diagonal Red Ribbon in Top Right: "BELUM LUNAS"
+        ctx.save();
+        ctx.translate(cardX + cardW - 35, cardY + 50);
+        ctx.rotate((26 * Math.PI) / 180);
+        ctx.fillStyle = '#ef4444';
+        ctx.fillRect(-120, -22, 260, 44);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '900 16px Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('BELUM LUNAS', 10, 0);
+        ctx.restore();
+
+        // Top Avatar / Icon at center
+        let y = 70;
+        const iconSize = 64;
+        const iconX = width / 2 - iconSize / 2;
+        const iconY = y;
+
+        if (waAvatarImg) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(width / 2, iconY + iconSize / 2, iconSize / 2, 0, Math.PI * 2);
+            ctx.closePath();
+            ctx.clip();
+            ctx.drawImage(waAvatarImg, iconX, iconY, iconSize, iconSize);
+            ctx.restore();
+
+            ctx.beginPath();
+            ctx.arc(width / 2, iconY + iconSize / 2, iconSize / 2, 0, Math.PI * 2);
+            ctx.strokeStyle = '#10b981';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+        } else {
+            // Receipt circle icon
+            ctx.beginPath();
+            ctx.arc(width / 2, iconY + iconSize / 2, iconSize / 2, 0, Math.PI * 2);
+            ctx.fillStyle = '#f1f5f9';
+            ctx.fill();
+            ctx.strokeStyle = '#cbd5e1';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            ctx.font = '28px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('🧾', width / 2, iconY + iconSize / 2);
+        }
+
+        y += iconSize + 30;
+
+        // Store Title: E4 STORE (Per user request: KIOS PULSA & PAYMENT diganti E4 STORE)
+        ctx.fillStyle = '#0f172a';
+        ctx.font = '900 32px Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText('E4 STORE', width / 2, y);
+
+        y += 28;
+        ctx.fillStyle = '#64748b';
+        ctx.font = '600 15px Arial, sans-serif';
+        ctx.fillText('BUKTI CATATAN TAGIHAN', width / 2, y);
+
+        y += 30;
+
+        // Helper for dashed line
+        const drawDashedDivider = (currY: number) => {
+            ctx.save();
+            ctx.beginPath();
+            ctx.setLineDash([5, 5]);
+            ctx.moveTo(cardX + 25, currY);
+            ctx.lineTo(cardX + cardW - 25, currY);
+            ctx.strokeStyle = '#cbd5e1';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            ctx.restore();
+        };
+
+        drawDashedDivider(y);
+        y += 35;
+
+        // Customer Details Section
+        const labelX = cardX + 30;
+        const valX = cardX + cardW - 30;
+
+        const drawRow = (label: string, val: string, isBoldVal = false, valColor = '#0f172a') => {
+            ctx.fillStyle = '#64748b';
+            ctx.font = '500 17px Arial, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(label, labelX, y);
+
+            ctx.fillStyle = valColor;
+            ctx.font = isBoldVal ? 'bold 18px Arial, sans-serif' : '17px Arial, sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(val, valX, y);
+            y += 34;
+        };
+
+        drawRow('Customer:', memberName, true);
+        if (hasWaProfile) {
+            drawRow('Profil WA:', waProfileName, true, '#059669');
+        }
+        let clean = waPhone.replace(/\D/g, '');
+        if (clean.startsWith('0')) clean = '62' + clean.substring(1);
+        drawRow('No. HP:', waPhone !== '-' ? (waPhone.startsWith('+') ? waPhone : `+${clean}`) : '-', false);
+        drawRow('Tanggal:', dateStr, false);
+
+        y += 5;
+        drawDashedDivider(y);
+        y += 32;
+
+        // Items Table Header
+        ctx.fillStyle = '#64748b';
+        ctx.font = 'bold 14px Arial, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('DESKRIPSI ITEM', labelX, y);
+
+        ctx.textAlign = 'right';
+        ctx.fillText('NOMINAL', valX, y);
+        y += 28;
+
+        // Items List
+        utangTxs.forEach((t: any) => {
+            const sisa = t.price - (t.paidAmount || 0);
+            ctx.fillStyle = '#1e293b';
+            ctx.font = '500 17px Arial, sans-serif';
+            ctx.textAlign = 'left';
+            let prodName = t.product || 'Produk';
+            if (prodName.length > 28) prodName = prodName.slice(0, 26) + '...';
+            ctx.fillText(prodName, labelX, y);
+
+            ctx.fillStyle = '#0f172a';
+            ctx.font = 'bold 18px Arial, sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(`Rp ${sisa.toLocaleString('id-ID')}`, valX, y);
+            y += 36;
+        });
+
+        y += 5;
+        drawDashedDivider(y);
+        y += 40;
+
+        // TOTAL UTANG
+        ctx.fillStyle = '#0f172a';
+        ctx.font = '900 20px Arial, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('TOTAL UTANG', labelX, y);
+
+        ctx.fillStyle = '#0f172a';
+        ctx.font = '900 30px Arial, sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText(`Rp ${totalUtang.toLocaleString('id-ID')}`, valX, y);
+
+        y += 18;
+        // Solid black line below total
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(labelX, y);
+        ctx.lineTo(valX, y);
+        ctx.strokeStyle = '#0f172a';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+        ctx.restore();
+
+        y += 35;
+
+        // Note Box: Tolong segera diselesaikan ya kak, terima kasih 🙏
+        const boxX = labelX;
+        const boxW = valX - labelX;
+        const boxH = 54;
+        const boxR = 12;
+
+        ctx.beginPath();
+        ctx.moveTo(boxX + boxR, y);
+        ctx.lineTo(boxX + boxW - boxR, y);
+        ctx.arcTo(boxX + boxW, y, boxX + boxW, y + boxR, boxR);
+        ctx.lineTo(boxX + boxW, y + boxH - boxR);
+        ctx.arcTo(boxX + boxW, y + boxH, boxX + boxW - boxR, y + boxH, boxR);
+        ctx.lineTo(boxX + boxR, y + boxH);
+        ctx.arcTo(boxX, y + boxH, boxX, y + boxH - boxR, boxR);
+        ctx.lineTo(boxX, y + boxR);
+        ctx.arcTo(boxX, y, boxX + boxR, y, boxR);
+        ctx.closePath();
+
+        ctx.fillStyle = '#f8fafc';
+        ctx.fill();
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+
+        ctx.fillStyle = '#475569';
+        ctx.font = 'italic 16px Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('Tolong segera diselesaikan ya kak, terima kasih 🙏', width / 2, y + boxH / 2);
+
+        y += boxH + 35;
+
+        // Decorative Barcode
+        ctx.save();
+        const barcodeW = 260;
+        const barcodeH = 34;
+        const bcStartX = width / 2 - barcodeW / 2;
+        const barWidths = [10, 4, 12, 4, 8, 4, 14, 6, 10, 4, 14, 4, 8, 6, 12, 4, 14, 4, 10, 4, 12];
+        let currBcX = bcStartX;
+        ctx.fillStyle = '#475569';
+        barWidths.forEach((w) => {
+            ctx.fillRect(currBcX, y, w, barcodeH);
+            currBcX += w + 4;
+        });
+        ctx.restore();
+
+        y += barcodeH + 20;
+
+        // Receipt reference text
+        const safeName = memberName.replace(/\s+/g, '').toUpperCase().slice(0, 10);
+        const refCode = `REC-${txDate.getFullYear()}${(txDate.getMonth() + 1).toString().padStart(2, '0')}${txDate.getDate().toString().padStart(2, '0')}-${safeName}`;
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '14px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(refCode, width / 2, y);
+
+        ctx.restore(); // restore clipping
+
+        return canvas.toBuffer('image/png');
+    } catch (e: any) {
+        console.error("generateCanvasDebtReceipt error:", e);
+        return null;
+    }
+}
+
 
 let digiflazzUsername = db.digiflazzUsername || "";
 let digiflazzApiKey = db.digiflazzApiKey || "";
@@ -2232,31 +2542,55 @@ app.get("/api/summary", (req, res) => {
     const member = db.members.find((m: any) => m.id === tx.memberId);
     if (!member) return false;
     
-    const nama = member.name || "Kak";
-    const product = tx.product || "Produk";
-    const priceStr = (tx.price || 0).toLocaleString('id-ID');
+    // Total all unpaid utang for this member
+    const memberUtangTxs = db.transactions.filter((t: any) => t.method === 'utang' && t.status === 'Sukses' && t.memberId === tx.memberId);
+    const utangList = memberUtangTxs.length > 0 ? memberUtangTxs : [tx];
 
-    const dUtang = new Date(tx.date || new Date());
+    let totalUtang = 0;
+    utangList.forEach((t: any) => {
+        const sisa = t.price - (t.paidAmount || 0);
+        totalUtang += sisa;
+    });
+
+    const dates = utangList.map((t: any) => new Date(t.date || Date.now()).getTime());
+    const earliestDate = new Date(Math.min(...dates));
     const months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
-    const tglUtangStr = `${dUtang.getDate()} ${months[dUtang.getMonth()]} ${dUtang.getFullYear()}`;
+    const tglUtangStr = `${earliestDate.getDate()} ${months[earliestDate.getMonth()]} ${earliestDate.getFullYear()}`;
 
     const now = new Date();
-    // Gunakan tanggal saat ini, hitung selisih hari
-    const diffTime = Math.abs(now.getTime() - dUtang.getTime());
-    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    const diffTime = Math.abs(now.getTime() - earliestDate.getTime());
+    const diffDays = Math.max(1, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
 
     const tunggakanText = `sudah masuk masa tunggakan ${diffDays} hari`;
+    const productNames = Array.from(new Set(utangList.map((t: any) => t.product))).join(', ');
+    
+    const waDetails = await getCustomerWaDetails(member);
+    const nama = (waDetails.waProfile && waDetails.waProfile !== '-') ? waDetails.waProfile : (member.name || "Kak");
 
-    const msg = `Halo Kak/Bapak/Ibu ${nama}! Saya Chuna, asisten bot dari E4 Store. 😊\n\nMau mengingatkan dengan hormat ya, Kak. Tagihan untuk pembelian ${product} sejak tanggal *${tglUtangStr}* ${tunggakanText} dengan total Rp ${priceStr}.\n\nSaat ini kami sedang agak darurat soal stok produk digital. Persediaan pulsa dan top-up kami sudah menipis, jadi banyak order dari pelanggan lain yang harus kami tunda karena kami belum bisa membeli produk baru. Padahal antrian top-up dan pascabayar dari customer lain sudah menumpuk, tapi modal untuk beli produk baru masih tertahan di tagihan Kakak untuk pembelian ${product} tersebut.\n\nSebagai asisten bot, saya sangat mengharapkan pengertian dari Kakak ${nama} untuk segera melunasi tagihan paling lambat 3 hari ke depan. Kalau ada kendala atau keberatan, tolong chat saya langsung ya.\n\nKalau ada keluhan, chat aja di owner saya ya, Kak, di 085169949218. Nanti beliau yang bantu handle lebih lanjut. 😊\n\nAtas kerjasama dan perhatiannya, saya ucapkan terima kasih banyak! 🙏\n\nSalam,\nChuna – Asisten Bot E4 Store`;
+    const msg = `Halo Kak/Bapak/Ibu ${nama}! Saya Chuna, asisten bot dari E4 Store. 😊\n\nMau mengingatkan dengan hormat ya, Kak. Tagihan untuk pembelian ${productNames} sejak tanggal *${tglUtangStr}* ${tunggakanText} dengan total Rp ${totalUtang.toLocaleString('id-ID')}.\n\nSaat ini kami sedang agak darurat soal stok produk digital. Persediaan pulsa dan top-up kami sudah menipis, jadi banyak order dari pelanggan lain yang harus kami tunda karena kami belum bisa membeli produk baru. Padahal antrian top-up dan pascabayar dari customer lain sudah menumpuk, tapi modal untuk beli produk baru masih tertahan di tagihan Kakak untuk pembelian ${productNames} tersebut.\n\nSebagai asisten bot, saya sangat mengharapkan pengertian dari Kakak ${nama} untuk segera melunasi tagihan paling lambat 3 hari ke depan. Kalau ada kendala atau keberatan, tolong chat saya langsung ya.\n\nKalau ada keluhan, chat aja di owner saya ya, Kak, di 085169949218. Nanti beliau yang bantu handle lebih lanjut. 😊\n\nAtas kerjasama dan perhatiannya, saya ucapkan terima kasih banyak! 🙏\n\nSalam,\nChuna – Asisten Bot E4 Store`;
     
     let sent = false;
-    
-    if (member.whatsapp && waSocket) {
-      let cleanWa = member.whatsapp.replace(/\D/g, '');
+    let debtReceiptBuffer: Buffer | null = null;
+    try {
+        debtReceiptBuffer = await generateCanvasDebtReceipt(member, utangList);
+    } catch (e) {}
+
+    let rawWa = member.whatsapp || (waDetails.waPhone !== '-' ? waDetails.waPhone : '');
+    if (rawWa && waSocket) {
+      let cleanWa = rawWa.replace(/\D/g, '');
       if (cleanWa.startsWith('0')) cleanWa = '62' + cleanWa.substring(1);
       const jid = `${cleanWa}@s.whatsapp.net`;
       try {
-        await waSocket.sendMessage(jid, { text: msg });
+        await waSocket.presenceSubscribe(jid);
+        await waSocket.sendPresenceUpdate("composing", jid);
+        await new Promise(r => setTimeout(r, 1200));
+        await waSocket.sendPresenceUpdate("paused", jid);
+
+        if (debtReceiptBuffer) {
+          await waSocket.sendMessage(jid, { image: debtReceiptBuffer, caption: msg });
+        } else {
+          await waSocket.sendMessage(jid, { text: msg });
+        }
         sent = true;
       } catch (e) {
         console.error("Gagal mengirim WA reminder", e);
@@ -2265,7 +2599,11 @@ app.get("/api/summary", (req, res) => {
     
     if (!sent && member.telegram && bot) {
       try {
-         await bot.telegram.sendMessage(member.telegram, msg);
+         if (debtReceiptBuffer) {
+           await bot.telegram.sendPhoto(member.telegram, { source: debtReceiptBuffer }, { caption: msg, parse_mode: 'Markdown' });
+         } else {
+           await bot.telegram.sendMessage(member.telegram, msg);
+         }
          sent = true;
       } catch (e) {
          console.error("Gagal mengirim TG reminder", e);
@@ -3150,6 +3488,10 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca") {
                 let waMsgKey: any | undefined;
                 let waJid: string | undefined;
 
+                const waDetails = await getCustomerWaDetails(member, ctx.from?.id);
+                const waProfileName = (waDetails && waDetails.waProfile && waDetails.waProfile !== '-') ? waDetails.waProfile : (member.name || '');
+                const greetingWaName = waProfileName ? ` ${waProfileName}` : '';
+
                 if (status === 'Pending') {
                     msg = `⏳ Hai Kak!
 
@@ -3271,8 +3613,9 @@ Coba lihat angka: *${product.product_name}* saat ini mungkin sudah naik, melebih
                     tgMsgId = tgMsg.message_id;
                 }
                 
-                if (msg && waSocket && member.whatsapp) {
-                    let cleanWa = member.whatsapp.replace(/\D/g, "");
+                let custWa = member.whatsapp || (ctx.from?.id ? (registeredUsers[ctx.from?.id]?.wa || registeredUsers[Number(ctx.from?.id)]?.wa) : '') || '';
+                if (waSocket && custWa) {
+                    let cleanWa = custWa.replace(/\D/g, "");
                     if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
                     const jid = cleanWa + "@s.whatsapp.net";
                     waJid = jid;
@@ -3282,7 +3625,17 @@ Coba lihat angka: *${product.product_name}* saat ini mungkin sudah naik, melebih
                         await new Promise(r => setTimeout(r, 1200));
                         await waSocket.sendPresenceUpdate('paused', jid);
                         let waMsg;
-                        if (typeof notaBuffer !== 'undefined' && notaBuffer) {
+                        if (status === 'Pending') {
+                            const waPendingMsg = `⏳ Hai Kak${greetingWaName}!
+
+Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa saat, nanti akan kami kabari setelah selesai.
+
+📦 Produk : ${product.product_name}
+🎯 Tujuan : ${targetDisplay} (${member.name || "-"})
+
+Chuna menunggu kabar baik dari Kakak! 😊`;
+                            waMsg = await waSocket.sendMessage(jid, { text: waPendingMsg });
+                        } else if (typeof notaBuffer !== 'undefined' && notaBuffer) {
                             waMsg = await waSocket.sendMessage(jid, { image: notaBuffer, caption: msg });
                         } else {
                             waMsg = await waSocket.sendMessage(jid, { text: msg });
@@ -3440,6 +3793,10 @@ async function processPascaPayment(ctx: any, ref_id: string, method: string, sta
                 let waMsgKey: any | undefined;
                 let waJid: string | undefined;
 
+                const waDetails = await getCustomerWaDetails(member, ctx.from?.id);
+                const waProfileName = (waDetails && waDetails.waProfile && waDetails.waProfile !== '-') ? waDetails.waProfile : (member.name || '');
+                const greetingWaName = waProfileName ? ` ${waProfileName}` : '';
+
                 if (status === 'Pending') {
                     msg = `⏳ Hai Kak!
 
@@ -3560,8 +3917,9 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
                     tgMsgId = tgMsg.message_id;
                 }
 
-                if (msg && waSocket && member.whatsapp) {
-                    let cleanWa = member.whatsapp.replace(/\D/g, "");
+                let custWa = member.whatsapp || (ctx.from?.id ? (registeredUsers[ctx.from?.id]?.wa || registeredUsers[Number(ctx.from?.id)]?.wa) : '') || '';
+                if (waSocket && custWa) {
+                    let cleanWa = custWa.replace(/\D/g, "");
                     if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
                     const jid = cleanWa + "@s.whatsapp.net";
                     waJid = jid;
@@ -3571,7 +3929,17 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
                         await new Promise(r => setTimeout(r, 1200));
                         await waSocket.sendPresenceUpdate('paused', jid);
                         let waMsg;
-                        if (typeof notaBuffer !== 'undefined' && notaBuffer) {
+                        if (status === 'Pending') {
+                            const waPendingMsg = `⏳ Hai Kak${greetingWaName}!
+
+Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa saat, nanti akan kami kabari setelah selesai.
+
+📦 Tagihan : ${stateData.product.product_name}
+🎯 Tujuan : ${displayCustomerNo} (${payJson.data?.customer_name || checkResult?.customer_name || "-"})
+
+Chuna menunggu kabar baik dari Kakak! 😊`;
+                            waMsg = await waSocket.sendMessage(jid, { text: waPendingMsg });
+                        } else if (typeof notaBuffer !== 'undefined' && notaBuffer) {
                             waMsg = await waSocket.sendMessage(jid, { image: notaBuffer, caption: msg });
                         } else {
                             waMsg = await waSocket.sendMessage(jid, { text: msg });
@@ -4436,11 +4804,108 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
               parse_mode: 'Markdown',
               reply_markup: {
                   inline_keyboard: [
+                      [{ text: "🔔 Kirim Pengingat (WA)", callback_data: `ingatkan_utang_${memberId}` }],
                       [{ text: "✅ Bayar", callback_data: `bayar_utang_${memberId}` }],
                       [{ text: "❌ Tidak", callback_data: `batal_utang` }]
                   ]
               }
           });
+      });
+
+      bot.action(/^ingatkan_utang_(.+)$/, async (ctx) => {
+          if (!db.owners.includes(ctx.from?.id)) return;
+          const memberId = ctx.match[1];
+          const member = members.find(m => m.id === memberId);
+          const nama = member ? (member.name || "-") : memberId;
+
+          const utangTx = transactions.filter((t: any) => t.method === 'utang' && t.status === 'Sukses' && t.memberId === memberId);
+          if (utangTx.length === 0) {
+              return ctx.reply(`✨ Utang ${nama} sudah lunas semua! 🎉`);
+          }
+
+          const waDetails = await getCustomerWaDetails(member);
+          let rawWa = member?.whatsapp || (waDetails.waPhone !== '-' ? waDetails.waPhone : '');
+          if (!rawWa) {
+              return ctx.reply(`❌ Pelanggan ${nama} belum memiliki nomor WhatsApp terdaftar di sistem!`);
+          }
+
+          await ctx.answerCbQuery("Sedang membuat nota dan mengirim pengingat ke WhatsApp...");
+          const waitMsg = await ctx.reply(`⏳ Sedang menyiapkan nota tagihan dan mengirimkan pengingat ke WhatsApp ${nama} (${rawWa})...`);
+
+          try {
+              let totalUtang = 0;
+              utangTx.forEach((t: any) => {
+                  const sisa = t.price - (t.paidAmount || 0);
+                  totalUtang += sisa;
+              });
+
+              const dates = utangTx.map((t: any) => new Date(t.date || Date.now()).getTime());
+              const earliestDate = new Date(Math.min(...dates));
+              const months = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+              const dateStr = `${earliestDate.getDate()} ${months[earliestDate.getMonth()]} ${earliestDate.getFullYear()}`;
+              const daysPast = Math.max(1, Math.floor((Date.now() - earliestDate.getTime()) / (1000 * 60 * 60 * 24)));
+
+              const productNames = Array.from(new Set(utangTx.map((t: any) => t.product))).join(', ');
+              const namaCust = (waDetails.waProfile && waDetails.waProfile !== '-') ? waDetails.waProfile : nama;
+
+              const reminderMsg = `Halo Kak/Bapak/Ibu ${namaCust}! Saya Chuna, asisten bot dari E4 Store. 😊
+
+Mau mengingatkan dengan hormat ya, Kak. Tagihan untuk pembelian ${productNames} sejak tanggal *${dateStr}* sudah masuk masa tunggakan ${daysPast} hari dengan total Rp ${totalUtang.toLocaleString('id-ID')}.
+
+Saat ini kami sedang agak darurat soal stok produk digital. Persediaan pulsa dan top-up kami sudah menipis, jadi banyak order dari pelanggan lain yang harus kami tunda karena kami belum bisa membeli produk baru. Padahal antrian top-up dan pascabayar dari customer lain sudah menumpuk, tapi modal untuk beli produk baru masih tertahan di tagihan Kakak untuk pembelian ${productNames} tersebut.
+
+Sebagai asisten bot, saya sangat mengharapkan pengertian dari Kakak ${namaCust} untuk segera melunasi tagihan paling lambat 3 hari ke depan. Kalau ada kendala atau keberatan, tolong chat saya langsung ya.
+
+Kalau ada keluhan, chat aja di owner saya ya, Kak, di 085169949218. Nanti beliau yang bantu handle lebih lanjut. 😊
+
+Atas kerjasama dan perhatiannya, saya ucapkan terima kasih banyak! 🙏
+
+Salam,
+Chuna – Asisten Bot E4 Store`;
+
+              const debtReceiptBuffer = await generateCanvasDebtReceipt(member, utangTx);
+
+              let cleanWa = rawWa.replace(/\D/g, "");
+              if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
+              const jid = `${cleanWa}@s.whatsapp.net`;
+
+              if (!waSocket) {
+                  return ctx.reply("⚠️ Bot WhatsApp belum terhubung / offline! Silakan scan QR code WhatsApp terlebih dahulu di web dashboard.");
+              }
+
+              await waSocket.presenceSubscribe(jid);
+              await waSocket.sendPresenceUpdate("composing", jid);
+              await new Promise(r => setTimeout(r, 1200));
+              await waSocket.sendPresenceUpdate("paused", jid);
+
+              if (debtReceiptBuffer) {
+                  await waSocket.sendMessage(jid, { image: debtReceiptBuffer, caption: reminderMsg });
+              } else {
+                  await waSocket.sendMessage(jid, { text: reminderMsg });
+              }
+
+              // Update last reminder timestamp
+              utangTx.forEach((t: any) => {
+                  t.lastReminderSentAt = new Date().toISOString();
+              });
+              writeDB(db);
+
+              try {
+                  await ctx.deleteMessage(waitMsg.message_id);
+              } catch (e) {}
+
+              if (debtReceiptBuffer) {
+                  await ctx.replyWithPhoto({ source: debtReceiptBuffer }, {
+                      caption: `🔔 *Pengingat Utang Berhasil Dikirim ke WhatsApp!*\n\n👤 Pelanggan: *${nama}*\n📱 No. WhatsApp: \`+${cleanWa}\`\n💰 Total Utang: *Rp ${totalUtang.toLocaleString('id-ID')}*\n📦 Produk: ${productNames}\n📅 Masa Tunggakan: ${daysPast} hari\n\n_Pesan pengingat dan gambar nota tagihan telah dikirimkan ke WhatsApp pelanggan._`,
+                      parse_mode: 'Markdown'
+                  });
+              } else {
+                  await ctx.reply(`✅ Pesan pengingat utang telah berhasil dikirim ke WhatsApp ${nama} (+${cleanWa})!`);
+              }
+          } catch (err: any) {
+              console.error("Gagal mengirim pengingat utang via WA:", err);
+              ctx.reply(`❌ Gagal mengirim pengingat utang ke WhatsApp: ${err.message || err}`);
+          }
       });
 
       bot.action(/^bayar_utang_(.+)$/, async (ctx) => {
