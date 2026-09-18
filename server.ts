@@ -6353,6 +6353,75 @@ Dengan senang hati kami informasikan bahwa pembayaran utang kakak telah kami ter
                 
                 delete userStates[userId];
                 db.members = members; db.registeredUsers = registeredUsers; writeDB(db);
+
+                // Notifikasi ke Owner tentang pendaftaran customer baru di Telegram
+                try {
+                  const tgFirstName = ctx.from?.first_name || '';
+                  const tgLastName = ctx.from?.last_name || '';
+                  const tgProfileName = [tgFirstName, tgLastName].filter(Boolean).join(' ') || (ctx.from?.username ? `@${ctx.from.username}` : '-');
+                  const tgUsername = ctx.from?.username ? `@${ctx.from.username}` : '-';
+
+                  let tgProfilePhotoFileId: string | null = null;
+                  try {
+                    const photos = await ctx.telegram.getUserProfilePhotos(userId, 0, 1);
+                    if (photos && photos.total_count > 0 && photos.photos.length > 0 && photos.photos[0].length > 0) {
+                      const sizeArr = photos.photos[0];
+                      tgProfilePhotoFileId = sizeArr[sizeArr.length - 1].file_id;
+                    }
+                  } catch (photoErr) {
+                    console.log("Could not get Telegram profile photo for user", userId, photoErr);
+                  }
+
+                  let fallbackWaPhoto: string | null = null;
+                  if (!tgProfilePhotoFileId && waSocket) {
+                    try {
+                      const waJid = `${cleanUserWa}@s.whatsapp.net`;
+                      fallbackWaPhoto = await waSocket.profilePictureUrl(waJid, 'image').catch(() => null);
+                    } catch (e) {}
+                  }
+
+                  const photoToSend = tgProfilePhotoFileId || fallbackWaPhoto;
+                  const regOwnerMsg = `🎉 *CUSTOMER BARU MENDAFTAR!* 🎉
+
+Halo Bos, ada customer baru yang baru saja mendaftar di Telegram E4 Store:
+
+👤 *Nama User*: ${state.data.username}
+📱 *Nomor WhatsApp*: +${cleanUserWa} (${state.data.wa})
+📧 *Gmail yang Diisi*: ${state.data.gmail || '-'}
+💬 *Nama Profile Telegram*: ${tgProfileName}
+🆔 *ID Telegram*: \`${userId}\` (${tgUsername})
+📅 *Waktu*: ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Makassar' })} WITA
+
+_Data member telah berhasil tersimpan dan akun otomatis aktif._`;
+
+                  if (bot && db.owners && db.owners.length > 0) {
+                    for (const ownerId of db.owners) {
+                      try {
+                        if (photoToSend) {
+                          await bot.telegram.sendPhoto(ownerId, photoToSend, {
+                            caption: regOwnerMsg,
+                            parse_mode: 'Markdown'
+                          }).catch(async () => {
+                            await bot.telegram.sendPhoto(ownerId, photoToSend, { caption: regOwnerMsg }).catch(async () => {
+                              await bot.telegram.sendMessage(ownerId, regOwnerMsg).catch(() => {});
+                            });
+                          });
+                        } else {
+                          await bot.telegram.sendMessage(ownerId, regOwnerMsg, {
+                            parse_mode: 'Markdown'
+                          }).catch(async () => {
+                            await bot.telegram.sendMessage(ownerId, regOwnerMsg).catch(() => {});
+                          });
+                        }
+                      } catch (ownerErr) {
+                        console.error("Gagal mengirim notifikasi pendaftaran ke owner:", ownerId, ownerErr);
+                      }
+                    }
+                  }
+                } catch (notifErr) {
+                  console.error("Error saat memproses notifikasi owner pendaftaran:", notifErr);
+                }
+
                 await ctx.reply(`Yeayyy! Selamat datang di keluarga E4 Store kak ${state.data.username}! 🥳Sekarang kakak udah bisa nikmatin semua fitur keren dari Chuna.Ketik /menu buat mulai ya kak!`, {
                   reply_markup: {
                     keyboard: [
