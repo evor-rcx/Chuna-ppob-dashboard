@@ -31,7 +31,7 @@ export const getHolidayInfo = (currentDate: Date) => {
       allHolidays.push({
         name: c.name,
         date: new Date(year, c.month, c.date),
-        type: 'custom'
+        type: 'observance' as any
       });
     });
   });

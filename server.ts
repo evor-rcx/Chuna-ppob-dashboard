@@ -100,7 +100,7 @@ function getCalendarInfo(date: Date) {
             allHolidays.push({
                 name: c.name,
                 date: new Date(year, c.month, c.date),
-                type: 'custom'
+                type: 'observance' as any
             });
         });
     });
@@ -547,6 +547,31 @@ if (!db.physicalProducts || db.physicalProducts.length === 0) db.physicalProduct
     { id: '3', name: 'Cemilan', price: 2000, stock: 100 }
 ];
 if (!db.physicalTransactions) db.physicalTransactions = [];
+if (!db.waProfiles) db.waProfiles = {};
+
+function getCustomerWaDetails(member: any, telegramUserId?: any) {
+    let rawWa = member?.whatsapp || (telegramUserId ? (registeredUsers[telegramUserId]?.wa || registeredUsers[Number(telegramUserId)]?.wa) : '') || '';
+    let waPhone = rawWa || '-';
+    let waProfile = '-';
+
+    if (rawWa) {
+        let clean = rawWa.replace(/\D/g, "");
+        if (clean.startsWith("0")) clean = "62" + clean.substring(1);
+
+        if (member?.waProfileName) {
+            waProfile = member.waProfileName;
+        } else if (db.waProfiles && db.waProfiles[clean]) {
+            waProfile = db.waProfiles[clean];
+        } else if (db.waProfiles && db.waProfiles[rawWa]) {
+            waProfile = db.waProfiles[rawWa];
+        }
+    }
+
+    return {
+        waPhone: waPhone || '-',
+        waProfile: waProfile || '-'
+    };
+}
 
 
 
@@ -1332,10 +1357,33 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
     waSocket.ev.on("contacts.upsert", (contacts) => {
       let changed = false;
       if (!db.waContacts) db.waContacts = [];
+      if (!db.waProfiles) db.waProfiles = {};
       for (const contact of contacts) {
           if (contact.id && contact.id.endsWith('@s.whatsapp.net')) {
               if (!db.waContacts.includes(contact.id)) {
                   db.waContacts.push(contact.id);
+                  changed = true;
+              }
+              const pName = (contact as any).notify || (contact as any).name || (contact as any).verifiedName;
+              const phone = contact.id.split('@')[0];
+              if (pName && db.waProfiles[phone] !== pName) {
+                  db.waProfiles[phone] = pName;
+                  changed = true;
+              }
+          }
+      }
+      if (changed) writeDB(db);
+    });
+
+    waSocket.ev.on("contacts.update", (contacts) => {
+      let changed = false;
+      if (!db.waProfiles) db.waProfiles = {};
+      for (const contact of contacts) {
+          if (contact.id && contact.id.endsWith('@s.whatsapp.net')) {
+              const pName = (contact as any).notify || (contact as any).name || (contact as any).verifiedName;
+              const phone = contact.id.split('@')[0];
+              if (pName && db.waProfiles[phone] !== pName) {
+                  db.waProfiles[phone] = pName;
                   changed = true;
               }
           }
@@ -1343,14 +1391,20 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
       if (changed) writeDB(db);
     });
     
-    
     waSocket.ev.on("messaging-history.set", (history) => {
       let changed = false;
       if (!db.waContacts) db.waContacts = [];
+      if (!db.waProfiles) db.waProfiles = {};
       for (const contact of history.contacts || []) {
           if (contact.id && contact.id.endsWith('@s.whatsapp.net')) {
               if (!db.waContacts.includes(contact.id)) {
                   db.waContacts.push(contact.id);
+                  changed = true;
+              }
+              const pName = (contact as any).notify || (contact as any).name || (contact as any).verifiedName;
+              const phone = contact.id.split('@')[0];
+              if (pName && db.waProfiles[phone] !== pName) {
+                  db.waProfiles[phone] = pName;
                   changed = true;
               }
           }
@@ -1399,6 +1453,17 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
     const repliedGeneral = new Set<string>();
     waSocket.ev.on("messages.upsert", async (m) => {
       const msg = m.messages[0];
+      if (msg && msg.pushName) {
+        const senderJid = msg.key?.participant || msg.key?.remoteJid || '';
+        if (senderJid.endsWith('@s.whatsapp.net')) {
+          const phone = senderJid.split('@')[0];
+          if (!db.waProfiles) db.waProfiles = {};
+          if (db.waProfiles[phone] !== msg.pushName) {
+            db.waProfiles[phone] = msg.pushName;
+            writeDB(db);
+          }
+        }
+      }
       if (!msg.key.fromMe && m.type === "notify" && msg.message) {
         // Anti View Once Logic
         const isViewOnce = msg.message?.viewOnceMessage || msg.message?.viewOnceMessageV2 || msg.message?.viewOnceMessageV2Extension;
@@ -2117,7 +2182,7 @@ app.get("/api/summary", (req, res) => {
 
     if (sent) {
        tx.lastReminderSentAt = new Date().toISOString();
-       saveDb();
+       writeDB(db);
        res.json({ success: true, message: "Pengingat berhasil dikirim ke pelanggan!" });
     } else {
        res.status(500).json({ error: "Gagal mengirim pengingat, pastikan kontak pelanggan terhubung ke bot WA/TG." });
@@ -2156,7 +2221,7 @@ app.get("/api/summary", (req, res) => {
         }
     }
     if (updated) {
-        saveDb();
+        writeDB(db);
     }
   }
 
@@ -3056,10 +3121,16 @@ ${isIpError ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Tenang 
 Chuna siap bantu! 😊💪`;
 
                     if (isIpError) {
+                        const tgName = ctx.from?.first_name || "Pelanggan";
+                        const regName = member?.name || registeredUsers[ctx.from?.id]?.username || "-";
+                        const waInfo = getCustomerWaDetails(member, ctx.from?.id);
                         const ownerIpMsg = `🚨 *INFO PENTING DARI CHUNA!* 🚨
 IP Digiflazz tidak dikenali!
 Pelanggan mencoba memesan namun gagal karena error IP.
-👤 *Pelanggan*: ${member.name || "-"} (${targetDisplay})
+👤 *Pelanggan*: ${tgName} (${targetDisplay})
+🏷️ *Nama Terdaftar*: ${regName}
+📱 *No. WhatsApp*: ${waInfo.waPhone}
+💬 *Profil WhatsApp*: ${waInfo.waProfile}
 📦 *Produk*: ${product.product_name}
 ⚠️ *Error*: ${payJson.data.message}
 
@@ -3332,10 +3403,16 @@ ${isIpError ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Tenang 
 Chuna siap bantu! 😊💪`;
 
                     if (isIpError) {
+                        const tgName = ctx.from?.first_name || "Pelanggan";
+                        const regName = member?.name || registeredUsers[ctx.from?.id]?.username || "-";
+                        const waInfo = getCustomerWaDetails(member, ctx.from?.id);
                         const ownerIpMsg = `🚨 *INFO PENTING DARI CHUNA!* 🚨
 IP Digiflazz tidak dikenali!
 Pelanggan mencoba memesan namun gagal karena error IP.
-👤 *Pelanggan*: ${payJson.data?.customer_name || checkResult?.customer_name || "-"} (${displayCustomerNo})
+👤 *Pelanggan*: ${tgName} (${displayCustomerNo})
+🏷️ *Nama Terdaftar*: ${regName}
+📱 *No. WhatsApp*: ${waInfo.waPhone}
+💬 *Profil WhatsApp*: ${waInfo.waProfile}
 📦 *Tagihan*: ${stateData.product.product_name}
 ⚠️ *Error*: ${payJson.data.message}
 
@@ -4800,7 +4877,11 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          if (errMsg.toLowerCase().includes("ip anda tidak kami kenali")) {
                              displayMsg = `❌ Maaf Kak, pengecekan untuk pesanan Anda gagal diproses.\n\nKemungkinan ada kesalahan data atau jaringan. Silakan cek kembali, atau hubungi Chuna untuk bantuan lebih lanjut.\n\nKeterangan : Sedang ada pemeliharaan\n📦 Produk  : ${state.data.product.product_name}\n🎯 Tujuan   : ${omniFinalCustomerNo}\n\nJangan khawatir, Kakak bisa mencoba ulang kapan saja.\n\nChuna siap bantu! 😊💪`;
                              const custName = ctx.from?.first_name || "Pelanggan";
-                             const ownerMsg = `🚨 INFO PENTING DARI CHUNA! 🚨\nIP Digiflazz tidak dikenali!\nPelanggan mencoba memesan namun gagal karena error IP.\n👤 Pelanggan: ${custName} (${omniFinalCustomerNo})\n📦 Produk: ${state.data.product.product_name}\n⚠️ Error: ${errMsg}\n\nSegera cek dan update whitelist IP di dashboard Digiflazz Kakak!`;
+                             const memberId = state.data?.memberId || `MBR-${ctx.from?.id}`;
+                             const regMember = members.find((m: any) => m.id === memberId || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
+                             const regName = regMember?.name || registeredUsers[ctx.from?.id]?.username || "-";
+                             const waInfo = getCustomerWaDetails(regMember, ctx.from?.id);
+                             const ownerMsg = `🚨 INFO PENTING DARI CHUNA! 🚨\nIP Digiflazz tidak dikenali!\nPelanggan mencoba memesan namun gagal karena error IP.\n👤 Pelanggan: ${custName} (${omniFinalCustomerNo})\n🏷️ Nama Terdaftar: ${regName}\n📱 No. WhatsApp: ${waInfo.waPhone}\n💬 Profil WhatsApp: ${waInfo.waProfile}\n📦 Produk: ${state.data.product.product_name}\n⚠️ Error: ${errMsg}\n\nSegera cek dan update whitelist IP di dashboard Digiflazz Kakak!`;
                              for (const ownerId of db.owners) {
                                  bot.telegram.sendMessage(ownerId, ownerMsg).catch(()=>{});
                              }
@@ -4925,7 +5006,11 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          if (errMsg.toLowerCase().includes("ip anda tidak kami kenali")) {
                              displayMsg = `❌ Maaf Kak, pengecekan untuk pesanan Anda gagal diproses.\n\nKemungkinan ada kesalahan data atau jaringan. Silakan cek kembali, atau hubungi Chuna untuk bantuan lebih lanjut.\n\nKeterangan : Sedang ada pemeliharaan\n📦 Produk  : ${state.data.product.product_name}\n🎯 Tujuan   : ${finalCustomerNoVal}\n\nJangan khawatir, Kakak bisa mencoba ulang kapan saja.\n\nChuna siap bantu! 😊💪`;
                              const custName = ctx.from?.first_name || "Pelanggan";
-                             const ownerMsg = `🚨 INFO PENTING DARI CHUNA! 🚨\nIP Digiflazz tidak dikenali!\nPelanggan mencoba memesan namun gagal karena error IP.\n👤 Pelanggan: ${custName} (${finalCustomerNoVal})\n📦 Produk: ${state.data.product.product_name}\n⚠️ Error: ${errMsg}\n\nSegera cek dan update whitelist IP di dashboard Digiflazz Kakak!`;
+                             const memberId = state.data?.memberId || `MBR-${ctx.from?.id}`;
+                             const regMember = members.find((m: any) => m.id === memberId || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
+                             const regName = regMember?.name || registeredUsers[ctx.from?.id]?.username || "-";
+                             const waInfo = getCustomerWaDetails(regMember, ctx.from?.id);
+                             const ownerMsg = `🚨 INFO PENTING DARI CHUNA! 🚨\nIP Digiflazz tidak dikenali!\nPelanggan mencoba memesan namun gagal karena error IP.\n👤 Pelanggan: ${custName} (${finalCustomerNoVal})\n🏷️ Nama Terdaftar: ${regName}\n📱 No. WhatsApp: ${waInfo.waPhone}\n💬 Profil WhatsApp: ${waInfo.waProfile}\n📦 Produk: ${state.data.product.product_name}\n⚠️ Error: ${errMsg}\n\nSegera cek dan update whitelist IP di dashboard Digiflazz Kakak!`;
                              for (const ownerId of db.owners) {
                                  bot.telegram.sendMessage(ownerId, ownerMsg).catch(()=>{});
                              }
@@ -5151,7 +5236,11 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          if (errMsg.toLowerCase().includes("ip anda tidak kami kenali")) {
                              displayMsg = `❌ Maaf Kak, pengecekan untuk pesanan Anda gagal diproses.\n\nKemungkinan ada kesalahan data atau jaringan. Silakan cek kembali, atau hubungi Chuna untuk bantuan lebih lanjut.\n\nKeterangan : Sedang ada pemeliharaan\n📦 Produk  : ${product.product_name}\n🎯 Tujuan   : ${finalCustomerNo}\n\nJangan khawatir, Kakak bisa mencoba ulang kapan saja.\n\nChuna siap bantu! 😊💪`;
                              const custName = ctx.from?.first_name || "Pelanggan";
-                             const ownerMsg = `🚨 INFO PENTING DARI CHUNA! 🚨\nIP Digiflazz tidak dikenali!\nPelanggan mencoba memesan namun gagal karena error IP.\n👤 Pelanggan: ${custName} (${finalCustomerNo})\n📦 Produk: ${product.product_name}\n⚠️ Error: ${errMsg}\n\nSegera cek dan update whitelist IP di dashboard Digiflazz Kakak!`;
+                             const memberId = state.data?.memberId || `MBR-${ctx.from?.id}`;
+                             const regMember = members.find((m: any) => m.id === memberId || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
+                             const regName = regMember?.name || registeredUsers[ctx.from?.id]?.username || "-";
+                             const waInfo = getCustomerWaDetails(regMember, ctx.from?.id);
+                             const ownerMsg = `🚨 INFO PENTING DARI CHUNA! 🚨\nIP Digiflazz tidak dikenali!\nPelanggan mencoba memesan namun gagal karena error IP.\n👤 Pelanggan: ${custName} (${finalCustomerNo})\n🏷️ Nama Terdaftar: ${regName}\n📱 No. WhatsApp: ${waInfo.waPhone}\n💬 Profil WhatsApp: ${waInfo.waProfile}\n📦 Produk: ${product.product_name}\n⚠️ Error: ${errMsg}\n\nSegera cek dan update whitelist IP di dashboard Digiflazz Kakak!`;
                              for (const ownerId of db.owners) {
                                  bot.telegram.sendMessage(ownerId, ownerMsg).catch(()=>{});
                              }
