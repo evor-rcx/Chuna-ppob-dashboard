@@ -8,6 +8,20 @@ export interface ThermalZoneInfo {
   temp: number;
 }
 
+export interface StorageDevice {
+  name: string;
+  device: string;
+  mountPoint: string;
+  fsType: string;
+  totalGB: number;
+  usedGB: number;
+  freeGB: number;
+  usagePercent: number;
+  isUsb: boolean;
+  isRoot: boolean;
+  status: 'MOUNTED' | 'UNMOUNTED';
+}
+
 export interface ServerHardwareStats {
   hostType: 'armbian_stb' | 'proxmox' | 'home_server' | 'cloud_container' | 'linux_generic';
   hostName: string;
@@ -57,6 +71,10 @@ export interface ServerHardwareStats {
     freeGB: number;
     usagePercent: number;
     mountPoint: string;
+    drives: StorageDevice[];
+    usbDrives: StorageDevice[];
+    hasUsbAttached: boolean;
+    usbCount: number;
   };
   network: {
     primaryIp: string;
@@ -378,30 +396,256 @@ function getMemoryStats(): {
   };
 }
 
-// 5. Read Root Disk Storage
-function getStorageStats(): { totalGB: number; usedGB: number; freeGB: number; usagePercent: number; mountPoint: string } {
+// 5. Read Root Disk & USB Storage / Flashdisks (/proc/mounts, /proc/partitions, /sys/block)
+function getStorageStats(): {
+  totalGB: number;
+  usedGB: number;
+  freeGB: number;
+  usagePercent: number;
+  mountPoint: string;
+  drives: StorageDevice[];
+  usbDrives: StorageDevice[];
+  hasUsbAttached: boolean;
+  usbCount: number;
+} {
+  const drives: StorageDevice[] = [];
+  const mountedPoints = new Set<string>();
+  const mountedDevices = new Set<string>();
+
+  // 1. Check Root Filesystem (/)
+  let rootTotalGB = 16;
+  let rootUsedGB = 4.8;
+  let rootFreeGB = 11.2;
+  let rootUsagePercent = 30;
+
   try {
-    const statfs = (fs as any).statfsSync ? (fs as any).statfsSync('/') : null;
-    if (statfs) {
-      const bsize = statfs.bsize || 4096;
-      const blocks = statfs.blocks || 0;
-      const bfree = statfs.bavail || statfs.bfree || 0;
+    if (typeof (fs as any).statfsSync === 'function') {
+      const rootStat = (fs as any).statfsSync('/');
+      if (rootStat && rootStat.blocks > 0) {
+        const bsize = rootStat.bsize || 4096;
+        const totalBytes = rootStat.blocks * bsize;
+        const freeBytes = (rootStat.bavail || rootStat.bfree || 0) * bsize;
+        const usedBytes = Math.max(0, totalBytes - freeBytes);
 
-      const totalBytes = blocks * bsize;
-      const freeBytes = bfree * bsize;
-      const usedBytes = Math.max(0, totalBytes - freeBytes);
-
-      const totalGB = Math.round((totalBytes / (1024 * 1024 * 1024)) * 10) / 10;
-      const usedGB = Math.round((usedBytes / (1024 * 1024 * 1024)) * 10) / 10;
-      const freeGB = Math.round((freeBytes / (1024 * 1024 * 1024)) * 10) / 10;
-      const usagePercent = totalGB > 0 ? Math.round((usedGB / totalGB) * 100) : 0;
-
-      return { totalGB, usedGB, freeGB, usagePercent, mountPoint: '/' };
+        rootTotalGB = Math.round((totalBytes / (1024 * 1024 * 1024)) * 10) / 10;
+        rootUsedGB = Math.round((usedBytes / (1024 * 1024 * 1024)) * 10) / 10;
+        rootFreeGB = Math.round((freeBytes / (1024 * 1024 * 1024)) * 10) / 10;
+        rootUsagePercent = rootTotalGB > 0 ? Math.round((rootUsedGB / rootTotalGB) * 100) : 0;
+      }
     }
   } catch (e) {}
 
-  // Fallback standard storage placeholder
-  return { totalGB: 16, usedGB: 4.8, freeGB: 11.2, usagePercent: 30, mountPoint: '/' };
+  const rootDevice: StorageDevice = {
+    name: 'Internal Storage (eMMC / MicroSD OS)',
+    device: '/dev/root',
+    mountPoint: '/',
+    fsType: 'ext4',
+    totalGB: rootTotalGB,
+    usedGB: rootUsedGB,
+    freeGB: rootFreeGB,
+    usagePercent: rootUsagePercent,
+    isUsb: false,
+    isRoot: true,
+    status: 'MOUNTED'
+  };
+  drives.push(rootDevice);
+  mountedPoints.add('/');
+
+  // 2. Read /proc/mounts to find mounted USB drives, flashdisks, or external HDD
+  const mountsContent = readProcFileSafe('/proc/mounts');
+  if (mountsContent) {
+    const lines = mountsContent.split('\n');
+    for (const line of lines) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length >= 3) {
+        const dev = parts[0];
+        const mnt = parts[1];
+        const fstype = parts[2];
+
+        // Ignore system virtual / pseudo filesystems
+        if (
+          mnt === '/' ||
+          mountedPoints.has(mnt) ||
+          dev === 'none' ||
+          dev === 'rootfs' ||
+          dev.startsWith('tmpfs') ||
+          dev.startsWith('overlay') ||
+          dev.startsWith('proc') ||
+          dev.startsWith('sysfs') ||
+          dev.startsWith('devpts') ||
+          dev.startsWith('cgroup') ||
+          dev.startsWith('pstore') ||
+          dev.startsWith('bpf') ||
+          fstype === 'squashfs' ||
+          fstype === 'tmpfs' ||
+          fstype === 'devtmpfs' ||
+          mnt.startsWith('/proc') ||
+          mnt.startsWith('/sys') ||
+          mnt.startsWith('/dev') ||
+          mnt.startsWith('/run/user') ||
+          mnt.startsWith('/run/lock')
+        ) {
+          continue;
+        }
+
+        const isSdOrNvme = dev.startsWith('/dev/sd') || dev.startsWith('/dev/nvme') || dev.startsWith('/dev/mmcblk');
+        const isMediaOrMnt = mnt.startsWith('/media') || mnt.startsWith('/mnt') || mnt.startsWith('/storage') || mnt.startsWith('/usb');
+
+        if (isSdOrNvme || isMediaOrMnt) {
+          try {
+            if (typeof (fs as any).statfsSync === 'function') {
+              const stat = (fs as any).statfsSync(mnt);
+              if (stat && stat.blocks > 0) {
+                const bsize = stat.bsize || 4096;
+                const totalBytes = stat.blocks * bsize;
+                const freeBytes = (stat.bavail || stat.bfree || 0) * bsize;
+                const usedBytes = Math.max(0, totalBytes - freeBytes);
+
+                const totalGB = Math.round((totalBytes / (1024 * 1024 * 1024)) * 10) / 10;
+                const usedGB = Math.round((usedBytes / (1024 * 1024 * 1024)) * 10) / 10;
+                const freeGB = Math.round((freeBytes / (1024 * 1024 * 1024)) * 10) / 10;
+                const usagePercent = totalGB > 0 ? Math.round((usedGB / totalGB) * 100) : 0;
+
+                // Identify if USB:
+                // On ARM STB, /dev/sd* is USB. Also check /sys/block link for usb.
+                let isUsb = dev.startsWith('/dev/sd') || isMediaOrMnt;
+                const devBase = path.basename(dev).replace(/[0-9]+$/, '');
+                try {
+                  const sysBlockPath = `/sys/block/${devBase}`;
+                  if (fs.existsSync(sysBlockPath)) {
+                    const link = fs.readlinkSync(sysBlockPath);
+                    if (link.includes('usb')) isUsb = true;
+                  }
+                } catch (e) {}
+
+                let name = `USB Flashdisk (${path.basename(dev)})`;
+                if (!isUsb && dev.includes('mmcblk')) {
+                  name = `MicroSD Card (${path.basename(dev)})`;
+                } else if (isMediaOrMnt) {
+                  const folder = path.basename(mnt);
+                  name = `USB Flashdisk: ${folder} (${path.basename(dev)})`;
+                }
+
+                drives.push({
+                  name,
+                  device: dev,
+                  mountPoint: mnt,
+                  fsType: fstype,
+                  totalGB,
+                  usedGB,
+                  freeGB,
+                  usagePercent,
+                  isUsb,
+                  isRoot: false,
+                  status: 'MOUNTED'
+                });
+
+                mountedPoints.add(mnt);
+                mountedDevices.add(dev);
+              }
+            }
+          } catch (e) {}
+        }
+      }
+    }
+  }
+
+  // 3. Scan /proc/partitions for attached USB flashdisks that might NOT be mounted yet
+  const partitionsContent = readProcFileSafe('/proc/partitions');
+  if (partitionsContent) {
+    const lines = partitionsContent.split('\n');
+    for (const line of lines) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length >= 4) {
+        const devName = parts[3]; // e.g. sda, sda1, sdb1
+        const blocks = parseInt(parts[2], 10) || 0;
+        const fullDev = `/dev/${devName}`;
+
+        if (/^sd[a-z][0-9]?$/.test(devName) && blocks > 2048) {
+          if (!mountedDevices.has(fullDev)) {
+            const isChildOrParentMounted = Array.from(mountedDevices).some(d => d.startsWith(fullDev) || fullDev.startsWith(d));
+            if (!isChildOrParentMounted) {
+              const approxGB = Math.round(((blocks * 1024) / (1024 * 1024 * 1024)) * 10) / 10;
+              drives.push({
+                name: `USB Flashdisk (${devName})`,
+                device: fullDev,
+                mountPoint: 'Belum di-Mount (Ketik: mount ' + fullDev + ' /media/usb)',
+                fsType: 'vfat/ntfs/exfat',
+                totalGB: approxGB,
+                usedGB: 0,
+                freeGB: approxGB,
+                usagePercent: 0,
+                isUsb: true,
+                isRoot: false,
+                status: 'UNMOUNTED'
+              });
+              mountedDevices.add(fullDev);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 4. Also scan common Armbian USB auto-mount directories (/media and /mnt)
+  const commonUsbDirs = ['/media', '/mnt'];
+  for (const cDir of commonUsbDirs) {
+    try {
+      if (fs.existsSync(cDir)) {
+        const subdirs = fs.readdirSync(cDir);
+        for (const sub of subdirs) {
+          const fullPath = path.join(cDir, sub);
+          if (!mountedPoints.has(fullPath)) {
+            try {
+              const stat = (fs as any).statfsSync(fullPath);
+              if (stat && stat.blocks > 0) {
+                const bsize = stat.bsize || 4096;
+                const totalBytes = stat.blocks * bsize;
+                const freeBytes = (stat.bavail || stat.bfree || 0) * bsize;
+                const usedBytes = Math.max(0, totalBytes - freeBytes);
+
+                const totalGB = Math.round((totalBytes / (1024 * 1024 * 1024)) * 10) / 10;
+                const usedGB = Math.round((usedBytes / (1024 * 1024 * 1024)) * 10) / 10;
+                const freeGB = Math.round((freeBytes / (1024 * 1024 * 1024)) * 10) / 10;
+                const usagePercent = totalGB > 0 ? Math.round((usedGB / totalGB) * 100) : 0;
+
+                if (Math.abs(totalGB - rootTotalGB) > 0.5) {
+                  drives.push({
+                    name: `USB Drive / Storage (${sub})`,
+                    device: `/dev/external`,
+                    mountPoint: fullPath,
+                    fsType: 'auto',
+                    totalGB,
+                    usedGB,
+                    freeGB,
+                    usagePercent,
+                    isUsb: true,
+                    isRoot: false,
+                    status: 'MOUNTED'
+                  });
+                  mountedPoints.add(fullPath);
+                }
+              }
+            } catch (e) {}
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  const usbDrives = drives.filter(d => d.isUsb);
+
+  return {
+    totalGB: rootTotalGB,
+    usedGB: rootUsedGB,
+    freeGB: rootFreeGB,
+    usagePercent: rootUsagePercent,
+    mountPoint: '/',
+    drives,
+    usbDrives,
+    hasUsbAttached: usbDrives.length > 0,
+    usbCount: usbDrives.length
+  };
 }
 
 // 6. Read Uptime from /proc/uptime

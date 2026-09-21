@@ -1,5 +1,19 @@
 import { useState, useEffect } from 'react';
-import { Cpu, Thermometer, HardDrive, Server, Activity, Clock, ShieldCheck, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Cpu, Thermometer, HardDrive, Server, Activity, Clock, ShieldCheck, RefreshCw, AlertTriangle, Usb } from 'lucide-react';
+
+export interface StorageDevice {
+  name: string;
+  device: string;
+  mountPoint: string;
+  fsType: string;
+  totalGB: number;
+  usedGB: number;
+  freeGB: number;
+  usagePercent: number;
+  isUsb: boolean;
+  isRoot: boolean;
+  status: 'MOUNTED' | 'UNMOUNTED';
+}
 
 export interface ServerHardwareStats {
   hostType: 'armbian_stb' | 'proxmox' | 'home_server' | 'cloud_container' | 'linux_generic';
@@ -50,6 +64,10 @@ export interface ServerHardwareStats {
     freeGB: number;
     usagePercent: number;
     mountPoint: string;
+    drives?: StorageDevice[];
+    usbDrives?: StorageDevice[];
+    hasUsbAttached?: boolean;
+    usbCount?: number;
   };
   network: {
     primaryIp: string;
@@ -209,6 +227,22 @@ export function ServerHardwareWidget({ compact = false, className = '' }: Server
           </div>
         </div>
 
+        {/* USB Flashdisk / Storage Status Bar in Sidebar */}
+        <div className="p-1.5 rounded-lg bg-slate-900/50 border border-slate-800 flex items-center justify-between text-[10px]">
+          <span className="flex items-center gap-1 text-slate-400">
+            <Usb size={11} className={stats.storage.hasUsbAttached ? "text-emerald-400 animate-pulse" : "text-slate-500"} />
+            USB Storage:
+          </span>
+          {stats.storage.hasUsbAttached ? (
+            <span className="font-mono font-bold text-emerald-400 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+              {stats.storage.usbCount} Terpasang ({stats.storage.usbDrives?.[0]?.totalGB} GB)
+            </span>
+          ) : (
+            <span className="font-mono text-slate-500 text-[9px]">Kosong / Tidak Ada</span>
+          )}
+        </div>
+
         {/* Footer info: Uptime & Detail Trigger */}
         <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
           <span className="flex items-center gap-1 font-mono truncate max-w-[150px]" title={`Uptime: ${stats.uptime.formatted}`}>
@@ -284,8 +318,8 @@ export function ServerHardwareWidget({ compact = false, className = '' }: Server
                 )}
               </div>
 
-              {/* Memory & Storage */}
-              <div className="grid grid-cols-2 gap-3 text-xs">
+              {/* Memory & Storage Root */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                 <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-800 space-y-2">
                   <div className="flex justify-between items-center">
                     <span className="text-[10px] text-slate-400 font-bold uppercase">Memori RAM & Swap</span>
@@ -303,7 +337,7 @@ export function ServerHardwareWidget({ compact = false, className = '' }: Server
 
                 <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-800 space-y-2">
                   <div className="flex justify-between items-center">
-                    <span className="text-[10px] text-slate-400 font-bold uppercase">Penyimpanan / (Root)</span>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase">Penyimpanan Internal (Root /)</span>
                     <span className="font-mono text-emerald-400 font-bold">{stats.storage.usagePercent}%</span>
                   </div>
                   <div className="text-sm font-bold text-white">
@@ -313,6 +347,69 @@ export function ServerHardwareWidget({ compact = false, className = '' }: Server
                     Sisa Tersedia: {stats.storage.freeGB} GB
                   </div>
                 </div>
+              </div>
+
+              {/* USB Flashdisk & External Storage Section in Modal */}
+              <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Usb size={15} className="text-emerald-400" />
+                    <span className="text-xs font-bold text-white uppercase tracking-wider">
+                      Media USB & Flashdisk Terdeteksi
+                    </span>
+                  </div>
+                  <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                    stats.storage.hasUsbAttached ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-slate-800 text-slate-400'
+                  }`}>
+                    {stats.storage.hasUsbAttached ? `${stats.storage.usbCount} USB Aktif` : 'Tidak Ada USB Terpasang'}
+                  </span>
+                </div>
+
+                {stats.storage.usbDrives && stats.storage.usbDrives.length > 0 ? (
+                  <div className="space-y-2">
+                    {stats.storage.usbDrives.map((usb, idx) => (
+                      <div key={idx} className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 text-xs space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-emerald-300 flex items-center gap-1.5">
+                            <Usb size={13} />
+                            {usb.name}
+                          </span>
+                          <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded font-bold ${
+                            usb.status === 'MOUNTED' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-amber-950 text-amber-400 border border-amber-800'
+                          }`}>
+                            {usb.status === 'MOUNTED' ? 'MOUNTED' : 'UNMOUNTED'}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
+                          <span>Device: <strong className="text-slate-200">{usb.device}</strong></span>
+                          <span>Format: <strong className="text-slate-200">{usb.fsType}</strong></span>
+                          <span>Kapasitas: <strong className="text-white">{usb.totalGB} GB</strong></span>
+                        </div>
+                        {usb.status === 'MOUNTED' ? (
+                          <>
+                            <div className="text-[10px] text-slate-400 font-mono">
+                              Mount Point: <span className="text-cyan-300">{usb.mountPoint}</span> ({usb.usedGB} GB dipakai, {usb.freeGB} GB bebas)
+                            </div>
+                            <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+                              <div className="h-full bg-emerald-500 transition-all" style={{ width: `${usb.usagePercent}%` }}></div>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="text-[10px] text-amber-300 bg-amber-950/40 p-1.5 rounded border border-amber-900/50">
+                            💡 {usb.mountPoint}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-lg bg-slate-900/50 border border-dashed border-slate-800 text-slate-400 text-xs flex flex-col gap-1">
+                    <p className="font-medium text-slate-300">Belum ada Flashdisk / USB Drive terdeteksi di port STB.</p>
+                    <p className="text-[11px] text-slate-500">
+                      Format flashdisk didukung: <strong>FAT32, NTFS, exFAT, EXT4</strong>. Saat dicolokkan ke port USB STB Armbian, partisi akan otomatis terdeteksi atau dapat di-mount ke <code>/media/usb</code> atau <code>/mnt/</code>.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* IP & Reading method */}
@@ -506,6 +603,80 @@ export function ServerHardwareWidget({ compact = false, className = '' }: Server
               {stats.uptime.formatted}
             </span>
           </div>
+        </div>
+      </div>
+
+      {/* Storage & USB Flashdisk Storage Matrix */}
+      <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Usb size={16} className={stats.storage.hasUsbAttached ? "text-emerald-400" : "text-slate-400"} />
+            <h4 className="text-sm font-bold text-white tracking-wide">
+              Media Penyimpanan & Flashdisk USB ({stats.storage.drives?.length || 1} Partisi)
+            </h4>
+          </div>
+          <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold w-fit ${
+            stats.storage.hasUsbAttached ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-slate-800 text-slate-400'
+          }`}>
+            {stats.storage.hasUsbAttached ? `USB Terpasang: ${stats.storage.usbCount} Drive` : 'Port USB: Belum Ada Flashdisk'}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {stats.storage.drives && stats.storage.drives.length > 0 ? (
+            stats.storage.drives.map((d, i) => (
+              <div 
+                key={i} 
+                className={`p-3 rounded-xl border flex flex-col justify-between space-y-2 ${
+                  d.isUsb ? 'bg-emerald-950/20 border-emerald-800/50' : 'bg-slate-900/80 border-slate-800'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="space-y-0.5 min-w-0">
+                    <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">
+                      {d.isUsb ? <Usb size={13} className="text-emerald-400 shrink-0" /> : <HardDrive size={13} className="text-cyan-400 shrink-0" />}
+                      <span className="truncate">{d.name}</span>
+                    </div>
+                    <div className="text-[10px] font-mono text-slate-400 truncate">
+                      {d.device} • {d.fsType}
+                    </div>
+                  </div>
+                  <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded font-bold shrink-0 ${
+                    d.status === 'MOUNTED' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-amber-950 text-amber-400 border border-amber-800'
+                  }`}>
+                    {d.status}
+                  </span>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex justify-between items-baseline text-[11px]">
+                    <span className="font-bold text-white font-mono">{d.totalGB} GB Total</span>
+                    {d.status === 'MOUNTED' ? (
+                      <span className="text-[10px] font-mono text-slate-400">{d.freeGB} GB Bebas ({d.usagePercent}%)</span>
+                    ) : (
+                      <span className="text-[10px] text-amber-300">Belum di-Mount</span>
+                    )}
+                  </div>
+                  {d.status === 'MOUNTED' && (
+                    <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full transition-all ${d.isUsb ? 'bg-emerald-400' : 'bg-cyan-400'}`}
+                        style={{ width: `${d.usagePercent}%` }}
+                      ></div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="text-[10px] text-slate-400 font-mono truncate pt-1 border-t border-slate-800/80">
+                  {d.status === 'MOUNTED' ? `Mount: ${d.mountPoint}` : d.mountPoint}
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-400 col-span-full">
+              Partisi root terdeteksi: {stats.storage.totalGB} GB ({stats.storage.usedGB} GB terpakai).
+            </div>
+          )}
         </div>
       </div>
 
