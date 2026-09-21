@@ -1686,6 +1686,19 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
     }
   });
 
+  app.get("/api/system/network", (req, res) => {
+    try {
+      const stats = getLiveServerHardwareStats();
+      res.json({
+        network: stats.network,
+        hostName: stats.hostName,
+        timestamp: stats.timestamp
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // Layer 1 & 2: EGIS WAF Inspector & NYXGUARD Sentry
   app.use((req, res, next) => {
     securitySuite.egisInspector(req, res, next, triggerHeliosOwnerAlert);

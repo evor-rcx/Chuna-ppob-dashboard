@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Cpu, Thermometer, HardDrive, Server, Activity, Clock, ShieldCheck, RefreshCw, AlertTriangle, Usb } from 'lucide-react';
+import { Cpu, Thermometer, HardDrive, Server, Activity, Clock, ShieldCheck, RefreshCw, AlertTriangle, Usb, ArrowDown, ArrowUp, Wifi, Globe, Network } from 'lucide-react';
 
 export interface StorageDevice {
   name: string;
@@ -13,6 +13,37 @@ export interface StorageDevice {
   isUsb: boolean;
   isRoot: boolean;
   status: 'MOUNTED' | 'UNMOUNTED';
+}
+
+export interface NetworkInterfaceDetail {
+  name: string;
+  ip: string;
+  isUp: boolean;
+  isWireless: boolean;
+  rxBytes: number;
+  txBytes: number;
+  downloadSpeedKBps: number;
+  uploadSpeedKBps: number;
+  downloadSpeedMbps: number;
+  uploadSpeedMbps: number;
+  formattedDownload: string;
+  formattedUpload: string;
+  totalRxFormatted: string;
+  totalTxFormatted: string;
+}
+
+export interface NetworkStats {
+  primaryIp: string;
+  totalDownloadSpeedKBps?: number;
+  totalUploadSpeedKBps?: number;
+  totalDownloadSpeedMbps?: number;
+  totalUploadSpeedMbps?: number;
+  formattedDownloadSpeed?: string;
+  formattedUploadSpeed?: string;
+  totalDownloadedFormatted?: string;
+  totalUploadedFormatted?: string;
+  activeInterface?: string;
+  interfaces: NetworkInterfaceDetail[];
 }
 
 export interface ServerHardwareStats {
@@ -69,10 +100,7 @@ export interface ServerHardwareStats {
     hasUsbAttached?: boolean;
     usbCount?: number;
   };
-  network: {
-    primaryIp: string;
-    interfaces: Array<{ name: string; ip: string }>;
-  };
+  network: NetworkStats;
   uptime: {
     seconds: number;
     formatted: string;
@@ -241,6 +269,24 @@ export function ServerHardwareWidget({ compact = false, className = '' }: Server
           ) : (
             <span className="font-mono text-slate-500 text-[9px]">Kosong / Tidak Ada</span>
           )}
+        </div>
+
+        {/* Network Bandwidth Speed in Sidebar */}
+        <div className="p-1.5 rounded-lg bg-slate-900/50 border border-slate-800 flex items-center justify-between text-[10px]">
+          <span className="flex items-center gap-1 text-slate-400">
+            <Network size={11} className="text-sky-400" />
+            Speed ({stats.network.activeInterface || 'eth0'}):
+          </span>
+          <div className="flex items-center gap-2 font-mono text-[9px]">
+            <span className="flex items-center text-emerald-400 font-bold" title="Kecepatan Download">
+              <ArrowDown size={10} className="mr-0.5 text-emerald-400" />
+              {stats.network.formattedDownloadSpeed || '0 KB/s'}
+            </span>
+            <span className="flex items-center text-sky-400 font-bold" title="Kecepatan Upload">
+              <ArrowUp size={10} className="mr-0.5 text-sky-400" />
+              {stats.network.formattedUploadSpeed || '0 KB/s'}
+            </span>
+          </div>
         </div>
 
         {/* Footer info: Uptime & Detail Trigger */}
@@ -412,6 +458,61 @@ export function ServerHardwareWidget({ compact = false, className = '' }: Server
                 )}
               </div>
 
+              {/* Network Speed & Bandwidth Section in Modal */}
+              <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <Network size={14} className="text-sky-400" />
+                    Kecepatan & Bandwidth Jaringan (/proc/net/dev)
+                  </span>
+                  <div className="flex items-center gap-3 font-mono text-xs">
+                    <span className="text-emerald-400 font-bold flex items-center" title="Kecepatan Download">
+                      <ArrowDown size={12} className="mr-0.5 text-emerald-400" />
+                      {stats.network.formattedDownloadSpeed || '0 KB/s'}
+                    </span>
+                    <span className="text-sky-400 font-bold flex items-center" title="Kecepatan Upload">
+                      <ArrowUp size={12} className="mr-0.5 text-sky-400" />
+                      {stats.network.formattedUploadSpeed || '0 KB/s'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-[10px] font-mono bg-slate-900/70 p-2 rounded-lg border border-slate-800">
+                  <div>
+                    <span className="text-slate-400">Total Diterima (DL): </span>
+                    <strong className="text-emerald-300">{stats.network.totalDownloadedFormatted || '0 B'}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">Total Terkirim (UL): </span>
+                    <strong className="text-sky-300">{stats.network.totalUploadedFormatted || '0 B'}</strong>
+                  </div>
+                </div>
+
+                {stats.network.interfaces && stats.network.interfaces.length > 0 && (
+                  <div className="space-y-1 pt-1">
+                    {stats.network.interfaces.map((iface, i) => (
+                      <div key={i} className="flex items-center justify-between text-[10px] font-mono px-2.5 py-1.5 rounded-lg bg-slate-900/50 border border-slate-800">
+                        <div className="flex items-center gap-1.5">
+                          {iface.isWireless ? <Wifi size={12} className="text-amber-400" /> : <Network size={12} className="text-cyan-400" />}
+                          <span className="font-bold text-white">{iface.name}</span>
+                          <span className="text-slate-400">({iface.ip})</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-emerald-400 flex items-center">
+                            <ArrowDown size={10} className="mr-0.5" />
+                            {iface.formattedDownload}
+                          </span>
+                          <span className="text-sky-400 flex items-center">
+                            <ArrowUp size={10} className="mr-0.5" />
+                            {iface.formattedUpload}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* IP & Reading method */}
               <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-[11px] font-mono text-slate-400">
                 <span>IP Host: <strong className="text-white">{stats.network.primaryIp}</strong></span>
@@ -493,8 +594,8 @@ export function ServerHardwareWidget({ compact = false, className = '' }: Server
         </div>
       </div>
 
-      {/* 4 Main Telemetry Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      {/* 5 Main Telemetry Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
         {/* Card 1: Suhu CPU & Thermal Zone */}
         <div className={`p-4 rounded-xl border flex flex-col justify-between space-y-2 ${getTempColor(tempStatus, tempVal)}`}>
           <div className="flex items-center justify-between">
@@ -573,7 +674,44 @@ export function ServerHardwareWidget({ compact = false, className = '' }: Server
           </div>
         </div>
 
-        {/* Card 4: Storage & Uptime */}
+        {/* Card 4: Kecepatan Jaringan (/proc/net/dev) */}
+        <div className="p-4 rounded-xl bg-slate-900/70 border border-slate-800 flex flex-col justify-between space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+              <Network size={16} className="text-sky-400" />
+              Jaringan ({stats.network.activeInterface || 'eth0'})
+            </span>
+            <span className="text-[10px] font-mono text-emerald-300 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800">
+              Realtime
+            </span>
+          </div>
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                <ArrowDown size={12} className="text-emerald-400 shrink-0" /> Down:
+              </span>
+              <span className="text-base font-black text-emerald-400 font-mono">
+                {stats.network.formattedDownloadSpeed || '0 KB/s'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                <ArrowUp size={12} className="text-sky-400 shrink-0" /> Up:
+              </span>
+              <span className="text-base font-black text-sky-400 font-mono">
+                {stats.network.formattedUploadSpeed || '0 KB/s'}
+              </span>
+            </div>
+          </div>
+          <div className="text-[10px] font-mono text-slate-400 border-t border-slate-800 pt-1.5 flex justify-between items-center">
+            <span>Total:</span>
+            <span className="text-slate-300 truncate font-mono">
+              ↓{stats.network.totalDownloadedFormatted || '0 B'} • ↑{stats.network.totalUploadedFormatted || '0 B'}
+            </span>
+          </div>
+        </div>
+
+        {/* Card 5: Storage & Uptime */}
         <div className="p-4 rounded-xl bg-slate-900/70 border border-slate-800 flex flex-col justify-between space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
@@ -604,6 +742,141 @@ export function ServerHardwareWidget({ compact = false, className = '' }: Server
             </span>
           </div>
         </div>
+      </div>
+
+      {/* Realtime Network Traffic & Bandwidth Matrix */}
+      <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Network size={16} className="text-sky-400" />
+            <h4 className="text-sm font-bold text-white tracking-wide">
+              Kecepatan & Lalu Lintas Jaringan Realtime (/proc/net/dev)
+            </h4>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded font-bold bg-sky-500/20 text-sky-300 border border-sky-500/30">
+              IP: {stats.network.primaryIp}
+            </span>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded font-bold bg-slate-800 text-slate-300">
+              Aktif: {stats.network.activeInterface || 'eth0'}
+            </span>
+          </div>
+        </div>
+
+        {/* Speed Meters Banner */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="p-3 rounded-xl bg-slate-900/80 border border-emerald-900/40 flex items-center justify-between">
+            <div>
+              <div className="text-[10px] text-slate-400 uppercase font-bold flex items-center gap-1">
+                <ArrowDown size={12} className="text-emerald-400" /> Download Speed
+              </div>
+              <div className="text-lg font-black text-emerald-400 font-mono mt-0.5">
+                {stats.network.formattedDownloadSpeed || '0 KB/s'}
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-[10px] font-mono text-emerald-300 font-bold">
+                {stats.network.totalDownloadSpeedMbps || 0} Mbps
+              </div>
+              <div className="text-[9px] text-slate-500 font-mono">Bandwidth Rate</div>
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl bg-slate-900/80 border border-sky-900/40 flex items-center justify-between">
+            <div>
+              <div className="text-[10px] text-slate-400 uppercase font-bold flex items-center gap-1">
+                <ArrowUp size={12} className="text-sky-400" /> Upload Speed
+              </div>
+              <div className="text-lg font-black text-sky-400 font-mono mt-0.5">
+                {stats.network.formattedUploadSpeed || '0 KB/s'}
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-[10px] font-mono text-sky-300 font-bold">
+                {stats.network.totalUploadSpeedMbps || 0} Mbps
+              </div>
+              <div className="text-[9px] text-slate-500 font-mono">Bandwidth Rate</div>
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
+            <div>
+              <div className="text-[10px] text-slate-400 uppercase font-bold">
+                Total Download (RX)
+              </div>
+              <div className="text-lg font-black text-white font-mono mt-0.5">
+                {stats.network.totalDownloadedFormatted || '0 B'}
+              </div>
+            </div>
+            <div className="text-right">
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">Sejak Boot</span>
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
+            <div>
+              <div className="text-[10px] text-slate-400 uppercase font-bold">
+                Total Upload (TX)
+              </div>
+              <div className="text-lg font-black text-white font-mono mt-0.5">
+                {stats.network.totalUploadedFormatted || '0 B'}
+              </div>
+            </div>
+            <div className="text-right">
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">Sejak Boot</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Interface List Cards */}
+        {stats.network.interfaces && stats.network.interfaces.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
+            {stats.network.interfaces.map((iface, i) => (
+              <div key={i} className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 flex flex-col justify-between space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-6 h-6 rounded-lg bg-sky-500/10 text-sky-400 flex items-center justify-center border border-sky-500/20 shrink-0">
+                      {iface.isWireless ? <Wifi size={13} /> : <Network size={13} />}
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-xs font-bold text-white block truncate">{iface.name}</span>
+                      <span className="text-[10px] font-mono text-slate-400">{iface.ip}</span>
+                    </div>
+                  </div>
+                  <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded font-bold ${
+                    iface.isUp ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-slate-800 text-slate-400'
+                  }`}>
+                    {iface.isUp ? (iface.isWireless ? 'WI-FI UP' : 'LAN UP') : 'DOWN'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 bg-slate-900/60 p-2 rounded-lg border border-slate-800/80 text-[11px] font-mono">
+                  <div>
+                    <span className="text-[9px] text-slate-500 block uppercase">Download</span>
+                    <span className="text-emerald-400 font-bold flex items-center">
+                      <ArrowDown size={10} className="mr-0.5 shrink-0" />
+                      {iface.formattedDownload}
+                    </span>
+                    <span className="text-[9px] text-slate-400 block mt-0.5">{iface.downloadSpeedMbps} Mbps</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] text-slate-500 block uppercase">Upload</span>
+                    <span className="text-sky-400 font-bold flex items-center">
+                      <ArrowUp size={10} className="mr-0.5 shrink-0" />
+                      {iface.formattedUpload}
+                    </span>
+                    <span className="text-[9px] text-slate-400 block mt-0.5">{iface.uploadSpeedMbps} Mbps</span>
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center text-[10px] font-mono text-slate-400 border-t border-slate-800/80 pt-1.5">
+                  <span>Total Diterima: {iface.totalRxFormatted}</span>
+                  <span>Terkirim: {iface.totalTxFormatted}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Storage & USB Flashdisk Storage Matrix */}

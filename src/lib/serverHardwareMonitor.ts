@@ -22,6 +22,37 @@ export interface StorageDevice {
   status: 'MOUNTED' | 'UNMOUNTED';
 }
 
+export interface NetworkInterfaceDetail {
+  name: string;
+  ip: string;
+  isUp: boolean;
+  isWireless: boolean;
+  rxBytes: number;
+  txBytes: number;
+  downloadSpeedKBps: number;
+  uploadSpeedKBps: number;
+  downloadSpeedMbps: number;
+  uploadSpeedMbps: number;
+  formattedDownload: string;
+  formattedUpload: string;
+  totalRxFormatted: string;
+  totalTxFormatted: string;
+}
+
+export interface NetworkStats {
+  primaryIp: string;
+  totalDownloadSpeedKBps: number;
+  totalUploadSpeedKBps: number;
+  totalDownloadSpeedMbps: number;
+  totalUploadSpeedMbps: number;
+  formattedDownloadSpeed: string;
+  formattedUploadSpeed: string;
+  totalDownloadedFormatted: string;
+  totalUploadedFormatted: string;
+  activeInterface: string;
+  interfaces: NetworkInterfaceDetail[];
+}
+
 export interface ServerHardwareStats {
   hostType: 'armbian_stb' | 'proxmox' | 'home_server' | 'cloud_container' | 'linux_generic';
   hostName: string;
@@ -76,10 +107,7 @@ export interface ServerHardwareStats {
     hasUsbAttached: boolean;
     usbCount: number;
   };
-  network: {
-    primaryIp: string;
-    interfaces: Array<{ name: string; ip: string }>;
-  };
+  network: NetworkStats;
   uptime: {
     seconds: number;
     formatted: string;
@@ -767,7 +795,160 @@ function detectHostEnvironment(): {
   };
 }
 
-// 8. Main Hardware Collector - Asynchronous & Lightweight
+// 8. Network Traffic and Bandwidth Speed Monitor (/proc/net/dev)
+interface NetDevSnapshot {
+  timestamp: number;
+  interfaces: Record<string, { rxBytes: number; txBytes: number }>;
+}
+
+let prevNetDevSnapshot: NetDevSnapshot | null = null;
+
+function formatNetworkBytes(bytes: number): string {
+  if (!bytes || isNaN(bytes)) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function formatNetworkSpeed(bytesPerSec: number): string {
+  if (!bytesPerSec || isNaN(bytesPerSec) || bytesPerSec <= 0) return '0 KB/s';
+  if (bytesPerSec < 1024) return `${Math.round(bytesPerSec)} B/s`;
+  if (bytesPerSec < 1024 * 1024) return `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
+  return `${(bytesPerSec / (1024 * 1024)).toFixed(2)} MB/s`;
+}
+
+function bytesToMbps(bytesPerSec: number): number {
+  if (!bytesPerSec || isNaN(bytesPerSec)) return 0;
+  return Math.round(((bytesPerSec * 8) / 1_000_000) * 100) / 100;
+}
+
+export function getNetworkTrafficStats(): NetworkStats {
+  const now = Date.now();
+  const netIfaces = os.networkInterfaces();
+
+  const ipMap: Record<string, string> = {};
+  let primaryIp = '127.0.0.1';
+
+  for (const [name, addrs] of Object.entries(netIfaces)) {
+    if (addrs) {
+      for (const a of addrs) {
+        if (a.family === 'IPv4' && !a.internal) {
+          ipMap[name] = a.address;
+          if (primaryIp === '127.0.0.1') primaryIp = a.address;
+        }
+      }
+    }
+  }
+
+  // Read /proc/net/dev
+  const netDevContent = readProcFileSafe('/proc/net/dev');
+  const currentSnapshot: Record<string, { rxBytes: number; txBytes: number }> = {};
+
+  if (netDevContent) {
+    const lines = netDevContent.split('\n');
+    for (const line of lines) {
+      if (!line.includes(':')) continue;
+      const [ifaceRaw, dataRaw] = line.split(':');
+      const iface = ifaceRaw.trim();
+      const parts = dataRaw.trim().split(/\s+/);
+      if (parts.length >= 9) {
+        const rxBytes = parseInt(parts[0], 10) || 0;
+        const txBytes = parseInt(parts[8], 10) || 0;
+        currentSnapshot[iface] = { rxBytes, txBytes };
+      }
+    }
+  }
+
+  // Calculate delta if previous snapshot exists
+  let deltaSec = 0;
+  if (prevNetDevSnapshot) {
+    deltaSec = (now - prevNetDevSnapshot.timestamp) / 1000;
+  }
+  const isDeltaValid = deltaSec >= 0.3 && deltaSec <= 30 && prevNetDevSnapshot !== null;
+
+  const interfaceDetails: NetworkInterfaceDetail[] = [];
+  let totalRxBytesPerSec = 0;
+  let totalTxBytesPerSec = 0;
+  let totalRxBytesAll = 0;
+  let totalTxBytesAll = 0;
+  let activeInterface = '';
+
+  const allNames = Array.from(new Set([...Object.keys(currentSnapshot), ...Object.keys(ipMap)]));
+
+  for (const name of allNames) {
+    if (name === 'lo') continue;
+
+    const cur = currentSnapshot[name] || { rxBytes: 0, txBytes: 0 };
+    let rxSpeed = 0;
+    let txSpeed = 0;
+
+    if (isDeltaValid && prevNetDevSnapshot?.interfaces[name]) {
+      const prev = prevNetDevSnapshot.interfaces[name];
+      rxSpeed = Math.max(0, (cur.rxBytes - prev.rxBytes) / deltaSec);
+      txSpeed = Math.max(0, (cur.txBytes - prev.txBytes) / deltaSec);
+    }
+
+    const isWireless = name.startsWith('wl') || name.startsWith('ra') || name.includes('wifi');
+    const ip = ipMap[name] || '-';
+    const isUp = ip !== '-' || cur.rxBytes > 0;
+
+    if (!activeInterface && isUp) {
+      activeInterface = name;
+    } else if (ip === primaryIp) {
+      activeInterface = name;
+    }
+
+    totalRxBytesPerSec += rxSpeed;
+    totalTxBytesPerSec += txSpeed;
+    totalRxBytesAll += cur.rxBytes;
+    totalTxBytesAll += cur.txBytes;
+
+    interfaceDetails.push({
+      name,
+      ip,
+      isUp,
+      isWireless,
+      rxBytes: cur.rxBytes,
+      txBytes: cur.txBytes,
+      downloadSpeedKBps: Math.round((rxSpeed / 1024) * 10) / 10,
+      uploadSpeedKBps: Math.round((txSpeed / 1024) * 10) / 10,
+      downloadSpeedMbps: bytesToMbps(rxSpeed),
+      uploadSpeedMbps: bytesToMbps(txSpeed),
+      formattedDownload: formatNetworkSpeed(rxSpeed),
+      formattedUpload: formatNetworkSpeed(txSpeed),
+      totalRxFormatted: formatNetworkBytes(cur.rxBytes),
+      totalTxFormatted: formatNetworkBytes(cur.txBytes)
+    });
+  }
+
+  // Update snapshot cache
+  prevNetDevSnapshot = {
+    timestamp: now,
+    interfaces: currentSnapshot
+  };
+
+  const totalDownKBps = Math.round((totalRxBytesPerSec / 1024) * 10) / 10;
+  const totalUpKBps = Math.round((totalTxBytesPerSec / 1024) * 10) / 10;
+  const totalDownMbps = bytesToMbps(totalRxBytesPerSec);
+  const totalUpMbps = bytesToMbps(totalTxBytesPerSec);
+
+  return {
+    primaryIp,
+    totalDownloadSpeedKBps: totalDownKBps,
+    totalUploadSpeedKBps: totalUpKBps,
+    totalDownloadSpeedMbps: totalDownMbps,
+    totalUploadSpeedMbps: totalUpMbps,
+    formattedDownloadSpeed: formatNetworkSpeed(totalRxBytesPerSec),
+    formattedUploadSpeed: formatNetworkSpeed(totalTxBytesPerSec),
+    totalDownloadedFormatted: formatNetworkBytes(totalRxBytesAll),
+    totalUploadedFormatted: formatNetworkBytes(totalTxBytesAll),
+    activeInterface: activeInterface || (interfaceDetails[0]?.name ?? 'eth0'),
+    interfaces: interfaceDetails
+  };
+}
+
+// 9. Main Hardware Collector - Asynchronous & Lightweight
 export function getLiveServerHardwareStats(): ServerHardwareStats {
   const hostEnv = detectHostEnvironment();
   const cpuUsage = getCpuUsage();
@@ -776,23 +957,8 @@ export function getLiveServerHardwareStats(): ServerHardwareStats {
   const mem = getMemoryStats();
   const storage = getStorageStats();
   const uptime = getUptime();
+  const network = getNetworkTrafficStats();
   const loadAvg = os.loadavg() as [number, number, number];
-
-  // Network Interfaces
-  const networkIfaces = os.networkInterfaces();
-  const ifaceList: Array<{ name: string; ip: string }> = [];
-  let primaryIp = '127.0.0.1';
-
-  for (const [name, addrs] of Object.entries(networkIfaces)) {
-    if (addrs) {
-      for (const a of addrs) {
-        if (a.family === 'IPv4' && !a.internal) {
-          ifaceList.push({ name, ip: a.address });
-          if (primaryIp === '127.0.0.1') primaryIp = a.address;
-        }
-      }
-    }
-  }
 
   // Refine Device Model
   let finalDeviceModel = hostEnv.boardInfo?.boardName || cpuAndDev.deviceModel;
@@ -838,10 +1004,7 @@ export function getLiveServerHardwareStats(): ServerHardwareStats {
       swapUsagePercent: mem.swapUsagePercent
     },
     storage,
-    network: {
-      primaryIp,
-      interfaces: ifaceList
-    },
+    network,
     uptime,
     procReadingMethod: mem.isProc ? 'direct_proc_fs' : 'node_os_fallback',
     timestamp: new Date().toISOString()
