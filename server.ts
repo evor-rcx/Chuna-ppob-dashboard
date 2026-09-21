@@ -1472,12 +1472,35 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
   app.post("/api/security/warden/auth-verify", (req, res) => {
     const { password, totpCode } = req.body || {};
     const adminPassword = process.env.ADMIN_PASSWORD || 'Eko190497#';
+    const clientIp = req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.socket.remoteAddress || '127.0.0.1';
+
+    // Layer 13: Admin IP Whitelist check
+    if (!securitySuite.auditCheckAdminIPAllowed(clientIp)) {
+      securitySuite.logThreat('Audit', 'critical', clientIp, 'Admin Panel Blocked', 'Akses Admin diblokir: IP tidak terdaftar dalam Whitelist IP Admin.');
+      return res.status(403).json({ success: false, error: 'Akses Ditolak: IP Anda tidak terdaftar dalam Whitelist IP Admin Resmi.' });
+    }
+
+    // Account Lockout check (distributed IP attack defense)
+    const lockCheck = securitySuite.recordAccountLoginAttempt('admin', false);
+    if (!lockCheck.allowed) {
+      return res.status(429).json({
+        success: false,
+        error: `Akun Admin terkunci sementara selama ${lockCheck.lockedMinutes} menit karena 5x percobaan gagal berulang kali.`
+      });
+    }
 
     // Timing-safe constant-time comparison
     const isPasswordValid = securitySuite.wardenTimingSafeEqual(String(password || ''), adminPassword);
     if (!isPasswordValid) {
-      return res.status(401).json({ success: false, error: 'Password salah!' });
+      // Uniform response prevents username enumeration
+      return res.status(401).json({
+        success: false,
+        error: 'Kredensial tidak valid! Sisa percobaan aman: ' + (lockCheck.remainingAttempts ?? 0)
+      });
     }
+
+    // If password is valid, reset failed counter
+    securitySuite.recordAccountLoginAttempt('admin', true);
 
     const setupInfo = securitySuite.get2FASetupInfo();
     if (setupInfo.enabled) {
@@ -1491,6 +1514,8 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
     }
 
     const csrfToken = securitySuite.generateCsrfToken();
+    securitySuite.auditRecordAction('admin', 'LOGIN', 'Admin Dashboard', null, 'SESSION_GRANTED', clientIp);
+
     res.json({
       success: true,
       message: 'Autentikasi Berhasil!',
@@ -1548,6 +1573,80 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
+  });
+
+  // Layer 11: SENTRY - OS Hardening, System Permissions & Incident Playbook
+  app.get("/api/security/sentry/audit", (req, res) => {
+    const auditData = securitySuite.sentryAuditSystemPermissions();
+    res.json(auditData);
+  });
+
+  app.get("/api/security/sentry/script", (req, res) => {
+    const script = securitySuite.sentryGenerateHardeningScript();
+    res.setHeader('Content-Type', 'text/x-shellscript');
+    res.setHeader('Content-Disposition', 'attachment; filename="e4-armbian-hardening.sh"');
+    res.send(script);
+  });
+
+  app.get("/api/security/sentry/playbook", (req, res) => {
+    const playbook = securitySuite.sentryGetIncidentPlaybook();
+    res.json(playbook);
+  });
+
+  // Layer 12: HOOK - Cryptographic Webhook Verification Endpoints
+  app.post("/api/security/hook/test-telegram", (req, res) => {
+    const tokenHeader = req.headers['x-telegram-bot-api-secret-token'] as string | undefined;
+    const isValid = securitySuite.hookVerifyTelegramSecret(tokenHeader);
+    if (isValid) {
+      res.json({ success: true, message: 'X-Telegram-Bot-Api-Secret-Token valid & terverifikasi!' });
+    } else {
+      res.status(403).json({ success: false, error: 'Telegram Secret Token tidak valid atau palsu!' });
+    }
+  });
+
+  app.post("/api/security/hook/test-meta", (req, res) => {
+    const sigHeader = req.headers['x-hub-signature-256'] as string | undefined;
+    const bodyStr = JSON.stringify(req.body || {});
+    const isValid = securitySuite.hookVerifyMetaSignature(bodyStr, sigHeader);
+    if (isValid) {
+      res.json({ success: true, message: 'X-Hub-Signature-256 Meta valid & terverifikasi!' });
+    } else {
+      res.status(403).json({ success: false, error: 'Meta HMAC-SHA256 Signature tidak valid atau palsu!' });
+    }
+  });
+
+  // Layer 13: AUDIT - Chained-Hash Immutable Admin Audit Ledger & IP Whitelist
+  app.get("/api/security/audit/ledger", (req, res) => {
+    const ledger = securitySuite.auditGetLedger();
+    const integrity = securitySuite.auditVerifyLedgerIntegrity();
+    res.json({
+      ledger,
+      integrity
+    });
+  });
+
+  app.post("/api/security/audit/verify", (req, res) => {
+    const result = securitySuite.auditVerifyLedgerIntegrity();
+    res.json(result);
+  });
+
+  app.get("/api/security/audit/whitelist", (req, res) => {
+    res.json(securitySuite.auditGetAdminIPWhitelist());
+  });
+
+  app.post("/api/security/audit/whitelist", (req, res) => {
+    const { ips, enabled } = req.body || {};
+    const clientIp = req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.socket.remoteAddress || '127.0.0.1';
+    securitySuite.auditSetAdminIPWhitelist(Array.isArray(ips) ? ips : [], Boolean(enabled));
+    securitySuite.auditRecordAction('admin', 'UPDATE_ADMIN_IP_WHITELIST', 'Security Config', null, { ips, enabled }, clientIp);
+    res.json({ success: true, message: 'Admin IP Whitelist berhasil diperbarui!', data: securitySuite.auditGetAdminIPWhitelist() });
+  });
+
+  app.post("/api/security/audit/record", (req, res) => {
+    const { action, target, prevValue, newValue } = req.body || {};
+    const clientIp = req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.socket.remoteAddress || '127.0.0.1';
+    const record = securitySuite.auditRecordAction('admin', String(action || 'ADMIN_ACTION'), String(target || 'GENERAL'), prevValue, newValue, clientIp);
+    res.json({ success: true, record });
   });
 
   // Layer 1 & 2: EGIS WAF Inspector & NYXGUARD Sentry
