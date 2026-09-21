@@ -58,6 +58,7 @@ function isTelegramMatch(telegram, userId, username) {
 
 import { getCalendarInfo, getHolidayInfo } from './src/utils/holidays';
 import { securitySuite } from './src/lib/securitySuite';
+import { getLiveServerHardwareStats } from './src/lib/serverHardwareMonitor';
 
 export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any): Promise<Buffer | null> {
     try {
@@ -1647,6 +1648,42 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
     const clientIp = req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.socket.remoteAddress || '127.0.0.1';
     const record = securitySuite.auditRecordAction('admin', String(action || 'ADMIN_ACTION'), String(target || 'GENERAL'), prevValue, newValue, clientIp);
     res.json({ success: true, record });
+  });
+
+  // --- Hardware & System Stats API (Armbian ARM64, Proxmox, Home Server) ---
+  app.get("/api/system/server-stats", (req, res) => {
+    try {
+      const stats = getLiveServerHardwareStats();
+      res.json(stats);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/system/hardware", (req, res) => {
+    try {
+      const stats = getLiveServerHardwareStats();
+      res.json(stats);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/system/thermal", (req, res) => {
+    try {
+      const stats = getLiveServerHardwareStats();
+      res.json({
+        temperature: stats.temperature,
+        cpu: {
+          usagePercent: stats.cpu.usagePercent,
+          cores: stats.cpu.cores
+        },
+        deviceModel: stats.deviceModel,
+        hostType: stats.hostType
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // Layer 1 & 2: EGIS WAF Inspector & NYXGUARD Sentry

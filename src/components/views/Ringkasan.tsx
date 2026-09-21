@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { PageContainer } from '../PageContainer';
+import { ServerHardwareWidget } from '../ServerHardwareWidget';
 
 export function Ringkasan({ onBack }: { onBack: () => void }) {
   const [summary, setSummary] = useState({
@@ -51,6 +52,10 @@ export function Ringkasan({ onBack }: { onBack: () => void }) {
             {summary.statusServer}
           </p>
         </div>
+      </div>
+
+      <div className="mt-6">
+        <ServerHardwareWidget compact={false} />
       </div>
 
       <div className="mt-8">

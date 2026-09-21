@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { getHolidayInfo } from '../utils/holidays';
 import { Store } from "lucide-react";
 import { playPowerDown, playTerminalBlip } from '../utils/audio';
+import { ServerHardwareWidget } from './ServerHardwareWidget';
 
 
 const Clock = () => {
@@ -40,6 +41,7 @@ export function Sidebar() {
   const [digiflazzBalance, setDigiflazzBalance] = useState(0);
   const [digiflazzStatus, setDigiflazzStatus] = useState('Disconnected');
   const [digiflazzUsername, setDigiflazzUsername] = useState('');
+  const [statusView, setStatusView] = useState<'hardware' | 'ppob'>('hardware');
   
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [logoutLogs, setLogoutLogs] = useState<string[]>([]);
@@ -109,25 +111,65 @@ export function Sidebar() {
           <h1 className="text-3xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-sky-400 via-indigo-400 to-purple-500 drop-shadow-md">STORE</h1>
         </div>
         <Clock />
-        <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-5">
-          <div className="flex justify-between items-center mb-3">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Status Sistem PPOB</span>
-            <span className={`flex h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></span>
-          </div>
-          <div className="h-1.5 w-full bg-slate-700 rounded-full overflow-hidden">
-            <div className={`h-full w-[100%] ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
-          </div>
-          <div className="flex justify-between items-center mt-2"><p className="text-[10px] text-slate-500">Koneksi Pusat: {isConnected ? 'Stable' : 'Disconnected'}</p></div>
-          
-          <div className="mt-3 pt-3 border-t border-slate-700/40 flex items-center justify-between">
-            <div className="flex items-center gap-1.5 text-[10px] font-semibold text-indigo-300">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              SHIELD: EGIS • NYX • ANCHOR
+        <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-4 sm:p-5">
+          {/* Sub-header with Tab Selector: Armbian/HW vs PPOB */}
+          <div className="flex items-center justify-between mb-3 border-b border-slate-700/40 pb-2">
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setStatusView('hardware')}
+                className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                  statusView === 'hardware'
+                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                STB / HW
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatusView('ppob')}
+                className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                  statusView === 'ppob'
+                    ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                PPOB
+              </button>
             </div>
-            <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30">
-              ACTIVE
+            <span className="flex h-2 w-2 relative" title="Telemetri Realtime Aktif">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
             </span>
           </div>
+
+          {statusView === 'hardware' ? (
+            <ServerHardwareWidget compact={true} />
+          ) : (
+            <div>
+              <div className="flex justify-between items-center mb-3">
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Status Sistem PPOB</span>
+                <span className={`flex h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></span>
+              </div>
+              <div className="h-1.5 w-full bg-slate-700 rounded-full overflow-hidden">
+                <div className={`h-full w-[100%] ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+              </div>
+              <div className="flex justify-between items-center mt-2">
+                <p className="text-[10px] text-slate-500">Koneksi Pusat: {isConnected ? 'Stable' : 'Disconnected'}</p>
+              </div>
+              
+              <div className="mt-3 pt-3 border-t border-slate-700/40 flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-[10px] font-semibold text-indigo-300">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  SHIELD: EGIS • NYX • ANCHOR
+                </div>
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30">
+                  ACTIVE
+                </span>
+              </div>
+            </div>
+          )}
         </div>
         <div className="bg-gradient-to-br from-sky-600 to-indigo-700 rounded-2xl p-5 shadow-lg shadow-sky-900/20">
           <div className="text-xs text-sky-100 opacity-80 uppercase tracking-widest">Dasbord Pengaturan Owner</div>

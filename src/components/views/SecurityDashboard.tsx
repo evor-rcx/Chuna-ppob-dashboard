@@ -28,6 +28,7 @@ import {
   UserCheck,
   Download
 } from 'lucide-react';
+import { ServerHardwareWidget } from '../ServerHardwareWidget';
 
 interface SecurityTelemetry {
   status: 'ACTIVE' | 'WARNING' | 'ALERT';
@@ -1283,6 +1284,9 @@ export function SecurityDashboard({ onBack }: { onBack: () => void }) {
                 </p>
               </div>
             </div>
+
+            {/* Live Armbian ARM64 / Proxmox Hardware Telemetry */}
+            <ServerHardwareWidget compact={false} />
 
             {/* Checklist & Status */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
