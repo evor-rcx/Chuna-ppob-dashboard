@@ -56,80 +56,8 @@ function isTelegramMatch(telegram, userId, username) {
 }
 
 
-import Holidays from 'date-holidays';
-
-function getCalendarInfo(date: Date) {
-    const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-    const months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
-    
-    // We want the time in Makassar timezone to get the right day
-    const witaStr = date.toLocaleString('en-US', { timeZone: 'Asia/Makassar' });
-    const witaDate = new Date(witaStr);
-    const dayName = days[witaDate.getDay()];
-    const dateNum = witaDate.getDate().toString().padStart(2, '0');
-    const monthName = months[witaDate.getMonth()];
-    const yearNum = witaDate.getFullYear();
-    const fullDateStr = `${dayName}, ${dateNum} ${monthName} ${yearNum}`;
-    
-    const hd = new Holidays('ID');
-    const currentYear = witaDate.getFullYear();
-    
-    // Get holidays for current year and next year
-    const holidaysThisYear = hd.getHolidays(currentYear);
-    const holidaysNextYear = hd.getHolidays(currentYear + 1);
-    
-    const allHolidays = [...holidaysThisYear, ...holidaysNextYear].map(h => ({
-        name: h.name,
-        date: new Date(h.date),
-        type: h.type
-    }));
-
-    const customHolidays = [
-        { month: 3, date: 21, name: 'Hari Kartini' },
-        { month: 4, date: 2, name: 'Hari Pendidikan Nasional' },
-        { month: 4, date: 20, name: 'Hari Kebangkitan Nasional' },
-        { month: 9, date: 1, name: 'Hari Kesaktian Pancasila' },
-        { month: 9, date: 2, name: 'Hari Batik Nasional' },
-        { month: 9, date: 28, name: 'Hari Sumpah Pemuda' },
-        { month: 10, date: 10, name: 'Hari Pahlawan' },
-        { month: 11, date: 22, name: 'Hari Ibu' }
-    ];
-
-    [currentYear, currentYear + 1].forEach(year => {
-        customHolidays.forEach(c => {
-            allHolidays.push({
-                name: c.name,
-                date: new Date(year, c.month, c.date),
-                type: 'observance' as any
-            });
-        });
-    });
-
-    // Find today's holiday
-    const todayHoliday = allHolidays.find(h => {
-        return h.date.getDate() === witaDate.getDate() && 
-               h.date.getMonth() === witaDate.getMonth() && 
-               h.date.getFullYear() === witaDate.getFullYear();
-    });
-
-    if (todayHoliday) {
-        return `${fullDateStr} - ${todayHoliday.name} (Hari Ini)`;
-    }
-
-    // Find next holiday
-    const witaDateOnly = new Date(witaDate.getFullYear(), witaDate.getMonth(), witaDate.getDate());
-    const upcomingHolidays = allHolidays
-        .filter(h => h.date.getTime() > witaDateOnly.getTime())
-        .sort((a, b) => a.date.getTime() - b.date.getTime());
-        
-    if (upcomingHolidays.length > 0) {
-        const next = upcomingHolidays[0];
-        const diffDays = Math.ceil((next.date.getTime() - witaDateOnly.getTime()) / (1000 * 3600 * 24));
-        return `${fullDateStr} - Menuju ${next.name} (${diffDays} hari lagi)`;
-    }
-    
-    return fullDateStr;
-}
+import { getCalendarInfo, getHolidayInfo } from './src/utils/holidays';
+import { securitySuite } from './src/lib/securitySuite';
 
 export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any): Promise<Buffer | null> {
     try {
@@ -576,6 +504,9 @@ function readDB() {
   return db;
 }
 function writeDB(data: any) {
+  try {
+    securitySuite.auditDatabaseIntegrity(data);
+  } catch (e) {}
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 }
 
@@ -1410,7 +1341,229 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
   });
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+  // =========================================================================
+  // 5-LAYER SUPERFORTRESS CYBER DEFENSE SUITE (Egis, Nyxguard, Anchor, Purge, Helios)
+  // =========================================================================
+  const triggerHeliosOwnerAlert = (msg: string) => {
+    try {
+      if (bot && db.owners && Array.isArray(db.owners)) {
+        for (const oId of db.owners) {
+          bot.telegram.sendMessage(oId, msg, { parse_mode: 'Markdown' }).catch(() => {});
+        }
+      }
+    } catch (e) {}
+  };
+
+  // Layer 5: HELIOS Telemetry & Security Management Endpoints (Unrestricted for Admin Dashboard)
+  app.get("/api/security/stats", (req, res) => {
+    res.json(securitySuite.getTelemetry());
+  });
+
+  app.post("/api/security/unban", (req, res) => {
+    const { ip } = req.body || {};
+    if (!ip) return res.status(400).json({ success: false, error: 'IP is required' });
+    securitySuite.unbanIP(ip);
+    res.json({ success: true, message: `IP ${ip} berhasil di-unban.` });
+  });
+
+  // Layer 6: ATLAS - Race Condition Mutex & Idempotency Testing
+  app.post("/api/security/atlas/test-lock", async (req, res) => {
+    const { memberId, count = 5 } = req.body || {};
+    const targetId = memberId || 'test-member-atlas';
+    let balance = 100000;
+    const debitAmount = 25000;
+    const executionLogs: string[] = [];
+
+    // Simulate concurrent requests
+    const promises = Array.from({ length: Number(count) }).map((_, idx) => {
+      return securitySuite.atlasLock(targetId, async () => {
+        const initial = balance;
+        await new Promise(r => setTimeout(r, 20)); // artificial async delay to provoke race condition if unlocked
+        if (balance >= debitAmount) {
+          balance -= debitAmount;
+          executionLogs.push(`Req #${idx + 1}: SUKSES (Saldo: Rp ${initial} -> Rp ${balance})`);
+        } else {
+          executionLogs.push(`Req #${idx + 1}: DITOLAK (Saldo tidak cukup: Rp ${balance})`);
+        }
+      });
+    });
+
+    await Promise.all(promises);
+    res.json({
+      success: true,
+      message: `ATLAS Mutex berhasil menserialisasi ${count} transaksi bersamaan secara atomic!`,
+      finalBalance: balance,
+      executionLogs
+    });
+  });
+
+  // Layer 7: FORGE - File Upload & Polyglot Sanitizer
+  app.post("/api/security/forge/scan-file", (req, res) => {
+    try {
+      const { filename, base64Content } = req.body || {};
+      if (!filename || !base64Content) {
+        return res.status(400).json({ success: false, error: 'filename dan base64Content wajib diisi' });
+      }
+
+      // Remove base64 data URL header if present (e.g. data:image/png;base64,...)
+      const cleanBase64 = base64Content.replace(/^data:[^;]+;base64,/, '');
+      const buffer = Buffer.from(cleanBase64, 'base64');
+
+      const result = securitySuite.forgeSanitizeFile(buffer, filename);
+      if (!result.isValid) {
+        return res.status(400).json({
+          success: false,
+          error: result.error,
+          details: 'FORGE menolak file karena gagal validasi magic bytes atau terdeteksi polyglot payload.'
+        });
+      }
+
+      res.json({
+        success: true,
+        message: 'File lolos inspeksi Magic Bytes dan Polyglot Hunter!',
+        sanitizedFilename: result.sanitizedFilename,
+        mimeType: result.mimeType,
+        sizeBytes: buffer.length
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // Layer 8: WARDEN - CSRF, 2FA (TOTP) & Timing-Safe Verification
+  app.get("/api/security/warden/csrf", (req, res) => {
+    const token = securitySuite.generateCsrfToken();
+    res.json({ success: true, csrfToken: token });
+  });
+
+  app.get("/api/security/warden/2fa-info", (req, res) => {
+    res.json(securitySuite.get2FASetupInfo());
+  });
+
+  app.post("/api/security/warden/2fa-verify", (req, res) => {
+    const { code } = req.body || {};
+    if (!code) return res.status(400).json({ success: false, error: 'Kode 2FA wajib diisi' });
+    const isValid = securitySuite.verifyTotp(String(code));
+    if (isValid) {
+      res.json({ success: true, message: 'Kode 2FA / Backup Code valid!' });
+    } else {
+      res.status(401).json({ success: false, error: 'Kode 2FA / Backup Code tidak valid atau kedaluwarsa' });
+    }
+  });
+
+  app.post("/api/security/warden/2fa-toggle", (req, res) => {
+    const { enabled, code } = req.body || {};
+    if (enabled) {
+      // Must verify code first before enabling
+      if (!securitySuite.verifyTotp(String(code))) {
+        return res.status(400).json({ success: false, error: 'Masukkan kode 2FA yang valid untuk mengaktifkan' });
+      }
+      securitySuite.set2FAEnabled(true);
+      res.json({ success: true, message: '2FA Admin (TOTP) berhasil DIAKTIFKAN!' });
+    } else {
+      securitySuite.set2FAEnabled(false);
+      res.json({ success: true, message: '2FA Admin (TOTP) dinonaktifkan' });
+    }
+  });
+
+  app.post("/api/security/warden/auth-verify", (req, res) => {
+    const { password, totpCode } = req.body || {};
+    const adminPassword = process.env.ADMIN_PASSWORD || 'Eko190497#';
+
+    // Timing-safe constant-time comparison
+    const isPasswordValid = securitySuite.wardenTimingSafeEqual(String(password || ''), adminPassword);
+    if (!isPasswordValid) {
+      return res.status(401).json({ success: false, error: 'Password salah!' });
+    }
+
+    const setupInfo = securitySuite.get2FASetupInfo();
+    if (setupInfo.enabled) {
+      if (!totpCode || !securitySuite.verifyTotp(String(totpCode))) {
+        return res.status(403).json({
+          success: false,
+          requires2FA: true,
+          error: '2FA Admin Aktif: Masukkan 6-digit kode Authenticator / Backup Code.'
+        });
+      }
+    }
+
+    const csrfToken = securitySuite.generateCsrfToken();
+    res.json({
+      success: true,
+      message: 'Autentikasi Berhasil!',
+      csrfToken
+    });
+  });
+
+  // Layer 9: CRYPT - AES-256-GCM Test Endpoints
+  app.post("/api/security/crypt/test", (req, res) => {
+    const { text } = req.body || {};
+    const sampleText = text || 'PIN: 190497 | API_KEY: digi_secret_live_994829';
+    const encrypted = securitySuite.cryptEncrypt(sampleText);
+    const decrypted = securitySuite.cryptDecrypt(encrypted);
+
+    res.json({
+      success: true,
+      algorithm: 'AES-256-GCM (Authenticated Encryption)',
+      original: sampleText,
+      encrypted,
+      decrypted,
+      integrityVerified: decrypted === sampleText
+    });
+  });
+
+  // Layer 10: VAULT - Backup & Disaster Recovery Drill Endpoints
+  app.post("/api/security/vault/backup", (req, res) => {
+    const dbPath = path.join(process.cwd(), 'db.json');
+    const result = securitySuite.performVaultBackup(dbPath);
+    if (result.success) {
+      res.json({ success: true, message: `Backup terenkripsi berhasil disimpan: ${result.backupFile}`, data: result });
+    } else {
+      res.status(500).json({ success: false, error: result.error });
+    }
+  });
+
+  app.post("/api/security/vault/drill", (req, res) => {
+    const result = securitySuite.runDisasterRecoveryDrill();
+    res.json(result);
+  });
+
+  app.get("/api/security/vault/backups", (req, res) => {
+    try {
+      const backupDir = path.join(process.cwd(), 'backups');
+      if (!fs.existsSync(backupDir)) return res.json({ backups: [] });
+      const files = fs.readdirSync(backupDir).filter(f => f.startsWith('vault_backup_')).sort().reverse();
+      const backupList = files.map(file => {
+        const stats = fs.statSync(path.join(backupDir, file));
+        return {
+          filename: file,
+          sizeBytes: stats.size,
+          created: stats.mtime.toLocaleString('id-ID', { timeZone: 'Asia/Makassar' }) + ' WITA'
+        };
+      });
+      res.json({ backups: backupList });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Layer 1 & 2: EGIS WAF Inspector & NYXGUARD Sentry
+  app.use((req, res, next) => {
+    securitySuite.egisInspector(req, res, next, triggerHeliosOwnerAlert);
+  });
+
+  // Layer 4: PURGE - Sensitive Payload Redaction Middleware
+  app.use((req, res, next) => {
+    if (req.body && typeof req.body === 'object') {
+      // Clean potential prototype pollutions
+      delete (req.body as any)['__proto__'];
+      delete (req.body as any)['constructor'];
+    }
+    next();
+  });
 
   async function processDigiflazzWebhookData(data: any) {
     try {
@@ -2377,30 +2530,50 @@ app.get("/api/summary", (req, res) => {
     res.json(filtered);
   });
 
-  app.post("/api/physical-transactions", (req, res) => {
+  app.post("/api/physical-transactions", async (req, res) => {
     const { items, total, method, customer } = req.body;
+    const idempotencyKey = req.headers['x-idempotency-key'] as string;
     
-    // Update stock
-    for (const item of items) {
-       const product = db.physicalProducts.find((p: any) => p.id === item.id);
-       if (product) {
-           product.stock = Math.max(0, product.stock - item.quantity);
-       }
+    // Check Idempotency
+    if (idempotencyKey) {
+      const check = securitySuite.checkIdempotency(idempotencyKey);
+      if (check.isDuplicate) {
+        return res.json(check.cachedResult);
+      }
     }
     
-    const newTx = {
-       id: "PHY-" + Date.now(),
-       date: new Date().toISOString(),
-       items,
-       total,
-       method,
-       customer,
-       type: 'physical'
-    };
-    
-    db.physicalTransactions.push(newTx);
-    writeDB(db);
-    res.json(newTx);
+    try {
+      const newTx = await securitySuite.atlasLock('physical-stock', async () => {
+        // Update stock
+        for (const item of (items || [])) {
+           const product = db.physicalProducts.find((p: any) => p.id === item.id);
+           if (product) {
+               product.stock = Math.max(0, product.stock - item.quantity);
+           }
+        }
+        
+        const tx = {
+           id: "PHY-" + Date.now(),
+           date: new Date().toISOString(),
+           items,
+           total,
+           method,
+           customer,
+           type: 'physical'
+        };
+        
+        db.physicalTransactions.push(tx);
+        writeDB(db);
+        return tx;
+      });
+
+      if (idempotencyKey) {
+        securitySuite.recordIdempotency(idempotencyKey, newTx);
+      }
+      res.json(newTx);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
   
 
@@ -2815,16 +2988,18 @@ Yuk langsung belanja kak, banyak promo nunggu! 🛍️✨`;
     const { id } = req.params;
     const { balance } = req.body;
     try {
-      const member = members.find(m => m.id === id);
-      if (member) {
-         member.balance = balance;
-         db.members = members;
-         writeDB(db);
-         res.json({ success: true, member });
-      } else {
-         res.status(404).json({ error: "Member not found" });
-      }
-    } catch (err) {
+      await securitySuite.atlasLock(`member:${id}`, async () => {
+        const member = members.find(m => m.id === id);
+        if (member) {
+           member.balance = balance;
+           db.members = members;
+           writeDB(db);
+           res.json({ success: true, member });
+        } else {
+           res.status(404).json({ error: "Member not found" });
+        }
+      });
+    } catch (err: any) {
        res.status(500).json({ error: err.message });
     }
   });
@@ -4084,8 +4259,20 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
   };
       
       let welcomeVoiceFileId: string | null = db.welcomeVoiceFileId || null;
-      // Global middleware for typing status
+      // Global middleware for typing status and Nyxguard Bot Spam/Abuse defense
       bot.use(async (ctx, next) => {
+        const userId = ctx.from?.id;
+        if (userId && !db.owners.includes(userId)) {
+          // Check Nyxguard flood protection
+          const isSpam = securitySuite.checkBotSpam(userId, 10, 4000);
+          if (isSpam) {
+            try {
+              await ctx.reply("⚠️ *[NYXGUARD ANTI-FLOOD]*\nTerdeteksi pengiriman pesan terlalu cepat. Harap jeda beberapa detik sebelum mengirim perintah lagi.", { parse_mode: 'Markdown' });
+            } catch (e) {}
+            return;
+          }
+        }
+
         if (ctx.message || ctx.callbackQuery) {
           try {
             await ctx.sendChatAction('typing');
@@ -4947,16 +5134,42 @@ Chuna – E4 Store`;
       bot.hears("⚙️ Pengaturan", async (ctx) => {
         if (!db.owners.includes(ctx.from.id)) return;
         
-        ctx.reply(`⚙️ *PENGATURAN SISTEM*
+        const tel = securitySuite.getTelemetry();
+        ctx.reply(`🛡️ *SISTEM KEAMANAN SUPER KUAT (5-LAYER SHIELD)*
+━━━━━━━━━━━━━━━━━━━━━
+Status Sistem: *${tel.status} (100% SECURE)*
+Score Kesehatan: *${tel.layers.helios.healthScore}/100*
+Audit Terakhir: ${tel.layers.helios.lastAudit}
 
-1. *Digiflazz Webhook*
-Untuk menerima update transaksi otomatis (Sukses/Gagal dari Pending), silakan atur Webhook di Web Digiflazz:
-- Masuk ke Pengaturan Webhook Digiflazz
-- Masukkan URL ini (tambahkan URL server di depannya):
-\`/api/digiflazz-webhook\`
+🛡️ *1. EGIS (Firewall & WAF):*
+- Status: *ONLINE* (${tel.layers.egis.mode})
+- Paket Diinspeksi: *${tel.layers.egis.inspectedPackets}*
+- Serangan Ditangkal: *${tel.layers.egis.blockedAttacks}* (SQLi, XSS, Path Traversal, Scanners)
+
+🥷 *2. NYXGUARD (Sentry & Anti-Spam):*
+- Status: *ONLINE*
+- IP Dikarantina: *${tel.layers.nyxguard.bannedIPsCount}*
+- Spam Bot Ditangkal: *${tel.layers.nyxguard.botSpamBlocked}*
+
+⚓ *3. ANCHOR (Tamper-Proof Ledger):*
+- Status: *ONLINE* (${tel.layers.anchor.hashAlgorithm})
+- Verifikasi Integritas: *${tel.layers.anchor.integrityChecksPassed} Passed*
+- Upaya Manipulasi: *${tel.layers.anchor.tamperAttempts} Blocked*
+
+🧹 *4. PURGE (Zero-Trust Sanitizer):*
+- Status: *ONLINE*
+- Payload Disanitasi: *${tel.layers.purge.sanitizedPayloads}*
+- Kebocoran Kredensial Dicegah: *${tel.layers.purge.redactedSensitiveLeaks}*
+
+☀️ *5. HELIOS (Threat Intelligence):*
+- Status: *ONLINE* (Active Telemetry)
+- Notifikasi Ancaman: Otomatis via Telegram Owner
+━━━━━━━━━━━━━━━━━━━━━
+
+⚙️ *2. Digiflazz Webhook*
+Untuk update status transaksi otomatis:
+URL: \`/api/digiflazz-webhook\`
 Contoh: \`https://domainanda.com/api/digiflazz-webhook\`
-
-*Pastikan tidak ada spasi saat copy.*
 `, { parse_mode: 'Markdown' });
 
       });

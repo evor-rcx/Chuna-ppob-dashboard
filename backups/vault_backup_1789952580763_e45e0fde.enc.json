@@ -1,0 +1,14 @@
+{
+  "version": "E4_VAULT_V1",
+  "createdAt": "2026-09-21T01:03:00.763Z",
+  "sha256": "e45e0fdede53eecb05cd4d98cba820ef6033e1ebfdbcc94c62f7ae2c23d4e9ea",
+  "recordCount": {
+    "transactions": 0,
+    "members": 0
+  },
+  "payload": {
+    "iv": "079345d0adfe4aeb6ebb896d",
+    "ciphertext": "0b7b279870a8ad659b5b249d31b0b1f5f6f0e3d59b5670ef61cd189873a057115a29d1fb13cc912ac78e02b9ef2f84ab75075837562011df97309b07ad908db6e38c1e2aec441873f71f2a9b34f5137833d6a565b84250bf22e2e65c86f0d506ec1903ca",
+    "tag": "27b11d11508cb7988bdca508add05070"
+  }
+}

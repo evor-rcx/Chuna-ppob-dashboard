@@ -1,30 +1,4 @@
-import { getHolidayInfo } from './holidays';
-
-function getCalendarInfo(date: Date) {
-    const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-    const months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
-    
-    const witaStr = date.toLocaleString('en-US', { timeZone: 'Asia/Makassar' });
-    const witaDate = new Date(witaStr);
-    
-    const dayName = days[witaDate.getDay()];
-    const dateNum = witaDate.getDate().toString().padStart(2, '0');
-    const monthName = months[witaDate.getMonth()];
-    const yearNum = witaDate.getFullYear();
-    const fullDateStr = `${dayName}, ${dateNum} ${monthName} ${yearNum}`;
-    
-    const holidayData = getHolidayInfo(witaDate);
-    
-    if (holidayData) {
-        if (holidayData.isToday) {
-            return `${fullDateStr} | ${holidayData.text} (Hari Ini)`;
-        } else {
-            return `${fullDateStr} | Menuju ${holidayData.text}`;
-        }
-    }
-    
-    return fullDateStr;
-}
+import { getCalendarInfo, getHolidayInfo } from './holidays';
 
 export async function printReceiptBluetooth(transaction: any) {
   try {

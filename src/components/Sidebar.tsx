@@ -118,6 +118,16 @@ export function Sidebar() {
             <div className={`h-full w-[100%] ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
           </div>
           <div className="flex justify-between items-center mt-2"><p className="text-[10px] text-slate-500">Koneksi Pusat: {isConnected ? 'Stable' : 'Disconnected'}</p></div>
+          
+          <div className="mt-3 pt-3 border-t border-slate-700/40 flex items-center justify-between">
+            <div className="flex items-center gap-1.5 text-[10px] font-semibold text-indigo-300">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              SHIELD: EGIS • NYX • ANCHOR
+            </div>
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30">
+              ACTIVE
+            </span>
+          </div>
         </div>
         <div className="bg-gradient-to-br from-sky-600 to-indigo-700 rounded-2xl p-5 shadow-lg shadow-sky-900/20">
           <div className="text-xs text-sky-100 opacity-80 uppercase tracking-widest">Dasbord Pengaturan Owner</div>

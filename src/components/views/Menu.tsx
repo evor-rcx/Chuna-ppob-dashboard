@@ -1,4 +1,4 @@
-import { BarChart3, ShoppingCart, FileText, Settings, Bot, Wallet, Users, Store, Lock } from 'lucide-react';
+import { BarChart3, ShoppingCart, FileText, Settings, Bot, Wallet, Users, Store, Lock, ShieldAlert } from 'lucide-react';
 import { Page } from '../../types';
 import { ReactNode, useState } from 'react';
 
@@ -12,24 +12,56 @@ export function Menu({ onNavigate }: MenuProps) {
   const [passwordError, setPasswordError] = useState(false);
 
   
+  const [show2FAField, setShow2FAField] = useState(false);
+  const [totpInput, setTotpInput] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+
   const handleItemClick = (id: Page) => {
-    if (id === 'produk' || id === 'konfig' || id === 'saldo' || id === 'bot') {
+    if (id === 'produk' || id === 'konfig' || id === 'saldo' || id === 'bot' || id === 'security') {
       setShowPasswordModal(id);
       setPasswordInput('');
+      setTotpInput('');
+      setShow2FAField(false);
       setPasswordError(false);
+      setErrorMessage('');
     } else {
       onNavigate(id);
     }
   };
 
-  const verifyPassword = () => {
-    if (passwordInput === 'Eko190497#') {
-      if (showPasswordModal) {
-        onNavigate(showPasswordModal);
+  const verifyPassword = async () => {
+    try {
+      const res = await fetch('/api/security/warden/auth-verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: passwordInput, totpCode: totpInput })
+      });
+      const data = await res.json();
+      
+      if (res.ok && data.success) {
+        if (showPasswordModal) {
+          onNavigate(showPasswordModal);
+        }
+        setShowPasswordModal(null);
+      } else if (data.requires2FA) {
+        setShow2FAField(true);
+        setPasswordError(true);
+        setErrorMessage('2FA Aktif: Masukkan 6-digit kode Authenticator / Backup Code');
+      } else {
+        setPasswordError(true);
+        setErrorMessage(data.error || 'Kata sandi salah!');
       }
-      setShowPasswordModal(null);
-    } else {
-      setPasswordError(true);
+    } catch (e) {
+      // Fallback
+      if (passwordInput === 'Eko190497#') {
+        if (showPasswordModal) {
+          onNavigate(showPasswordModal);
+        }
+        setShowPasswordModal(null);
+      } else {
+        setPasswordError(true);
+        setErrorMessage('Kata sandi salah!');
+      }
     }
   };
 
@@ -42,6 +74,7 @@ export function Menu({ onNavigate }: MenuProps) {
     { id: 'saldo', icon: <Wallet size={32} />, label: 'Customer Telegram' },
     { id: 'member-offline', icon: <Users size={32} />, label: 'Member Offline' },
     { id: 'kasir-fisik', icon: <Store size={32} />, label: 'Kasir Jualan Fisik' },
+    { id: 'security', icon: <ShieldAlert size={32} className="text-indigo-400" />, label: 'Keamanan Super' },
   ];
 
   return (
@@ -98,10 +131,29 @@ export function Menu({ onNavigate }: MenuProps) {
               onChange={e => { setPasswordInput(e.target.value); setPasswordError(false); }}
               onKeyDown={e => { if (e.key === 'Enter') verifyPassword(); }}
               className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none mb-2"
-              placeholder="Kata Sandi"
+              placeholder="Kata Sandi Admin"
               autoFocus
             />
-            {passwordError && <p className="text-red-400 text-xs mb-4">Kata sandi salah!</p>}
+
+            {show2FAField && (
+              <div className="mt-2 mb-2 animate-fadeIn">
+                <label className="text-xs text-indigo-300 font-semibold block mb-1">
+                  🔑 2FA Authenticator Code (6-digit)
+                </label>
+                <input
+                  type="text"
+                  maxLength={8}
+                  value={totpInput}
+                  onChange={e => { setTotpInput(e.target.value); setPasswordError(false); }}
+                  onKeyDown={e => { if (e.key === 'Enter') verifyPassword(); }}
+                  className="w-full bg-slate-950 border border-indigo-500/50 rounded-lg p-3 text-white tracking-widest text-center font-mono font-bold focus:border-indigo-400 outline-none"
+                  placeholder="000000"
+                  autoFocus
+                />
+              </div>
+            )}
+
+            {passwordError && <p className="text-red-400 text-xs mb-4">{errorMessage || 'Kata sandi salah!'}</p>}
             
             <div className="flex gap-3 mt-6">
                <button 

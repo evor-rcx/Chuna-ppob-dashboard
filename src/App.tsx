@@ -13,6 +13,7 @@ import { Bot } from './components/views/Bot';
 import { Saldo } from './components/views/Saldo';
 import { MemberOffline } from './components/views/MemberOffline';
 import { KasirFisik } from './components/views/KasirFisik';
+import { SecurityDashboard } from './components/views/SecurityDashboard';
 import { Login } from './components/views/Login';
 import { CustomAlert } from './components/CustomAlert';
 import { Page } from './types';
@@ -97,6 +98,7 @@ export default function App() {
       case 'saldo': return <Saldo onBack={() => setCurrentPage('menu')} />;
       case 'member-offline': return <MemberOffline onBack={() => setCurrentPage('menu')} />;
       case 'kasir-fisik': return <KasirFisik onBack={() => setCurrentPage('menu')} />;
+      case 'security': return <SecurityDashboard onBack={() => setCurrentPage('menu')} />;
       default: return <Menu onNavigate={setCurrentPage} />;
     }
   };

@@ -7,4 +7,6 @@ export type Page =
   | 'bot' 
   | 'saldo' 
   | 'member-offline'
-  | 'kasir-fisik';
+  | 'kasir-fisik'
+  | 'security';
+
