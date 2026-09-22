@@ -60,17 +60,31 @@ import { getCalendarInfo, getHolidayInfo } from './src/utils/holidays';
 import { securitySuite } from './src/lib/securitySuite';
 import { getLiveServerHardwareStats } from './src/lib/serverHardwareMonitor';
 
+function roundRectPath(ctx: any, x: number, y: number, w: number, h: number, r: number) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+}
+
 export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any): Promise<Buffer | null> {
     try {
-        const width = 600;
-        let height = type === 'nota' ? 1000 : 900;
+        const width = 800;
+        const height = 800;
         
         let token = data.sn ? String(data.sn) : '-';
         let namaPlg = '';
         let golDaya = '';
         let kwh = '';
         
-        let isPln = (data.product || '').toLowerCase().includes('pln') || (data.product || '').toLowerCase().includes('listrik');
+        const isPln = (data.product || '').toLowerCase().includes('pln') || (data.product || '').toLowerCase().includes('listrik');
         
         if (isPln && token && token.includes('/')) {
             const parts = token.split('/');
@@ -146,52 +160,68 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
                 } catch (e) {}
             }
             
-            lines.push(['Nama', memberName]);
+            lines.push(['Nama Pembeli', memberName]);
             if (waProfileName && waProfileName !== '-' && waProfileName.toLowerCase() !== memberName.toLowerCase()) {
                 lines.push(['Profil WA', waProfileName]);
             }
-            lines.push(['ID Pelanggan', data.target || '-']);
+            lines.push(['ID Pelanggan / No', data.target || '-']);
             lines.push(['Order ID', data.id || '-']);
             lines.push(['Tanggal', formattedDate]);
-            lines.push(['Pembelian', data.product || '-']);
-            if (namaPlg) lines.push(['Nama Pel.', namaPlg]);
-            if (golDaya) lines.push(['Gol/Daya', golDaya]);
-            
-            height = 1000 + (lines.length * 35);
+            lines.push(['Produk', data.product || '-']);
+            if (namaPlg) lines.push(['Nama Pelanggan', namaPlg]);
+            if (golDaya) lines.push(['Tarif / Daya', golDaya]);
+            if (kwh) lines.push(['Jumlah kWh', kwh]);
         } else {
-            lines.push(['Nama', data.nama || '-']);
-            lines.push(['Nomor', data.no || data.target || '-']);
+            lines.push(['Nama Pelanggan', data.nama || '-']);
+            lines.push(['Nomor / ID Pel', data.no || data.target || '-']);
             lines.push(['Layanan', data.layanan || '-']);
-            height = 800 + (lines.length * 35);
-            if (data.detail) height += 250;
+            lines.push(['Tanggal Pengecekan', formattedDate]);
         }
 
         const canvas = createCanvas(width, height);
         const ctx = canvas.getContext('2d');
 
-        // Background
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
+        // Outer soft canvas background
+        ctx.fillStyle = '#f8fafc';
         ctx.fillRect(0, 0, width, height);
 
-        let y = 60;
-        
-        // Header
-        ctx.fillStyle = '#000000';
-        ctx.font = 'bold 36px Arial, sans-serif';
+        // Main receipt card with soft shadow & rounded corners (1:1 ratio 800x800)
+        const cardX = 24;
+        const cardY = 24;
+        const cardW = width - 48;
+        const cardH = height - 48;
+        const cardR = 24;
+
+        ctx.save();
+        ctx.shadowColor = 'rgba(15, 23, 42, 0.08)';
+        ctx.shadowBlur = 18;
+        ctx.shadowOffsetY = 6;
+        ctx.fillStyle = '#ffffff';
+        roundRectPath(ctx, cardX, cardY, cardW, cardH, cardR);
+        ctx.fill();
+        ctx.restore();
+
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 1.5;
+        roundRectPath(ctx, cardX, cardY, cardW, cardH, cardR);
+        ctx.stroke();
+
+        // Top Header
+        let y = 68;
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 32px Arial, sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText('E4 STORE', width / 2, y);
-        y += 40;
-        
-        ctx.fillStyle = '#555555';
-        ctx.font = '22px Arial, sans-serif';
-        ctx.fillText(type === 'nota' ? 'Token Listrik / Struk Pembayaran' : 'Cek Tagihan', width / 2, y);
-        y += 50;
+
+        y += 28;
+        ctx.fillStyle = '#64748b';
+        ctx.font = '500 16px Arial, sans-serif';
+        ctx.fillText(type === 'nota' ? (isPln ? 'Struk Pembelian Token Listrik PLN' : 'Struk Bukti Pembayaran Resmi') : 'Bukti Pengecekan Tagihan', width / 2, y);
 
         // WhatsApp Profile Avatar in Header (if available)
         if (waAvatarImg) {
-            const avSize = 64;
-            const avX = width - 40 - avSize;
+            const avSize = 54;
+            const avX = cardX + cardW - 74;
             const avY = 40;
             ctx.save();
             ctx.beginPath();
@@ -203,14 +233,14 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
 
             ctx.beginPath();
             ctx.arc(avX + avSize / 2, avY + avSize / 2, avSize / 2, 0, Math.PI * 2);
-            ctx.strokeStyle = '#22c55e';
+            ctx.strokeStyle = '#10b981';
             ctx.lineWidth = 2.5;
             ctx.stroke();
         }
-        
-        // Badge
+
+        // Status Badge
+        y += 22;
         let isSukses = type === 'nota' && data.status && data.status.toLowerCase().includes('sukses');
-        
         let methodStr = (data.method || '').toString().toLowerCase().trim();
         if (!methodStr && data.id) {
             try {
@@ -220,13 +250,12 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
                 }
             } catch (e) {}
         }
-        
+
         let lunasTag = '';
         if (isSukses) {
             const statusStr = (data.status || '').toString().toLowerCase().trim();
             const isUtang = methodStr === 'utang' || statusStr.includes('utang');
             const isPaidOff = statusStr.includes('lunas') || data.isPaid === true;
-            
             if (isUtang && !isPaidOff) {
                 lunasTag = '(TIDAK LUNAS)';
             } else {
@@ -234,223 +263,182 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
             }
         }
 
-        // Color badge: Merah jika TIDAK LUNAS atau Gagal, Hijau jika LUNAS, Kuning jika Pending
-        if (type === 'nota' && data.status && data.status.toLowerCase() === 'pending') {
-            ctx.fillStyle = '#f59e0b';
-        } else if (isSukses) {
-            if (lunasTag === '(TIDAK LUNAS)') {
-                ctx.fillStyle = '#dc2626'; // Merah untuk SUKSES (TIDAK LUNAS)
+        let badgeBg = '#16a34a';
+        let badgeText = 'STATUS: SUKSES (LUNAS)';
+        if (type === 'nota') {
+            if (data.status && data.status.toLowerCase().includes('pending')) {
+                badgeBg = '#f59e0b';
+                badgeText = 'STATUS: PENDING';
+            } else if (isSukses) {
+                if (lunasTag === '(TIDAK LUNAS)') {
+                    badgeBg = '#dc2626';
+                    badgeText = 'STATUS: SUKSES (TIDAK LUNAS)';
+                } else {
+                    badgeBg = '#16a34a';
+                    badgeText = `STATUS: SUKSES ${lunasTag}`.trim();
+                }
             } else {
-                ctx.fillStyle = '#4caf50'; // Hijau untuk SUKSES (LUNAS)
+                badgeBg = '#dc2626';
+                badgeText = `STATUS: ${data.status ? data.status.toUpperCase() : 'GAGAL'}`;
             }
         } else {
-            ctx.fillStyle = '#dc2626'; // Merah untuk Gagal
+            badgeBg = '#0284c7';
+            badgeText = 'TAGIHAN BERHASIL DITEMUKAN';
         }
-        
-        let baseStatus = (data.status || '').replace(/\s*\(.*?\)/g, '').trim().toUpperCase();
-        if (!baseStatus) baseStatus = 'SUKSES';
-        
-        const badgeText = type === 'nota' ? `Status: ${baseStatus} ${lunasTag}`.trim() : `Tagihan Ditemukan!`;
-        ctx.beginPath();
-        
-            ctx.moveTo((width - 400) / 2 + 20, y);
-            ctx.lineTo((width - 400) / 2 + 400 - 20, y);
-            ctx.quadraticCurveTo((width - 400) / 2 + 400, y, (width - 400) / 2 + 400, y + 20);
-            ctx.lineTo((width - 400) / 2 + 400, y + 45 - 20);
-            ctx.quadraticCurveTo((width - 400) / 2 + 400, y + 45, (width - 400) / 2 + 400 - 20, y + 45);
-            ctx.lineTo((width - 400) / 2 + 20, y + 45);
-            ctx.quadraticCurveTo((width - 400) / 2, y + 45, (width - 400) / 2, y + 45 - 20);
-            ctx.lineTo((width - 400) / 2, y + 20);
-            ctx.quadraticCurveTo((width - 400) / 2, y, (width - 400) / 2 + 20, y);
 
+        const badgeW = 320;
+        const badgeH = 34;
+        ctx.fillStyle = badgeBg;
+        roundRectPath(ctx, (width - badgeW) / 2, y, badgeW, badgeH, 17);
         ctx.fill();
+
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 20px Arial, sans-serif';
-        ctx.fillText(badgeText, width / 2, y + 30);
-        y += 80;
-        
-        // Divider
-        const drawDivider = (yPos: number) => {
+        ctx.font = 'bold 15px Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(badgeText, width / 2, y + 22);
+
+        // Dashed Divider
+        y += 48;
+        const drawDashedDivider = (currY: number) => {
+            ctx.save();
             ctx.beginPath();
             ctx.setLineDash([8, 8]);
-            ctx.moveTo(40, yPos);
-            ctx.lineTo(width - 40, yPos);
-            ctx.strokeStyle = '#cccccc';
-            ctx.lineWidth = 2;
+            ctx.moveTo(cardX + 28, currY);
+            ctx.lineTo(cardX + cardW - 28, currY);
+            ctx.strokeStyle = '#e2e8f0';
+            ctx.lineWidth = 1.6;
             ctx.stroke();
-            ctx.setLineDash([]);
+            ctx.restore();
         };
-        
-        drawDivider(y);
-        y += 50;
-        
-        // Lines
-        ctx.textAlign = 'left';
-        ctx.font = '22px Arial, sans-serif';
-        
-        for (const [label, val] of lines) {
-            ctx.fillStyle = '#555555';
-            ctx.fillText(label, 50, y);
-            ctx.fillStyle = '#000000';
-            ctx.textAlign = 'right';
-            ctx.fillText(val, width - 50, y);
+
+        drawDashedDivider(y);
+        y += 28;
+
+        // Body Lines (Left & Right alignment)
+        const leftX = cardX + 32;
+        const rightX = cardX + cardW - 32;
+        const lineHeight = lines.length > 6 ? 28 : 32;
+
+        for (const [lbl, val] of lines) {
+            ctx.fillStyle = '#64748b';
+            ctx.font = '500 16px Arial, sans-serif';
             ctx.textAlign = 'left';
-            y += 45;
+            ctx.fillText(lbl, leftX, y);
+
+            ctx.fillStyle = '#0f172a';
+            ctx.font = 'bold 16px Arial, sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(val, rightX, y);
+            y += lineHeight;
         }
-        if (type === "nota") {
-            y += 20;
-            const maxTokenLen = 22;
-            const tokenLines = [];
-            for (let i = 0; i < token.length; i += maxTokenLen) {
-                tokenLines.push(token.substring(i, i + maxTokenLen));
-            }
-            let boxHeight = Math.max(100, 40 + (tokenLines.length * 30));
-            ctx.strokeStyle = "#ca8a04";
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(50 + 10, y);
-            ctx.lineTo(50 + width - 100 - 10, y);
-            ctx.quadraticCurveTo(50 + width - 100, y, 50 + width - 100, y + 10);
-            ctx.lineTo(50 + width - 100, y + boxHeight - 10);
-            ctx.quadraticCurveTo(50 + width - 100, y + boxHeight, 50 + width - 100 - 10, y + boxHeight);
-            ctx.lineTo(50 + 10, y + boxHeight);
-            ctx.quadraticCurveTo(50, y + boxHeight, 50, y + boxHeight - 10);
-            ctx.lineTo(50, y + 10);
-            ctx.quadraticCurveTo(50, y, 50 + 10, y);
+
+        // Token / SN Box (If PLN or has SN in nota)
+        const hasToken = type === 'nota' && token && token !== '-';
+        if (hasToken) {
+            y += 8;
+            const boxH = 68;
+            ctx.fillStyle = '#fefce8';
+            roundRectPath(ctx, leftX, y, rightX - leftX, boxH, 12);
+            ctx.fill();
+            ctx.strokeStyle = '#facc15';
+            ctx.lineWidth = 1.5;
+            roundRectPath(ctx, leftX, y, rightX - leftX, boxH, 12);
             ctx.stroke();
-            ctx.fillStyle = "#000000";
-            ctx.fillText("Token / SN", 70, y + (boxHeight / 2) + 7);
-            ctx.fillStyle = "#ef4444";
-            ctx.textAlign = "right";
-            ctx.font = "bold 20px Arial, sans-serif";
-            let ty = y + (boxHeight / 2) - ((tokenLines.length - 1) * 15);
-            for (const tl of tokenLines) {
-                ctx.fillText(tl, width - 70, ty + 7);
-                ty += 30;
-            }
-            ctx.textAlign = "left";
-            y += boxHeight + 40;
-        }
-        y += 20;
-        // Total Box
-        ctx.strokeStyle = '#ca8a04';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        
-            ctx.moveTo(50 + 10, y);
-            ctx.lineTo(50 + width - 100 - 10, y);
-            ctx.quadraticCurveTo(50 + width - 100, y, 50 + width - 100, y + 10);
-            ctx.lineTo(50 + width - 100, y + 80 - 10);
-            ctx.quadraticCurveTo(50 + width - 100, y + 80, 50 + width - 100 - 10, y + 80);
-            ctx.lineTo(50 + 10, y + 80);
-            ctx.quadraticCurveTo(50, y + 80, 50, y + 80 - 10);
-            ctx.lineTo(50, y + 10);
-            ctx.quadraticCurveTo(50, y, 50 + 10, y);
 
-        ctx.stroke();
-        
-        ctx.fillStyle = '#000000';
-        ctx.font = 'bold 24px Arial, sans-serif';
-        ctx.fillText('TOTAL BAYAR', 70, y + 50);
-        
-        ctx.fillStyle = '#ef4444';
-        ctx.textAlign = 'right';
-        ctx.fillText('Rp ' + (data.price || data.total || 0).toLocaleString('id-ID'), width - 70, y + 50);
-        ctx.textAlign = 'left';
-        y += 110;
-        
-        if (type === 'tagihan' && data.detail) {
-            let detailsList = data.detail.replace(/[💎⚡📄📅💡💳]/g, '').split('\n').filter((l: string) => !l.toLowerCase().includes('admin') && !l.toLowerCase().includes('total'));
-            for (let l of detailsList) {
-                if(l.toLowerCase().includes('tarif') || l.toLowerCase().includes('daya') || l.toLowerCase().includes('lembar')) {
-                    const parts = l.split(':');
-                    ctx.fillStyle = '#555555';
-                    ctx.font = '20px Arial, sans-serif';
-                    let icon = '⚡';
-                    if(l.toLowerCase().includes('daya')) icon = '📊';
-                    if(l.toLowerCase().includes('lembar')) icon = '📄';
-                    ctx.fillText(`${parts[0].trim()}`, 50, y);
-                    ctx.fillStyle = '#000000';
-                    ctx.textAlign = 'right';
-                    ctx.fillText(parts[1] ? parts[1].trim() : '', width - 50, y);
-                    ctx.textAlign = 'left';
-                    y += 35;
-                } else if (l.toLowerCase().includes('bulan') || l.toLowerCase().includes('meter')) {
-                    ctx.fillStyle = '#f5f5f5';
-                    ctx.beginPath();
-        ctx.fillRect(50, y, width - 100, 45);
-                    ctx.fillStyle = '#000000';
-                    ctx.font = '18px Arial, sans-serif';
-                    ctx.fillText(l.trim(), 70, y + 30);
-                    y += 55;
-                }
-            }
-            y += 20;
-        }
+            ctx.fillStyle = '#854d0e';
+            ctx.font = 'bold 14px Arial, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText('STROOM / TOKEN PLN:', leftX + 16, y + 24);
 
-        if (type === 'nota') {
-            ctx.fillStyle = '#f8f9fa';
-            ctx.beginPath();
-        
-            ctx.moveTo(50 + 10, y);
-            ctx.lineTo(50 + width - 100 - 10, y);
-            ctx.quadraticCurveTo(50 + width - 100, y, 50 + width - 100, y + 10);
-            ctx.lineTo(50 + width - 100, y + 130 - 10);
-            ctx.quadraticCurveTo(50 + width - 100, y + 130, 50 + width - 100 - 10, y + 130);
-            ctx.lineTo(50 + 10, y + 130);
-            ctx.quadraticCurveTo(50, y + 130, 50, y + 130 - 10);
-            ctx.lineTo(50, y + 10);
-            ctx.quadraticCurveTo(50, y, 50 + 10, y);
+            ctx.fillStyle = '#dc2626';
+            ctx.font = 'bold 22px monospace';
+            ctx.textAlign = 'right';
+            ctx.fillText(token, rightX - 16, y + 44);
 
+            y += boxH + 16;
+        } else if (type === 'tagihan' && data.detail) {
+            y += 6;
+            const boxH = 66;
+            ctx.fillStyle = '#f8fafc';
+            roundRectPath(ctx, leftX, y, rightX - leftX, boxH, 12);
             ctx.fill();
-            
-            ctx.fillStyle = '#333333';
-            ctx.font = '16px Arial, sans-serif';
-            ctx.textAlign = 'center';
-            const shortCode = `#${(data.id || 'E4').substring(0,6).toUpperCase()}`;
-            ctx.fillText('Terima kasih telah berbelanja di E4 Store!', width / 2, y + 40);
-            ctx.fillText(`Cetak: ${formattedDate} | Kode: ${shortCode}`, width / 2, y + 70);
-            ctx.fillText(`${calendarInfo}`, width / 2, y + 100);
-            y += 150;
+            ctx.strokeStyle = '#e2e8f0';
+            ctx.lineWidth = 1.2;
+            roundRectPath(ctx, leftX, y, rightX - leftX, boxH, 12);
+            ctx.stroke();
+
+            ctx.fillStyle = '#475569';
+            ctx.font = '14px Arial, sans-serif';
+            ctx.textAlign = 'left';
+            const cleanDetail = data.detail.replace(/[💎⚡📄📅💡💳]/g, '').trim().split('\n').slice(0, 2);
+            let dy = y + 24;
+            for (const dl of cleanDetail) {
+                ctx.fillText(dl.trim(), leftX + 16, dy);
+                dy += 22;
+            }
+            y += boxH + 14;
         } else {
-            ctx.fillStyle = '#fdf2f8';
-            ctx.beginPath();
-        
-            ctx.moveTo(50 + 10, y);
-            ctx.lineTo(50 + width - 100 - 10, y);
-            ctx.quadraticCurveTo(50 + width - 100, y, 50 + width - 100, y + 10);
-            ctx.lineTo(50 + width - 100, y + 100 - 10);
-            ctx.quadraticCurveTo(50 + width - 100, y + 100, 50 + width - 100 - 10, y + 100);
-            ctx.lineTo(50 + 10, y + 100);
-            ctx.quadraticCurveTo(50, y + 100, 50, y + 100 - 10);
-            ctx.lineTo(50, y + 10);
-            ctx.quadraticCurveTo(50, y, 50 + 10, y);
-
-            ctx.fill();
-            
-            ctx.fillStyle = '#db2777';
-            ctx.font = 'bold 20px Arial, sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('Silahkan Lanjutkan Pembayaran', width / 2, y + 45);
-            ctx.fillStyle = '#333333';
-            ctx.font = '16px Arial, sans-serif';
-            ctx.fillText('Screenshot halaman ini jika diperlukan.', width / 2, y + 80);
-            y += 130;
+            y += 10;
         }
 
-        drawDivider(y);
-        y += 40;
-        
-        ctx.fillStyle = '#333333';
-        ctx.font = '16px Arial, sans-serif';
+        // Total Bayar Box
+        const totalBoxH = 64;
+        ctx.fillStyle = '#f0fdf4';
+        roundRectPath(ctx, leftX, y, rightX - leftX, totalBoxH, 12);
+        ctx.fill();
+        ctx.strokeStyle = '#86efac';
+        ctx.lineWidth = 1.5;
+        roundRectPath(ctx, leftX, y, rightX - leftX, totalBoxH, 12);
+        ctx.stroke();
+
+        ctx.fillStyle = '#166534';
+        ctx.font = 'bold 18px Arial, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(type === 'nota' ? 'TOTAL PEMBAYARAN' : 'TOTAL TAGIHAN', leftX + 18, y + 38);
+
+        ctx.fillStyle = '#15803d';
+        ctx.font = '900 26px Arial, sans-serif';
+        ctx.textAlign = 'right';
+        const amountVal = data.price || data.total || 0;
+        ctx.fillText(`Rp ${Number(amountVal).toLocaleString('id-ID')}`, rightX - 18, y + 40);
+
+        y += totalBoxH + 18;
+
+        // Footer info card
+        const footerH = 62;
+        ctx.fillStyle = '#f8fafc';
+        roundRectPath(ctx, leftX, y, rightX - leftX, footerH, 12);
+        ctx.fill();
+        ctx.strokeStyle = '#f1f5f9';
+        ctx.lineWidth = 1;
+        roundRectPath(ctx, leftX, y, rightX - leftX, footerH, 12);
+        ctx.stroke();
+
+        ctx.fillStyle = '#475569';
+        ctx.font = 'bold 14px Arial, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('Chuna - Asisten Imutmu siap bantu 24 jam!', width / 2, y);
-        y += 25;
-        ctx.fillText('Terimakasih telah berbelanja di E4 Store!', width / 2, y);
-        y += 20;
-        ctx.fillStyle = '#888888';
-        ctx.fillText('◻  ◻  ◻  ◻  ◻', width / 2, y);
-        
+        ctx.fillText('Terima kasih telah bertransaksi di E4 Store!', width / 2, y + 24);
+
+        const shortCode = `#${(data.id || 'E4').substring(0, 8).toUpperCase()}`;
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '13px Arial, sans-serif';
+        ctx.fillText(`Cetak: ${formattedDate} | Ref: ${shortCode}`, width / 2, y + 46);
+
+        y += footerH + 16;
+        drawDashedDivider(y);
+
+        // Chuna bottom branding
+        y += 24;
+        ctx.fillStyle = '#64748b';
+        ctx.font = '500 14px Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Chuna - Asisten Imutmu siap melayani 24 jam non-stop ✨', width / 2, y);
+
+        y += 18;
+        ctx.fillStyle = '#cbd5e1';
+        ctx.font = '12px sans-serif';
+        ctx.fillText('Simpan struk digital ini sebagai bukti transaksi yang sah', width / 2, y);
+
         return canvas.toBuffer('image/png');
     } catch (e: any) {
         console.error("Canvas receipt error:", e);
@@ -617,7 +605,8 @@ let isRequestingPairingCode = false;
 
 export async function generateCanvasDebtReceipt(member: any, utangTxs: any[]): Promise<Buffer | null> {
     try {
-        const width = 600;
+        const width = 800;
+        const height = 800;
         let memberName = member?.name || '-';
         let waProfileName = '';
         let waPhone = '';
@@ -637,14 +626,132 @@ export async function generateCanvasDebtReceipt(member: any, utangTxs: any[]): P
             } catch (e) {}
         }
 
-        // Calculate totals
-        let totalUtang = 0;
-        utangTxs.forEach((t: any) => {
-            const sisa = t.price - (t.paidAmount || 0);
-            totalUtang += sisa;
-        });
+        const canvas = createCanvas(width, height);
+        const ctx = canvas.getContext('2d');
 
-        // Earliest or latest date
+        // Soft outer background
+        ctx.fillStyle = '#f8fafc';
+        ctx.fillRect(0, 0, width, height);
+
+        const cardX = 24;
+        const cardY = 24;
+        const cardW = width - 48;
+        const cardH = height - 48;
+        const cardR = 24;
+
+        // Card shadow & container
+        ctx.save();
+        ctx.shadowColor = 'rgba(15, 23, 42, 0.08)';
+        ctx.shadowBlur = 18;
+        ctx.shadowOffsetY = 6;
+        ctx.fillStyle = '#ffffff';
+        roundRectPath(ctx, cardX, cardY, cardW, cardH, cardR);
+        ctx.fill();
+        ctx.restore();
+
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 1.5;
+        roundRectPath(ctx, cardX, cardY, cardW, cardH, cardR);
+        ctx.stroke();
+
+        // Clip inside card for ribbon
+        ctx.save();
+        roundRectPath(ctx, cardX, cardY, cardW, cardH, cardR);
+        ctx.clip();
+
+        // Diagonal Red Ribbon in Top Right: "BELUM LUNAS"
+        ctx.save();
+        ctx.translate(cardX + cardW - 35, cardY + 45);
+        ctx.rotate((26 * Math.PI) / 180);
+        ctx.fillStyle = '#ef4444';
+        ctx.fillRect(-120, -20, 260, 40);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '900 15px Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('BELUM LUNAS', 10, 0);
+        ctx.restore();
+
+        // Top avatar or receipt circle icon
+        let y = 52;
+        const iconSize = 48;
+        if (waAvatarImg) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(width / 2, y + iconSize / 2, iconSize / 2, 0, Math.PI * 2);
+            ctx.closePath();
+            ctx.clip();
+            ctx.drawImage(waAvatarImg, width / 2 - iconSize / 2, y, iconSize, iconSize);
+            ctx.restore();
+
+            ctx.beginPath();
+            ctx.arc(width / 2, y + iconSize / 2, iconSize / 2, 0, Math.PI * 2);
+            ctx.strokeStyle = '#10b981';
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+        } else {
+            ctx.beginPath();
+            ctx.arc(width / 2, y + iconSize / 2, iconSize / 2, 0, Math.PI * 2);
+            ctx.fillStyle = '#fef2f2';
+            ctx.fill();
+            ctx.strokeStyle = '#fecaca';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            ctx.font = '24px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('🧾', width / 2, y + iconSize / 2);
+        }
+
+        y += iconSize + 22;
+
+        // Title
+        ctx.fillStyle = '#0f172a';
+        ctx.font = '900 28px Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText('E4 STORE', width / 2, y);
+
+        y += 24;
+        ctx.fillStyle = '#64748b';
+        ctx.font = 'bold 14px Arial, sans-serif';
+        ctx.fillText('BUKTI CATATAN TAGIHAN / UTANG', width / 2, y);
+
+        y += 20;
+
+        // Dashed divider
+        const drawDashedDivider = (currY: number) => {
+            ctx.save();
+            ctx.beginPath();
+            ctx.setLineDash([6, 6]);
+            ctx.moveTo(cardX + 30, currY);
+            ctx.lineTo(cardX + cardW - 30, currY);
+            ctx.strokeStyle = '#e2e8f0';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            ctx.restore();
+        };
+
+        drawDashedDivider(y);
+        y += 26;
+
+        const labelX = cardX + 32;
+        const valX = cardX + cardW - 32;
+
+        const drawRow = (label: string, val: string, isBoldVal = false, valColor = '#0f172a') => {
+            ctx.fillStyle = '#64748b';
+            ctx.font = '500 15px Arial, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(label, labelX, y);
+
+            ctx.fillStyle = valColor;
+            ctx.font = isBoldVal ? 'bold 15px Arial, sans-serif' : '15px Arial, sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(val, valX, y);
+            y += 26;
+        };
+
         const firstTx = utangTxs[0];
         const txDate = new Date(firstTx?.date || new Date());
         const dateStr = txDate.toLocaleString('id-ID', {
@@ -653,278 +760,125 @@ export async function generateCanvasDebtReceipt(member: any, utangTxs: any[]): P
             month: '2-digit',
             year: 'numeric',
             hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit'
+            minute: '2-digit'
         });
 
-        const itemRowsCount = Math.max(1, utangTxs.length);
-        const hasWaProfile = Boolean(waProfileName && waProfileName !== '-');
-        const height = 750 + (itemRowsCount * 42) + (hasWaProfile ? 35 : 0);
-
-        const canvas = createCanvas(width, height);
-        const ctx = canvas.getContext('2d');
-
-        // Draw soft card background with rounded corners
-        const cardX = 16;
-        const cardY = 16;
-        const cardW = width - 32;
-        const cardH = height - 32;
-        const cardR = 26;
-
-        // Clip to rounded card for clean ribbon edges
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(cardX + cardR, cardY);
-        ctx.lineTo(cardX + cardW - cardR, cardY);
-        ctx.arcTo(cardX + cardW, cardY, cardX + cardW, cardY + cardR, cardR);
-        ctx.lineTo(cardX + cardW, cardY + cardH - cardR);
-        ctx.arcTo(cardX + cardW, cardY + cardH, cardX + cardW - cardR, cardY + cardH, cardR);
-        ctx.lineTo(cardX + cardR, cardY + cardH);
-        ctx.arcTo(cardX, cardY + cardH, cardX, cardY + cardH - cardR, cardR);
-        ctx.lineTo(cardX, cardY + cardR);
-        ctx.arcTo(cardX, cardY, cardX + cardR, cardY, cardR);
-        ctx.closePath();
-
-        // Card fill & subtle border
-        ctx.fillStyle = '#ffffff';
-        ctx.fill();
-        ctx.strokeStyle = '#e2e8f0';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.clip(); // clip contents inside card
-
-        // Diagonal Red Ribbon in Top Right: "BELUM LUNAS"
-        ctx.save();
-        ctx.translate(cardX + cardW - 35, cardY + 50);
-        ctx.rotate((26 * Math.PI) / 180);
-        ctx.fillStyle = '#ef4444';
-        ctx.fillRect(-120, -22, 260, 44);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '900 16px Arial, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('BELUM LUNAS', 10, 0);
-        ctx.restore();
-
-        // Top Avatar / Icon at center
-        let y = 70;
-        const iconSize = 64;
-        const iconX = width / 2 - iconSize / 2;
-        const iconY = y;
-
-        if (waAvatarImg) {
-            ctx.save();
-            ctx.beginPath();
-            ctx.arc(width / 2, iconY + iconSize / 2, iconSize / 2, 0, Math.PI * 2);
-            ctx.closePath();
-            ctx.clip();
-            ctx.drawImage(waAvatarImg, iconX, iconY, iconSize, iconSize);
-            ctx.restore();
-
-            ctx.beginPath();
-            ctx.arc(width / 2, iconY + iconSize / 2, iconSize / 2, 0, Math.PI * 2);
-            ctx.strokeStyle = '#10b981';
-            ctx.lineWidth = 3;
-            ctx.stroke();
-        } else {
-            // Receipt circle icon
-            ctx.beginPath();
-            ctx.arc(width / 2, iconY + iconSize / 2, iconSize / 2, 0, Math.PI * 2);
-            ctx.fillStyle = '#f1f5f9';
-            ctx.fill();
-            ctx.strokeStyle = '#cbd5e1';
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
-
-            ctx.font = '28px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('🧾', width / 2, iconY + iconSize / 2);
-        }
-
-        y += iconSize + 30;
-
-        // Store Title: E4 STORE (Per user request: KIOS PULSA & PAYMENT diganti E4 STORE)
-        ctx.fillStyle = '#0f172a';
-        ctx.font = '900 32px Arial, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'alphabetic';
-        ctx.fillText('E4 STORE', width / 2, y);
-
-        y += 28;
-        ctx.fillStyle = '#64748b';
-        ctx.font = '600 15px Arial, sans-serif';
-        ctx.fillText('BUKTI CATATAN TAGIHAN', width / 2, y);
-
-        y += 30;
-
-        // Helper for dashed line
-        const drawDashedDivider = (currY: number) => {
-            ctx.save();
-            ctx.beginPath();
-            ctx.setLineDash([5, 5]);
-            ctx.moveTo(cardX + 25, currY);
-            ctx.lineTo(cardX + cardW - 25, currY);
-            ctx.strokeStyle = '#cbd5e1';
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
-            ctx.restore();
-        };
-
-        drawDashedDivider(y);
-        y += 35;
-
-        // Customer Details Section
-        const labelX = cardX + 30;
-        const valX = cardX + cardW - 30;
-
-        const drawRow = (label: string, val: string, isBoldVal = false, valColor = '#0f172a') => {
-            ctx.fillStyle = '#64748b';
-            ctx.font = '500 17px Arial, sans-serif';
-            ctx.textAlign = 'left';
-            ctx.fillText(label, labelX, y);
-
-            ctx.fillStyle = valColor;
-            ctx.font = isBoldVal ? 'bold 18px Arial, sans-serif' : '17px Arial, sans-serif';
-            ctx.textAlign = 'right';
-            ctx.fillText(val, valX, y);
-            y += 34;
-        };
-
-        drawRow('Customer:', memberName, true);
-        if (hasWaProfile) {
+        drawRow('Nama Customer:', memberName, true);
+        if (waProfileName && waProfileName !== '-') {
             drawRow('Profil WA:', waProfileName, true, '#059669');
         }
         let clean = waPhone.replace(/\D/g, '');
         if (clean.startsWith('0')) clean = '62' + clean.substring(1);
-        drawRow('No. HP:', waPhone !== '-' ? (waPhone.startsWith('+') ? waPhone : `+${clean}`) : '-', false);
-        drawRow('Tanggal:', dateStr, false);
+        drawRow('No. WhatsApp:', waPhone !== '-' ? (waPhone.startsWith('+') ? waPhone : `+${clean}`) : '-', false);
+        drawRow('Tanggal Catat:', dateStr, false);
 
-        y += 5;
+        y += 4;
         drawDashedDivider(y);
-        y += 32;
+        y += 24;
 
         // Items Table Header
-        ctx.fillStyle = '#64748b';
-        ctx.font = 'bold 14px Arial, sans-serif';
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = 'bold 13px Arial, sans-serif';
         ctx.textAlign = 'left';
-        ctx.fillText('DESKRIPSI ITEM', labelX, y);
-
+        ctx.fillText('RINCIAN PRODUK / TRANSAKSI', labelX, y);
         ctx.textAlign = 'right';
-        ctx.fillText('NOMINAL', valX, y);
-        y += 28;
+        ctx.fillText('SISA UTANG', valX, y);
+        y += 24;
 
-        // Items List
-        utangTxs.forEach((t: any) => {
+        let totalUtang = 0;
+        const maxItems = utangTxs.slice(0, 4);
+        maxItems.forEach((t: any) => {
             const sisa = t.price - (t.paidAmount || 0);
-            ctx.fillStyle = '#1e293b';
-            ctx.font = '500 17px Arial, sans-serif';
+            totalUtang += sisa;
+            ctx.fillStyle = '#334155';
+            ctx.font = '500 15px Arial, sans-serif';
             ctx.textAlign = 'left';
             let prodName = t.product || 'Produk';
-            if (prodName.length > 28) prodName = prodName.slice(0, 26) + '...';
+            if (prodName.length > 40) prodName = prodName.slice(0, 38) + '...';
             ctx.fillText(prodName, labelX, y);
 
             ctx.fillStyle = '#0f172a';
-            ctx.font = 'bold 18px Arial, sans-serif';
+            ctx.font = 'bold 15px Arial, sans-serif';
             ctx.textAlign = 'right';
             ctx.fillText(`Rp ${sisa.toLocaleString('id-ID')}`, valX, y);
-            y += 36;
+            y += 26;
         });
 
-        y += 5;
+        if (utangTxs.length > 4) {
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = 'italic 13px Arial, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(`... dan ${utangTxs.length - 4} transaksi lainnya`, labelX, y);
+            y += 22;
+        }
+
+        y += 4;
         drawDashedDivider(y);
-        y += 40;
+        y += 30;
 
         // TOTAL UTANG
         ctx.fillStyle = '#0f172a';
-        ctx.font = '900 20px Arial, sans-serif';
+        ctx.font = 'bold 18px Arial, sans-serif';
         ctx.textAlign = 'left';
         ctx.fillText('TOTAL UTANG', labelX, y);
 
-        ctx.fillStyle = '#0f172a';
-        ctx.font = '900 30px Arial, sans-serif';
+        ctx.fillStyle = '#dc2626';
+        ctx.font = '900 28px Arial, sans-serif';
         ctx.textAlign = 'right';
         ctx.fillText(`Rp ${totalUtang.toLocaleString('id-ID')}`, valX, y);
 
-        y += 18;
-        // Solid black line below total
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(labelX, y);
-        ctx.lineTo(valX, y);
-        ctx.strokeStyle = '#0f172a';
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
-        ctx.restore();
+        y += 24;
 
-        y += 35;
-
-        // Note Box: Tolong segera diselesaikan ya kak, terima kasih 🙏
+        // Reminder note box
         const boxX = labelX;
         const boxW = valX - labelX;
-        const boxH = 54;
-        const boxR = 12;
-
-        ctx.beginPath();
-        ctx.moveTo(boxX + boxR, y);
-        ctx.lineTo(boxX + boxW - boxR, y);
-        ctx.arcTo(boxX + boxW, y, boxX + boxW, y + boxR, boxR);
-        ctx.lineTo(boxX + boxW, y + boxH - boxR);
-        ctx.arcTo(boxX + boxW, y + boxH, boxX + boxW - boxR, y + boxH, boxR);
-        ctx.lineTo(boxX + boxR, y + boxH);
-        ctx.arcTo(boxX, y + boxH, boxX, y + boxH - boxR, boxR);
-        ctx.lineTo(boxX, y + boxR);
-        ctx.arcTo(boxX, y, boxX + boxR, y, boxR);
-        ctx.closePath();
-
-        ctx.fillStyle = '#f8fafc';
+        const boxH = 46;
+        ctx.fillStyle = '#fffbeb';
+        roundRectPath(ctx, boxX, y, boxW, boxH, 10);
         ctx.fill();
-        ctx.strokeStyle = '#e2e8f0';
-        ctx.lineWidth = 1.2;
+        ctx.strokeStyle = '#fef3c7';
+        ctx.lineWidth = 1;
+        roundRectPath(ctx, boxX, y, boxW, boxH, 10);
         ctx.stroke();
 
-        ctx.fillStyle = '#475569';
-        ctx.font = 'italic 16px Arial, sans-serif';
+        ctx.fillStyle = '#92400e';
+        ctx.font = 'italic 14px Arial, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('Tolong segera diselesaikan ya kak, terima kasih 🙏', width / 2, y + boxH / 2);
+        ctx.fillText('Mohon untuk segera diselesaikan ya kak, terima kasih 🙏', width / 2, y + boxH / 2);
 
-        y += boxH + 35;
+        y += boxH + 26;
 
         // Decorative Barcode
         ctx.save();
-        const barcodeW = 260;
-        const barcodeH = 34;
+        const barcodeW = 240;
+        const barcodeH = 26;
         const bcStartX = width / 2 - barcodeW / 2;
         const barWidths = [10, 4, 12, 4, 8, 4, 14, 6, 10, 4, 14, 4, 8, 6, 12, 4, 14, 4, 10, 4, 12];
         let currBcX = bcStartX;
-        ctx.fillStyle = '#475569';
+        ctx.fillStyle = '#94a3b8';
         barWidths.forEach((w) => {
             ctx.fillRect(currBcX, y, w, barcodeH);
             currBcX += w + 4;
         });
         ctx.restore();
 
-        y += barcodeH + 20;
-
-        // Receipt reference text
-        const safeName = memberName.replace(/\s+/g, '').toUpperCase().slice(0, 10);
+        y += barcodeH + 16;
+        const safeName = (memberName || 'MEMBER').replace(/\s+/g, '').toUpperCase().slice(0, 10);
         const refCode = `REC-${txDate.getFullYear()}${(txDate.getMonth() + 1).toString().padStart(2, '0')}${txDate.getDate().toString().padStart(2, '0')}-${safeName}`;
         ctx.fillStyle = '#94a3b8';
-        ctx.font = '14px monospace';
+        ctx.font = '12px monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'alphabetic';
         ctx.fillText(refCode, width / 2, y);
 
-        ctx.restore(); // restore clipping
-
+        ctx.restore(); // Restore clipping
         return canvas.toBuffer('image/png');
     } catch (e: any) {
         console.error("generateCanvasDebtReceipt error:", e);
         return null;
     }
 }
-
 
 let digiflazzUsername = db.digiflazzUsername || "";
 let digiflazzApiKey = db.digiflazzApiKey || "";

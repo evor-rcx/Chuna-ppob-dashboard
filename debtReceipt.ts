@@ -187,18 +187,13 @@ function drawShoppingBag(ctx: any, x: number, y: number, size: number) {
 }
 
 export async function generateDebtSettlementReceipt(data: DebtSettlementReceiptData): Promise<Buffer> {
-    const width = 600;
-    
-    // Calculate required height based on products count
-    const productCount = Math.max(1, data.products?.length || 1);
-    const productListHeight = productCount * 38;
-    const baseHeight = 1092;
-    const height = baseHeight + (productCount > 1 ? (productCount - 1) * 38 : 0);
+    const width = 800;
+    const height = 800;
 
     const canvas = createCanvas(width, height);
     const ctx = canvas.getContext('2d');
 
-    // 1. Soft Blue Clean Gradient Background
+    // 1. Soft Blue Clean Gradient Background (1:1 Ratio 800x800)
     const bgGrad = ctx.createLinearGradient(0, 0, 0, height);
     bgGrad.addColorStop(0, '#EAF5FD');
     bgGrad.addColorStop(0.5, '#F1F8FE');
@@ -206,385 +201,226 @@ export async function generateDebtSettlementReceipt(data: DebtSettlementReceiptD
     ctx.fillStyle = bgGrad;
     ctx.fillRect(0, 0, width, height);
 
-    // Decorative floating elements in background
-    // 1. Coins with cute faces
-    const coins = [
-        { x: 38, y: 38, r: 32 },
-        { x: 555, y: 48, r: 30 },
-        { x: 45, y: 440, r: 26 },
-        { x: 555, y: 435, r: 26 },
-        { x: 28, y: 760, r: 25 },
-        { x: 565, y: 760, r: 25 },
-        { x: 555, y: 980, r: 28 },
-    ];
-    coins.forEach(c => drawCuteCoin(ctx, c.x, c.y, c.r));
+    // Decorative floating sparkles & coins
+    drawSparkle(ctx, 50, 50, 10, '#38BDF8');
+    drawSparkle(ctx, 750, 60, 12, '#38BDF8');
+    drawSparkle(ctx, 740, 740, 10, '#38BDF8');
+    drawCuteCoin(ctx, 45, 400, 24);
+    drawCuteCoin(ctx, 755, 400, 24);
 
-    // 2. Cardboard boxes
-    const boxes = [
-        { x: 560, y: 135, s: 36 },
-        { x: 40, y: 330, s: 36 },
-        { x: 560, y: 320, s: 36 }
-    ];
-    boxes.forEach(b => drawCardboardBox(ctx, b.x, b.y, b.s));
+    // Main Card
+    const cardX = 28;
+    const cardY = 28;
+    const cardW = width - 56;
+    const cardH = height - 56;
+    const cardR = 24;
 
-    // 3. Shopping bags
-    const bags = [
-        { x: 40, y: 215, s: 32 },
-        { x: 40, y: 580, s: 32 },
-        { x: 555, y: 575, s: 32 },
-        { x: 30, y: 940, s: 32 },
-        { x: 555, y: 940, s: 32 }
-    ];
-    bags.forEach(b => drawShoppingBag(ctx, b.x, b.y, b.s));
+    ctx.save();
+    ctx.shadowColor = 'rgba(30, 58, 138, 0.08)';
+    ctx.shadowBlur = 18;
+    ctx.shadowOffsetY = 6;
+    ctx.fillStyle = '#ffffff';
+    roundRect(ctx, cardX, cardY, cardW, cardH, cardR);
+    ctx.fill();
+    ctx.restore();
 
-    // 4. Sparkles
-    const sparkles = [
-        { x: 75, y: 155, size: 9, color: 'rgba(56, 189, 248, 0.75)' },
-        { x: 520, y: 220, size: 8, color: 'rgba(56, 189, 248, 0.75)' },
-        { x: 75, y: 630, size: 9, color: 'rgba(56, 189, 248, 0.75)' },
-        { x: 535, y: 645, size: 9, color: 'rgba(56, 189, 248, 0.75)' },
-        { x: 80, y: 825, size: 8, color: 'rgba(56, 189, 248, 0.75)' },
-        { x: 530, y: 850, size: 8, color: 'rgba(56, 189, 248, 0.75)' }
-    ];
-    sparkles.forEach(s => drawSparkle(ctx, s.x, s.y, s.size, s.color));
+    ctx.strokeStyle = '#BAE6FD';
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, cardX, cardY, cardW, cardH, cardR);
+    ctx.stroke();
 
-    let currentY = 48;
-
-    // 2. Top Header - Logo & Store Name
-    drawGiftIcon(ctx, 215, currentY + 14, 34);
+    // Header
+    let y = 64;
     ctx.fillStyle = '#1E3A8A';
-    ctx.font = 'bold 32px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('E4 STORE', 242, currentY + 16);
-
-    currentY += 56;
-
-    // Main Title
-    ctx.fillStyle = '#0F172A';
-    ctx.font = 'bold 25px sans-serif';
+    ctx.font = 'bold 30px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(data.isLunasTotal ? 'NOTA PEMBAYARAN LUNAS' : 'NOTA PEMBAYARAN UTANG', width / 2, currentY);
+    ctx.fillText('🎁 E4 STORE', width / 2, y);
 
-    currentY += 32;
-    ctx.fillStyle = '#334155';
-    ctx.font = 'bold 18px sans-serif';
-    ctx.fillText('Atas Nama: ' + (data.nama || '-'), width / 2, currentY);
-
-    currentY += 30;
-
-    const cardX = 58;
-    const cardW = width - 116; // 484px
-
-    // 3. Card 1 - RINCIAN PRODUK
-    const headerHeight = 40;
-    const productBodyHeight = 36 + productListHeight + 36;
-    const card1Height = headerHeight + productBodyHeight;
-
-    // Card 1 container
-    ctx.save();
-    ctx.shadowColor = 'rgba(148, 163, 184, 0.18)';
-    ctx.shadowBlur = 12;
-    ctx.shadowOffsetY = 4;
-    ctx.fillStyle = '#FFFFFF';
-    roundRect(ctx, cardX, currentY, cardW, card1Height, 16);
-    ctx.fill();
-    ctx.restore();
-
-    // Card 1 Outer border
-    ctx.strokeStyle = '#BAE6FD';
-    ctx.lineWidth = 1.5;
-    roundRect(ctx, cardX, currentY, cardW, card1Height, 16);
-    ctx.stroke();
-
-    // Card 1 Header Bar (Light Blue)
-    ctx.fillStyle = '#BAE6FD';
-    roundRect(ctx, cardX, currentY, cardW, headerHeight, [16, 16, 0, 0]);
-    ctx.fill();
-
-    ctx.fillStyle = '#0F172A';
-    ctx.font = 'bold 17px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('📦 RINCIAN PRODUK', cardX + 16, currentY + headerHeight / 2);
-
-    // Card 1 Body Content
-    let pY = currentY + headerHeight + 22;
-
-    // Columns Header
-    ctx.fillStyle = '#334155';
+    y += 26;
+    ctx.fillStyle = '#0284C7';
     ctx.font = 'bold 15px sans-serif';
+    ctx.fillText(data.isLunasTotal ? 'NOTA PELUNASAN UTANG RESMI' : 'NOTA PEMBAYARAN ANGSURAN UTANG', width / 2, y);
+
+    y += 24;
+    ctx.fillStyle = '#475569';
+    ctx.font = '500 15px sans-serif';
+    ctx.fillText(`Atas Nama: ${data.nama}`, width / 2, y);
+
+    y += 18;
+    // Dashed divider
+    ctx.save();
+    ctx.setLineDash([6, 6]);
+    ctx.strokeStyle = '#E0F2FE';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(cardX + 24, y);
+    ctx.lineTo(cardX + cardW - 24, y);
+    ctx.stroke();
+    ctx.restore();
+
+    y += 22;
+
+    // Two side-by-side boxes: Left (Rincian Produk), Right (Rincian Pembayaran)
+    const gap = 16;
+    const boxW = (cardW - 48 - gap) / 2;
+    const boxH = 250;
+    const leftBoxX = cardX + 24;
+    const rightBoxX = leftBoxX + boxW + gap;
+
+    // Left Box - Rincian Transaksi
+    ctx.fillStyle = '#F8FAFC';
+    roundRect(ctx, leftBoxX, y, boxW, boxH, 16);
+    ctx.fill();
+    ctx.strokeStyle = '#E2E8F0';
+    ctx.lineWidth = 1.2;
+    roundRect(ctx, leftBoxX, y, boxW, boxH, 16);
+    ctx.stroke();
+
+    ctx.fillStyle = '#0369A1';
+    ctx.font = 'bold 14px sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText('Nama Produk', cardX + 18, pY);
-    ctx.textAlign = 'right';
-    ctx.fillText('Harga', cardX + cardW - 18, pY);
+    ctx.fillText('📦 RINCIAN TRANSAKSI', leftBoxX + 16, y + 26);
 
-    pY += 28;
+    let prodY = y + 54;
+    const products = data.products || [];
+    const displayProds = products.slice(0, 3);
 
-    // Product rows
-    ctx.fillStyle = '#0F172A';
-    ctx.font = 'bold 16px sans-serif';
-    if (data.products && data.products.length > 0) {
-        data.products.forEach(prod => {
-            ctx.textAlign = 'left';
-            ctx.fillText(prod.name || '-', cardX + 18, pY);
-            ctx.textAlign = 'right';
-            ctx.fillText(`Rp ${(prod.price || 0).toLocaleString('id-ID')}`, cardX + cardW - 18, pY);
-            pY += 34;
-        });
-    } else {
+    displayProds.forEach((p, idx) => {
+        ctx.fillStyle = '#334155';
+        ctx.font = 'bold 13px sans-serif';
         ctx.textAlign = 'left';
-        ctx.fillText('Produk Transaksi', cardX + 18, pY);
+        let pName = p.name || 'Produk';
+        if (pName.length > 22) pName = pName.slice(0, 20) + '..';
+        ctx.fillText(`${idx + 1}. ${pName}`, leftBoxX + 16, prodY);
+
+        ctx.fillStyle = '#0F172A';
+        ctx.font = '500 13px sans-serif';
         ctx.textAlign = 'right';
-        ctx.fillText(`Rp ${(data.totalDebt || 0).toLocaleString('id-ID')}`, cardX + cardW - 18, pY);
-        pY += 34;
+        ctx.fillText(`Rp ${(p.price || 0).toLocaleString('id-ID')}`, leftBoxX + boxW - 16, prodY);
+        prodY += 28;
+    });
+
+    if (products.length > 3) {
+        ctx.fillStyle = '#94A3B8';
+        ctx.font = 'italic 12px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`... dan ${products.length - 3} item lainnya`, leftBoxX + 16, prodY);
     }
 
-    // Total Utang in Card 1
-    pY += 6;
-    ctx.fillStyle = '#0F172A';
-    ctx.font = 'bold 17px sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillText(`Total Utang: Rp ${(data.totalDebt || 0).toLocaleString('id-ID')}`, cardX + cardW - 18, pY);
+    // Date in left box
+    ctx.fillStyle = '#94A3B8';
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('Tanggal Pembayaran:', leftBoxX + 16, y + boxH - 34);
+    ctx.fillStyle = '#475569';
+    ctx.font = '500 12px sans-serif';
+    ctx.fillText(`${data.tglBayar || data.tglUtang || '-'}`, leftBoxX + 16, y + boxH - 16);
 
-    currentY += card1Height + 16;
-
-    // 4. Card 2 - TANGGAL TRANSAKSI
-    const card2Height = headerHeight + 70;
-
-    ctx.save();
-    ctx.shadowColor = 'rgba(148, 163, 184, 0.18)';
-    ctx.shadowBlur = 12;
-    ctx.shadowOffsetY = 4;
-    ctx.fillStyle = '#FFFFFF';
-    roundRect(ctx, cardX, currentY, cardW, card2Height, 16);
+    // Right Box - Rincian Pembayaran
+    ctx.fillStyle = '#F0F9FF';
+    roundRect(ctx, rightBoxX, y, boxW, boxH, 16);
     ctx.fill();
-    ctx.restore();
-
     ctx.strokeStyle = '#BAE6FD';
-    ctx.lineWidth = 1.5;
-    roundRect(ctx, cardX, currentY, cardW, card2Height, 16);
+    ctx.lineWidth = 1.2;
+    roundRect(ctx, rightBoxX, y, boxW, boxH, 16);
     ctx.stroke();
 
-    // Card 2 Header
-    ctx.fillStyle = '#BAE6FD';
-    roundRect(ctx, cardX, currentY, cardW, headerHeight, [16, 16, 0, 0]);
-    ctx.fill();
-
-    ctx.fillStyle = '#0F172A';
-    ctx.font = 'bold 17px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('📅 TANGGAL TRANSAKSI', cardX + 16, currentY + headerHeight / 2);
-
-    // 2 Sub-boxes inside Card 2
-    const subBoxW = (cardW - 40) / 2;
-    const subBoxH = 52;
-    const subBoxY = currentY + headerHeight + 10;
-
-    // Left Sub-box: TANGGAL UTANG
-    ctx.fillStyle = '#F8FAFC';
-    roundRect(ctx, cardX + 12, subBoxY, subBoxW, subBoxH, 10);
-    ctx.fill();
-    ctx.strokeStyle = '#E2E8F0';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    ctx.fillStyle = '#64748B';
-    ctx.font = 'bold 12px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText('📅 TANGGAL UTANG:', cardX + 22, subBoxY + 18);
-    ctx.fillStyle = '#0F172A';
+    ctx.fillStyle = '#0369A1';
     ctx.font = 'bold 14px sans-serif';
-    ctx.fillText(data.tglUtang || '-', cardX + 22, subBoxY + 38);
-
-    // Right Sub-box: TANGGAL BAYAR
-    ctx.fillStyle = '#F8FAFC';
-    roundRect(ctx, cardX + 12 + subBoxW + 16, subBoxY, subBoxW, subBoxH, 10);
-    ctx.fill();
-    ctx.strokeStyle = '#E2E8F0';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    ctx.fillStyle = '#64748B';
-    ctx.font = 'bold 12px sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText('📅 TANGGAL BAYAR:', cardX + 12 + subBoxW + 24, subBoxY + 18);
-    ctx.fillStyle = '#0F172A';
-    ctx.font = 'bold 14px sans-serif';
-    ctx.fillText(`✅ ${data.tglBayar || '-'}`, cardX + 12 + subBoxW + 24, subBoxY + 38);
+    ctx.fillText('💰 RINCIAN PEMBAYARAN', rightBoxX + 16, y + 26);
 
-    currentY += card2Height + 16;
+    let payY = y + 60;
+    const payRows: [string, string, string, string, boolean][] = [
+        ['Total Utang:', `Rp ${(data.totalDebt || 0).toLocaleString('id-ID')}`, '#64748B', '#0F172A', false],
+        ['Dibayarkan:', `Rp ${(data.dibayarkan || 0).toLocaleString('id-ID')}`, '#64748B', '#0284C7', true]
+    ];
 
-    // 5. Card 3 - RINCIAN PEMBAYARAN
-    const card3Height = headerHeight + 112;
-
-    ctx.save();
-    ctx.shadowColor = 'rgba(148, 163, 184, 0.18)';
-    ctx.shadowBlur = 12;
-    ctx.shadowOffsetY = 4;
-    ctx.fillStyle = '#FFFFFF';
-    roundRect(ctx, cardX, currentY, cardW, card3Height, 16);
-    ctx.fill();
-    ctx.restore();
-
-    ctx.strokeStyle = '#BAE6FD';
-    ctx.lineWidth = 1.5;
-    roundRect(ctx, cardX, currentY, cardW, card3Height, 16);
-    ctx.stroke();
-
-    // Card 3 Header
-    ctx.fillStyle = '#BAE6FD';
-    roundRect(ctx, cardX, currentY, cardW, headerHeight, [16, 16, 0, 0]);
-    ctx.fill();
-
-    ctx.fillStyle = '#0F172A';
-    ctx.font = 'bold 17px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('💰 RINCIAN PEMBAYARAN', cardX + 16, currentY + headerHeight / 2);
-
-    // Card 3 Lines
-    let payY = currentY + headerHeight + 22;
-
-    // Row 1: Total Utang
-    ctx.fillStyle = '#1E293B';
-    ctx.font = '16px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText('• Total Utang:', cardX + 18, payY);
-    ctx.font = 'bold 16px sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillText(`Rp ${(data.totalDebt || 0).toLocaleString('id-ID')}`, cardX + cardW - 18, payY);
-
-    payY += 30;
-
-    // Row 2: Dibayarkan
-    ctx.fillStyle = '#1E293B';
-    ctx.font = '16px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText('• Dibayarkan:', cardX + 18, payY);
-    ctx.font = 'bold 16px sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillText(`Rp ${(data.dibayarkan || 0).toLocaleString('id-ID')} 💵`, cardX + cardW - 18, payY);
-
-    payY += 30;
-
-    // Row 3: Kembalian / Sisa Utang
     if (data.isLunasTotal) {
-        ctx.fillStyle = '#1E293B';
-        ctx.font = '16px sans-serif';
-        ctx.textAlign = 'left';
-        ctx.fillText('• Kembalian:', cardX + 18, payY);
-        ctx.font = 'bold 16px sans-serif';
-        ctx.textAlign = 'right';
-        ctx.fillText(`🪙 Rp ${(data.kembalian || 0).toLocaleString('id-ID')} ✅`, cardX + cardW - 18, payY);
+        payRows.push(['Kembalian:', `Rp ${(data.kembalian || 0).toLocaleString('id-ID')}`, '#15803D', '#16A34A', true]);
+        payRows.push(['Sisa Utang:', 'Rp 0 (LUNAS)', '#64748B', '#16A34A', true]);
     } else {
-        ctx.fillStyle = '#DC2626';
-        ctx.font = 'bold 16px sans-serif';
-        ctx.textAlign = 'left';
-        ctx.fillText('• Sisa Utang:', cardX + 18, payY);
-        ctx.textAlign = 'right';
-        ctx.fillText(`Rp ${(data.sisaUtang || 0).toLocaleString('id-ID')} ⚠️`, cardX + cardW - 18, payY);
+        payRows.push(['Sisa Utang:', `Rp ${(data.sisaUtang || 0).toLocaleString('id-ID')}`, '#DC2626', '#DC2626', true]);
     }
 
-    currentY += card3Height + 30;
+    payRows.forEach(([lbl, val, lblCol, valCol, isBold]) => {
+        ctx.fillStyle = lblCol;
+        ctx.font = '13px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(lbl, rightBoxX + 16, payY);
 
-    // 6. Section 4 - STATUS PESANAN KAKAK SEKARANG
-    ctx.fillStyle = '#0F172A';
-    ctx.font = 'bold 24px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('STATUS PESANAN', width / 2, currentY);
-    currentY += 28;
-    ctx.fillText('KAKAK SEKARANG:', width / 2, currentY);
+        ctx.fillStyle = valCol;
+        ctx.font = isBold ? 'bold 14px sans-serif' : '13px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText(val, rightBoxX + boxW - 16, payY);
+        payY += 34;
+    });
 
-    currentY += 20;
+    y += boxH + 28;
 
-    // Big Green or Orange Badge
+    // Big Green LUNAS or Orange BELUM LUNAS Badge
     const badgeW = 340;
-    const badgeH = 68;
+    const badgeH = 54;
     const badgeX = (width - badgeW) / 2;
 
     ctx.save();
-    ctx.shadowColor = data.isLunasTotal ? 'rgba(22, 163, 74, 0.45)' : 'rgba(234, 88, 12, 0.45)';
-    ctx.shadowBlur = 16;
-    ctx.shadowOffsetY = 6;
+    ctx.shadowColor = data.isLunasTotal ? 'rgba(22, 163, 74, 0.35)' : 'rgba(234, 88, 12, 0.35)';
+    ctx.shadowBlur = 14;
+    ctx.shadowOffsetY = 4;
     ctx.fillStyle = data.isLunasTotal ? '#16A34A' : '#EA580C';
-    roundRect(ctx, badgeX, currentY, badgeW, badgeH, 20);
+    roundRect(ctx, badgeX, y, badgeW, badgeH, 18);
     ctx.fill();
     ctx.restore();
 
-    // Sparkles beside badge
-    drawSparkle(ctx, badgeX - 22, currentY + badgeH / 2 - 10, 12, '#FACC15');
-    drawSparkle(ctx, badgeX - 10, currentY + badgeH / 2 + 14, 7, '#FDE047');
-    drawSparkle(ctx, badgeX + badgeW + 22, currentY + badgeH / 2 + 10, 12, '#FACC15');
-    drawSparkle(ctx, badgeX + badgeW + 10, currentY + badgeH / 2 - 14, 7, '#FDE047');
+    drawSparkle(ctx, badgeX - 16, y + badgeH / 2, 10, '#FACC15');
+    drawSparkle(ctx, badgeX + badgeW + 16, y + badgeH / 2, 10, '#FACC15');
 
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 34px sans-serif';
+    ctx.font = 'bold 24px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(data.isLunasTotal ? '✔ LUNAS' : '⚠️ BELUM LUNAS', width / 2, currentY + badgeH / 2);
+    ctx.fillText(data.isLunasTotal ? '✔ LUNAS TOTAL' : '⚠️ BELUM LUNAS', width / 2, y + badgeH / 2);
 
-    currentY += badgeH + 34;
+    y += badgeH + 28;
 
-    // 7. Section 5 - FOOTER / CHUNA AVATAR & MESSAGE
+    // Bottom Footer Card with Chuna
+    const footerW = cardW - 48;
+    const footerH = 110;
+    const footerX = cardX + 24;
+    ctx.fillStyle = '#F8FAFC';
+    roundRect(ctx, footerX, y, footerW, footerH, 16);
+    ctx.fill();
+    ctx.strokeStyle = '#E2E8F0';
+    ctx.lineWidth = 1;
+    roundRect(ctx, footerX, y, footerW, footerH, 16);
+    ctx.stroke();
+
     const chunaImg = await getChunaImage();
     if (chunaImg) {
-        // Draw real 3D Chuna Character standing at bottom-left corner!
-        ctx.save();
-        // Crop transparent padding: minX: 219, minY: 37, maxX: 850, maxY: 1023 (w: 631, h: 986)
-        const sX = 200;
-        const sY = 20;
-        const sW = 660;
-        const sH = 1004;
-
-        const dW = 205;
-        const dH = (sH / sW) * dW; // ~311px
-        const dX = 15;
-        const dY = height - dH + 8; // stick to bottom edge
-
-        ctx.drawImage(chunaImg, sX, sY, sW, sH, dX, dY, dW, dH);
-        ctx.restore();
+        try {
+            const dW = 80;
+            const dH = 100;
+            ctx.drawImage(chunaImg, footerX + 16, y + 5, dW, dH);
+        } catch (e) {}
     }
 
-    // Right message box
-    const msgX = 220;
-    let msgY = currentY + 10;
-
-    ctx.fillStyle = '#0F172A';
+    const msgX = footerX + 110;
+    let msgY = y + 26;
     ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#0F172A';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText('Terima kasih telah berbelanja di E4 Store! ❤️', msgX, msgY);
 
+    msgY += 24;
+    ctx.fillStyle = '#475569';
     ctx.font = '13px sans-serif';
-    ctx.fillText('Terima kasih sudah percaya sama kami.', msgX, msgY);
+    ctx.fillText('Chuna - Asisten Imutmu siap bantu 24 jam non-stop! ✨', msgX, msgY);
+
     msgY += 20;
-    
-    ctx.font = '13px sans-serif';
-    ctx.fillText('Jangan lupa, ', msgX, msgY);
-    ctx.font = 'bold 13px sans-serif';
-    ctx.fillText('Chuna - Asisten Imutmu', msgX + 75, msgY);
-    msgY += 18;
-
-    ctx.font = '13px sans-serif';
-    ctx.fillText('siap bantu ', msgX, msgY);
-    ctx.font = 'bold 13px sans-serif';
-    ctx.fillText('24 jam!', msgX + 66, msgY);
-    ctx.font = '13px sans-serif';
-    ctx.fillText(' kalau ada yang mau', msgX + 114, msgY);
-    msgY += 18;
-
-    ctx.font = '13px sans-serif';
-    ctx.fillText('ditanyain lagi ya, Kak 😊', msgX, msgY);
-    msgY += 28;
-
-    ctx.font = 'bold 13px sans-serif';
-    ctx.fillText('Terimakasih telah berbelanja di E4 Store! ❤️', msgX, msgY);
-    msgY += 18;
-
-    ctx.font = '13px sans-serif';
-    ctx.fillText('Semoga produknya bermanfaat dan kami', msgX, msgY);
-    msgY += 16;
-    ctx.fillText('tunggu kunjungan berikutnya!', msgX, msgY);
+    ctx.fillStyle = '#94A3B8';
+    ctx.font = '12px sans-serif';
+    ctx.fillText('Simpan nota digital ini sebagai tanda bukti pembayaran yang sah.', msgX, msgY);
 
     return canvas.toBuffer('image/png');
 }
