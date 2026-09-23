@@ -26,6 +26,7 @@ import { fetchTiktok } from "./downloader";
 import { generateDebtSettlementReceipt } from "./debtReceipt";
 import { generateVintageTagihanReceipt } from "./debtTagihanReceipt";
 import { generateOrderConfirmationSticker } from "./stickerConfirmation";
+import { generateEmeraldConfirmationImage } from "./emeraldConfirmationReceipt";
 
 import path from 'path';
 
@@ -2535,8 +2536,6 @@ Chuna tunggu Transaksi berikutnya dari Kakak! 😊💖`;
 
                     msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.
 
-Kemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan${isIpError ? ' lebih lanjut' : ''}.
-
 Keterangan : ${customerErrorMsg}
 📦 Produk  : ${tx.product}
 🎯 Tujuan   : ${tx.target} (${nama})
@@ -2626,22 +2625,14 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                                 await new Promise(r => setTimeout(r, 1200));
                                 await waSocket.sendPresenceUpdate("paused", jid);
                                 
-                                let edited = false;
-                                if (tx.waMsgKey) {
-                                    try {
-                                        await waSocket.sendMessage(jid, { text: msg, edit: tx.waMsgKey });
-                                        edited = true;
-                                    } catch (e) { console.log("Failed to edit msg", e); }
-                                }
-                                
                                 if (status === 'Sukses') {
                                     const buffer = await generateCanvasReceipt("nota", tx);
                                     if (buffer) {
-                                        await waSocket.sendMessage(jid, { image: buffer, caption: "✅ *Transaksi Berhasil!* Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰" });
-                                    } else if (!edited) {
+                                        await waSocket.sendMessage(jid, { image: buffer, caption: msg });
+                                    } else {
                                         await waSocket.sendMessage(jid, { text: msg });
                                     }
-                                } else if (!edited) {
+                                } else {
                                     await waSocket.sendMessage(jid, { text: msg });
                                 }
                                 
@@ -4589,7 +4580,27 @@ Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa s
 🎯 Tujuan   : ${targetDisplay} (${member.name || "-"})
 
 Chuna menunggu kabar baik dari Kakak! 😊`;
-                    const tgMsg = await ctx.reply(msg);
+
+                    let emeraldBuffer: Buffer | null = null;
+                    try {
+                        const customerDisplayName = (waProfileName && waProfileName !== '-') ? waProfileName : (member.name || 'Pelanggan');
+                        emeraldBuffer = await generateEmeraldConfirmationImage({
+                            customerName: customerDisplayName,
+                            serviceName: product.product_name,
+                            targetNo: targetDisplay,
+                            totalBayar: total,
+                            waPhotoUrl: waDetails?.waPhotoUrl || null
+                        });
+                    } catch (e) {
+                        console.error("Gagal generate emerald confirmation untuk TG:", e);
+                    }
+
+                    let tgMsg;
+                    if (emeraldBuffer) {
+                        tgMsg = await ctx.replyWithPhoto({ source: emeraldBuffer }, { caption: msg });
+                    } else {
+                        tgMsg = await ctx.reply(msg);
+                    }
                     tgMsgId = tgMsg.message_id;
                 } else if (status === 'Sukses') {
                     
@@ -4639,8 +4650,6 @@ Chuna tunggu Transaksi berikutnya dari Kakak! 😊💖`;
                         customerErrorMsg = 'Produk sedang kosong';
                     }
                     msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.
-
-Kemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan${isIpError ? ' lebih lanjut' : ''}.
 
 Keterangan : ${customerErrorMsg}
 📦 Produk  : ${product.product_name}
@@ -4722,7 +4731,26 @@ Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa s
 🎯 Tujuan : ${targetDisplay} (${member.name || "-"})
 
 Chuna menunggu kabar baik dari Kakak! 😊`;
-                            waMsg = await waSocket.sendMessage(jid, { text: waPendingMsg });
+
+                            let emeraldBuffer: Buffer | null = null;
+                            try {
+                                const customerDisplayName = (waProfileName && waProfileName !== '-') ? waProfileName : (member.name || 'Pelanggan');
+                                emeraldBuffer = await generateEmeraldConfirmationImage({
+                                    customerName: customerDisplayName,
+                                    serviceName: product.product_name,
+                                    targetNo: targetDisplay,
+                                    totalBayar: total,
+                                    waPhotoUrl: waDetails?.waPhotoUrl || null
+                                });
+                            } catch (e) {
+                                console.error("Gagal generate emerald confirmation untuk WA:", e);
+                            }
+
+                            if (emeraldBuffer) {
+                                waMsg = await waSocket.sendMessage(jid, { image: emeraldBuffer, caption: waPendingMsg });
+                            } else {
+                                waMsg = await waSocket.sendMessage(jid, { text: waPendingMsg });
+                            }
                         } else if (typeof notaBuffer !== 'undefined' && notaBuffer) {
                             waMsg = await waSocket.sendMessage(jid, { image: notaBuffer, caption: msg });
                         } else {
@@ -4894,7 +4922,27 @@ Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa s
 🎯 Tujuan   : ${displayCustomerNo} (${payJson.data?.customer_name || checkResult?.customer_name || "-"})
 
 Chuna menunggu kabar baik dari Kakak! 😊`;
-                    const tgMsg = await ctx.reply(msg);
+
+                    let emeraldBuffer: Buffer | null = null;
+                    try {
+                        const customerDisplayName = (waProfileName && waProfileName !== '-') ? waProfileName : (member.name || 'Pelanggan');
+                        emeraldBuffer = await generateEmeraldConfirmationImage({
+                            customerName: customerDisplayName,
+                            serviceName: stateData.product.product_name,
+                            targetNo: displayCustomerNo,
+                            totalBayar: totalBayar,
+                            waPhotoUrl: waDetails?.waPhotoUrl || null
+                        });
+                    } catch (e) {
+                        console.error("Gagal generate emerald confirmation pascabayar untuk TG:", e);
+                    }
+
+                    let tgMsg;
+                    if (emeraldBuffer) {
+                        tgMsg = await ctx.replyWithPhoto({ source: emeraldBuffer }, { caption: msg });
+                    } else {
+                        tgMsg = await ctx.reply(msg);
+                    }
                     tgMsgId = tgMsg.message_id;
                 } else if (status === 'Sukses') {
                     
@@ -4943,8 +4991,6 @@ Chuna tunggu Transaksi berikutnya dari Kakak! 😊💖`;
                         customerErrorMsg = 'Produk sedang kosong';
                     }
                     msg = `❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.
-
-Kemungkinan ada kesalahan data atau saldo kurang. Silakan cek kembali, atau hubungi Chuna untuk bantuan${isIpError ? ' lebih lanjut' : ''}.
 
 Keterangan : ${customerErrorMsg}
 📦 Tagihan : ${stateData.product.product_name}
@@ -5026,7 +5072,26 @@ Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa s
 🎯 Tujuan : ${displayCustomerNo} (${payJson.data?.customer_name || checkResult?.customer_name || "-"})
 
 Chuna menunggu kabar baik dari Kakak! 😊`;
-                            waMsg = await waSocket.sendMessage(jid, { text: waPendingMsg });
+
+                            let emeraldBuffer: Buffer | null = null;
+                            try {
+                                const customerDisplayName = (waProfileName && waProfileName !== '-') ? waProfileName : (member.name || 'Pelanggan');
+                                emeraldBuffer = await generateEmeraldConfirmationImage({
+                                    customerName: customerDisplayName,
+                                    serviceName: stateData.product.product_name,
+                                    targetNo: displayCustomerNo,
+                                    totalBayar: totalBayar,
+                                    waPhotoUrl: waDetails?.waPhotoUrl || null
+                                });
+                            } catch (e) {
+                                console.error("Gagal generate emerald confirmation pascabayar untuk WA:", e);
+                            }
+
+                            if (emeraldBuffer) {
+                                waMsg = await waSocket.sendMessage(jid, { image: emeraldBuffer, caption: waPendingMsg });
+                            } else {
+                                waMsg = await waSocket.sendMessage(jid, { text: waPendingMsg });
+                            }
                         } else if (typeof notaBuffer !== 'undefined' && notaBuffer) {
                             waMsg = await waSocket.sendMessage(jid, { image: notaBuffer, caption: msg });
                         } else {
@@ -8358,6 +8423,39 @@ E4 Store`,
             res.send(stickerBuffer);
         } else {
             res.status(500).send("Gagal generate sticker");
+        }
+    } catch (e: any) {
+        res.status(500).send("Error: " + e.message);
+    }
+  });
+
+  // Route demo gambar konfirmasi pembelian model Emerald Hijau Emas Mewah (E4 Store)
+  app.get("/api/demo-konfirmasi-emerald", async (req, res) => {
+    try {
+        const withAvatar = req.query.avatar !== 'false';
+        let waPhotoUrl: string | null = null;
+        if (withAvatar) {
+            if (req.query.photo && typeof req.query.photo === 'string') {
+                waPhotoUrl = req.query.photo;
+            } else if (db.waProfilePhotos) {
+                const keys = Object.keys(db.waProfilePhotos);
+                if (keys.length > 0) {
+                    waPhotoUrl = db.waProfilePhotos[keys[0]];
+                }
+            }
+        }
+        const buffer = await generateEmeraldConfirmationImage({
+            customerName: (req.query.nama as string) || 'Samsul Sifa',
+            serviceName: (req.query.layanan as string) || 'Produk',
+            targetNo: (req.query.tujuan as string) || '321856042',
+            totalBayar: (req.query.total as string) || 25000,
+            waPhotoUrl: waPhotoUrl
+        });
+        if (buffer) {
+            res.setHeader('Content-Type', 'image/png');
+            res.send(buffer);
+        } else {
+            res.status(500).send("Gagal generate gambar konfirmasi emerald");
         }
     } catch (e: any) {
         res.status(500).send("Error: " + e.message);
