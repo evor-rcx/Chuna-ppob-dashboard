@@ -24,6 +24,7 @@ console.error = function(...args) {
 
 import { fetchTiktok } from "./downloader";
 import { generateDebtSettlementReceipt } from "./debtReceipt";
+import { generateVintageTagihanReceipt } from "./debtTagihanReceipt";
 import { generateOrderConfirmationSticker } from "./stickerConfirmation";
 
 import path from 'path';
@@ -1323,6 +1324,47 @@ let waPairingCode = "";
 let isRequestingPairingCode = false;
 
 export async function generateCanvasDebtReceipt(member: any, utangTxs: any[]): Promise<Buffer | null> {
+    try {
+        let memberName = member?.name || member?.nama || 'Pelanggan';
+        let waPhone = member?.whatsapp || '';
+        let waPhotoUrl: string | null = null;
+
+        try {
+            const waDetails = await getCustomerWaDetails(member);
+            if (waDetails.waPhone && waDetails.waPhone !== '-') waPhone = waDetails.waPhone;
+            if (waDetails.waPhotoUrl) waPhotoUrl = waDetails.waPhotoUrl;
+        } catch (e) {}
+
+        const txList = Array.isArray(utangTxs) ? utangTxs : (utangTxs ? [utangTxs] : []);
+        const items = txList.map((t: any) => ({
+            name: t.product || t.layanan || 'Produk',
+            price: Number(t.price || t.nominal || 0)
+        }));
+        const totalDebt = items.reduce((acc, curr) => acc + curr.price, 0);
+
+        const firstDate = txList[0]?.date ? new Date(txList[0].date) : new Date();
+        const dateFormatted = `${String(firstDate.getDate()).padStart(2, '0')}/${String(firstDate.getMonth() + 1).padStart(2, '0')}/${firstDate.getFullYear()}`;
+
+        const cleanName = (memberName || 'PELANGGAN').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+        const barcodeCode = `REC-${firstDate.getFullYear()}${String(firstDate.getMonth() + 1).padStart(2, '0')}${String(firstDate.getDate()).padStart(2, '0')}-${cleanName}`;
+
+        return await generateVintageTagihanReceipt({
+            customerName: memberName,
+            phone: waPhone || '+6285822094851',
+            date: dateFormatted,
+            status: 'BELUM LUNAS',
+            items: items.length > 0 ? items : [{ name: 'Tagihan Utang', price: totalDebt || 12000 }],
+            totalDebt: totalDebt || 12000,
+            barcodeCode: barcodeCode,
+            waPhotoUrl: waPhotoUrl
+        });
+    } catch (e: any) {
+        console.error("generateCanvasDebtReceipt error:", e);
+        return null;
+    }
+}
+
+async function legacyCanvasDebtReceipt(member: any, utangTxs: any[]): Promise<Buffer | null> {
     try {
         const width = 800;
         const height = 800;
@@ -8366,6 +8408,38 @@ E4 Store`,
             sisaUtang: 53000,
             tglUtang: '17 September 2026',
             tglBayar: '19 September 2026',
+            waPhotoUrl: waPhotoUrl
+        });
+        res.setHeader('Content-Type', 'image/png');
+        res.send(buffer);
+    } catch (e: any) {
+        res.status(500).send("Error: " + e.message);
+    }
+  });
+
+  // Route demo Catatan Tagihan Vintage E4 Store (Padil / Prangko Foto WhatsApp)
+  app.get("/api/demo-nota-tagihan-vintage", async (req, res) => {
+    try {
+        let waPhotoUrl: string | null = null;
+        if (req.query.photo && typeof req.query.photo === 'string') {
+            waPhotoUrl = req.query.photo;
+        } else if (db.waProfilePhotos) {
+            const keys = Object.keys(db.waProfilePhotos);
+            if (keys.length > 0) {
+                waPhotoUrl = db.waProfilePhotos[keys[0]];
+            }
+        }
+        const buffer = await generateVintageTagihanReceipt({
+            customerName: (req.query.name as string) || 'Padil',
+            phone: (req.query.phone as string) || '+6285822094851',
+            date: (req.query.date as string) || '27/08/2026',
+            status: (req.query.status as string) || 'BELUM LUNAS',
+            items: [
+                { name: 'Free Fire 70 Diamond', price: 11000 },
+                { name: 'Free Fire Level Up Pass', price: 1000 }
+            ],
+            totalDebt: 12000,
+            barcodeCode: (req.query.code as string) || 'REC-20260827-PADIL',
             waPhotoUrl: waPhotoUrl
         });
         res.setHeader('Content-Type', 'image/png');

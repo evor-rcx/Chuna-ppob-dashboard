@@ -204,6 +204,13 @@ export function Transaksi({ onBack }: { onBack: () => void }) {
           </button>
           <button
             type="button"
+            onClick={() => setPreviewModal({ url: '/api/demo-nota-tagihan-vintage', title: 'Bukti Catatan Tagihan (Desain Prangko Pos Vintage E4 Store + Foto WA di Kotak Orens)', id: 'demo-tagihan-vintage' })}
+            className="px-3 py-1.5 bg-orange-500/25 hover:bg-orange-500/35 border border-orange-500/50 text-orange-200 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm ring-1 ring-orange-500/30"
+          >
+            📮 Tagihan Prangko WA
+          </button>
+          <button
+            type="button"
             onClick={() => setPreviewModal({ url: '/api/demo-sticker-konfirmasi', title: 'Stiker WhatsApp: Konfirmasi Pembelian (PLN 20.000 + Foto Profil)', id: 'demo-stiker-konfirmasi' })}
             className="px-3 py-1.5 bg-emerald-500/30 hover:bg-emerald-500/40 border border-emerald-400 text-emerald-200 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm ring-1 ring-emerald-500/50"
           >
@@ -436,6 +443,13 @@ export function Transaksi({ onBack }: { onBack: () => void }) {
                 className={`px-2.5 py-1 rounded text-xs font-semibold whitespace-nowrap transition-colors ${previewModal.url.includes('/demo-nota-angsuran') ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
               >
                 💳 Nota Angsuran
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreviewModal({ url: '/api/demo-nota-tagihan-vintage', title: 'Bukti Catatan Tagihan (Desain Prangko Pos Vintage E4 Store + Foto WA di Kotak Orens)', id: 'demo-tagihan-vintage' })}
+                className={`px-2.5 py-1 rounded text-xs font-semibold whitespace-nowrap transition-colors ${previewModal.url.includes('/demo-nota-tagihan-vintage') ? 'bg-orange-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
+              >
+                📮 Tagihan Prangko WA
               </button>
             </div>
 
