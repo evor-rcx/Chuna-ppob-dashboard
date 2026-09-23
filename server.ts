@@ -6510,7 +6510,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                         await waSocket.sendPresenceUpdate('paused', jid);
 
                         if (stickerBuffer) {
-                            await waSocket.sendMessage(jid, { sticker: stickerBuffer });
+                            await waSocket.sendMessage(jid, { sticker: stickerBuffer, isAnimated: true });
                         } else {
                             await waSocket.sendMessage(jid, { text: replyText });
                         }
