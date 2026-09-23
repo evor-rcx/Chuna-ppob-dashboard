@@ -1,4 +1,6 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
+// @ts-ignore
+import webpmux from 'node-webpmux';
 
 export interface ConfirmationStickerData {
     serviceName: string;      // e.g. "PLN 20.000"
@@ -11,7 +13,7 @@ export interface ConfirmationStickerData {
 }
 
 /**
- * Creates EXIF metadata chunk expected by WhatsApp for stickers
+ * Creates EXIF metadata buffer expected by WhatsApp for stickers
  */
 export function createStickerExif(packname: string = 'E4 STORE', author: string = 'Chuna E4 Store'): Buffer {
     const json = {
@@ -28,32 +30,6 @@ export function createStickerExif(packname: string = 'E4 STORE', author: string 
         jsonBuff
     ]);
     return exif;
-}
-
-/**
- * Injects EXIF chunk into a WebP RIFF buffer
- */
-export function injectExifToWebp(webpBuffer: Buffer, exifBuffer: Buffer): Buffer {
-    try {
-        const exifChunkHeader = Buffer.from('EXIF');
-        const exifLen = exifBuffer.length;
-        const exifLenBuf = Buffer.alloc(4);
-        exifLenBuf.writeUInt32LE(exifLen, 0);
-        const pad = (exifLen % 2 !== 0) ? Buffer.from([0x00]) : Buffer.alloc(0);
-        const fullExifChunk = Buffer.concat([exifChunkHeader, exifLenBuf, exifBuffer, pad]);
-
-        // Insert after WEBP (offset 12)
-        const riffHeader = webpBuffer.slice(0, 12);
-        const remaining = webpBuffer.slice(12);
-
-        const totalLength = riffHeader.length + fullExifChunk.length + remaining.length - 8;
-        const newRiff = Buffer.from(riffHeader);
-        newRiff.writeUInt32LE(totalLength, 4);
-
-        return Buffer.concat([newRiff, fullExifChunk, remaining]);
-    } catch (e) {
-        return webpBuffer;
-    }
 }
 
 /**
@@ -135,13 +111,14 @@ function drawSparkle(ctx: any, cx: number, cy: number, r: number, color: string)
 
 /**
  * Generates the WhatsApp Sticker (512x512 WebP) exactly matching the user's template
+ * High contrast & large clear typography for WhatsApp mobile readability
  */
 export async function generateOrderConfirmationSticker(data: ConfirmationStickerData): Promise<Buffer> {
     const size = 512;
     const canvas = createCanvas(size, size);
     const ctx = canvas.getContext('2d');
 
-    // Transparent canvas background (standard for stickers)
+    // 1. Transparent background
     ctx.clearRect(0, 0, size, size);
 
     // Load WhatsApp profile avatar if available
@@ -156,67 +133,63 @@ export async function generateOrderConfirmationSticker(data: ConfirmationSticker
         } catch (e) {}
     }
 
-    // 1. Kraft paper backing layer (visible edges like user's image)
-    const cardX = 36;
-    const cardY = 32;
-    const cardW = 440;
-    const cardH = 450;
+    // 2. Paper card dimensions (fills canvas with nice border padding)
+    const cardX = 26;
+    const cardY = 22;
+    const cardW = 460;
+    const cardH = 468;
 
+    // Outer Kraft Layer with prominent scalloped border (creates vintage stamp effect)
     ctx.save();
-    // Kraft dark background layer with slight organic tilt & scallop
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.22)';
-    ctx.shadowBlur = 12;
-    ctx.shadowOffsetY = 6;
-    ctx.fillStyle = '#b78d59';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
+    ctx.shadowBlur = 10;
+    ctx.shadowOffsetY = 4;
+    ctx.fillStyle = '#b78954';
     drawScallopedRect(ctx, cardX - 8, cardY - 6, cardW + 16, cardH + 12, 8);
     ctx.fill();
     ctx.restore();
 
-    // 2. Main warm ivory/parchment scalloped paper sheet
+    // Main Ivory/Parchment Paper sheet with scalloped edge
     ctx.save();
-    ctx.shadowColor = 'rgba(70, 45, 20, 0.15)';
-    ctx.shadowBlur = 8;
-    ctx.shadowOffsetY = 3;
     const paperGrad = ctx.createLinearGradient(cardX, cardY, cardX, cardY + cardH);
-    paperGrad.addColorStop(0, '#fffbf2');
-    paperGrad.addColorStop(0.5, '#fbf3e2');
-    paperGrad.addColorStop(1, '#f6ebd5');
+    paperGrad.addColorStop(0, '#fffdf9');
+    paperGrad.addColorStop(0.4, '#faf4e7');
+    paperGrad.addColorStop(1, '#f5ecd8');
     ctx.fillStyle = paperGrad;
     drawScallopedRect(ctx, cardX, cardY, cardW, cardH, 7);
     ctx.fill();
 
-    // Paper border stroke
-    ctx.strokeStyle = '#e7d8be';
-    ctx.lineWidth = 1.2;
+    // Subtle paper edge line
+    ctx.strokeStyle = '#dfcbb0';
+    ctx.lineWidth = 1.5;
     ctx.stroke();
     ctx.restore();
 
-    // 3. Decorative Sparkles around the note (matching the user's template)
-    drawSparkle(ctx, cardX + cardW - 46, cardY + 48, 14, '#c99256');
-    drawSparkle(ctx, cardX + cardW - 24, cardY + 70, 7, '#d8a56c');
-    drawSparkle(ctx, cardX + 32, cardY + cardH - 42, 11, '#c99256');
+    // 3. Decorative Sparkles around the note (matching user's template)
+    drawSparkle(ctx, cardX + cardW - 42, cardY + 50, 16, '#c48946');
+    drawSparkle(ctx, cardX + cardW - 20, cardY + 76, 8, '#dca05b');
+    drawSparkle(ctx, cardX + 34, cardY + cardH - 42, 13, '#c48946');
 
-    // 4. Circular Profile Photo Medallion at the TOP (Circle that was empty)
-    // Positioned neatly at top-center of the paper like the user's circle
+    // 4. Circular Profile Photo Medallion at the TOP (Circle that was prepared & empty)
     const avatarCenterX = size / 2;
-    const avatarCenterY = cardY + 8;
-    const avatarR = 38; // 76px diameter, prominent and clear
+    const avatarCenterY = cardY + 12;
+    const avatarR = 40; // 80px diameter, clear & prominent
 
-    // Subtle drop shadow under the circular medallion
+    // Outer kraft/gold circle backing shadow
     ctx.save();
-    ctx.shadowColor = 'rgba(60, 40, 15, 0.25)';
+    ctx.shadowColor = 'rgba(60, 35, 10, 0.3)';
     ctx.shadowBlur = 8;
-    ctx.shadowOffsetY = 4;
+    ctx.shadowOffsetY = 3;
     ctx.beginPath();
-    ctx.arc(avatarCenterX, avatarCenterY, avatarR, 0, Math.PI * 2);
-    ctx.fillStyle = '#d2a679';
+    ctx.arc(avatarCenterX, avatarCenterY, avatarR + 2, 0, Math.PI * 2);
+    ctx.fillStyle = '#b78954';
     ctx.fill();
     ctx.restore();
 
-    // Draw Avatar or Fallback E4 Monogram inside circle
+    // Draw Avatar or Fallback Monogram inside circle
     ctx.save();
     ctx.beginPath();
-    ctx.arc(avatarCenterX, avatarCenterY, avatarR - 1, 0, Math.PI * 2);
+    ctx.arc(avatarCenterX, avatarCenterY, avatarR, 0, Math.PI * 2);
     ctx.clip();
 
     if (avatarImg) {
@@ -235,15 +208,15 @@ export async function generateOrderConfirmationSticker(data: ConfirmationSticker
             avatarCenterX + avatarR,
             avatarCenterY + avatarR
         );
-        circleGrad.addColorStop(0, '#111e38');
-        circleGrad.addColorStop(0.5, '#1e355b');
-        circleGrad.addColorStop(1, '#0c1626');
+        circleGrad.addColorStop(0, '#0f172a');
+        circleGrad.addColorStop(0.5, '#1e293b');
+        circleGrad.addColorStop(1, '#020617');
         ctx.fillStyle = circleGrad;
         ctx.fillRect(avatarCenterX - avatarR, avatarCenterY - avatarR, avatarR * 2, avatarR * 2);
 
         // Inner golden ring
-        ctx.strokeStyle = 'rgba(234, 201, 117, 0.5)';
-        ctx.lineWidth = 1.2;
+        ctx.strokeStyle = 'rgba(234, 197, 105, 0.7)';
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.arc(avatarCenterX, avatarCenterY, avatarR - 5, 0, Math.PI * 2);
         ctx.stroke();
@@ -252,16 +225,12 @@ export async function generateOrderConfirmationSticker(data: ConfirmationSticker
         ctx.font = '900 24px Arial, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        const goldText = ctx.createLinearGradient(avatarCenterX - 15, avatarCenterY - 10, avatarCenterX + 15, avatarCenterY + 10);
-        goldText.addColorStop(0, '#fff4cc');
-        goldText.addColorStop(0.5, '#eac975');
-        goldText.addColorStop(1, '#b3821a');
-        ctx.fillStyle = goldText;
-        ctx.fillText('E4', avatarCenterX, avatarCenterY + 1.5);
+        ctx.fillStyle = '#fde68a';
+        ctx.fillText('E4', avatarCenterX, avatarCenterY + 1);
     }
     ctx.restore();
 
-    // Gold Outer Rim for the Profile Circle
+    // Border rims for the Profile Circle
     ctx.save();
     ctx.strokeStyle = '#cda26f';
     ctx.lineWidth = 2.5;
@@ -269,41 +238,41 @@ export async function generateOrderConfirmationSticker(data: ConfirmationSticker
     ctx.arc(avatarCenterX, avatarCenterY, avatarR, 0, Math.PI * 2);
     ctx.stroke();
 
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.arc(avatarCenterX, avatarCenterY, avatarR - 2, 0, Math.PI * 2);
+    ctx.arc(avatarCenterX, avatarCenterY, avatarR - 1.5, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
 
-    // 5. Header: "✔ Konfirmasi Pembelian"
-    let currentY = avatarCenterY + avatarR + 24;
+    // 5. Header: "✔ Konfirmasi Pembelian" (Large, Bold, Crystal Clear)
+    let currentY = avatarCenterY + avatarR + 25;
 
     ctx.save();
-    ctx.fillStyle = '#22140c';
-    ctx.font = '900 24px Arial, sans-serif';
+    ctx.fillStyle = '#170e07';
+    ctx.font = 'bold 27px Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('✔ Konfirmasi Pembelian', size / 2, currentY);
     ctx.restore();
 
     // 6. Dashed line under header
-    currentY += 22;
+    currentY += 21;
     ctx.save();
-    ctx.strokeStyle = '#bda584';
+    ctx.strokeStyle = '#bda07b';
     ctx.lineWidth = 2;
-    ctx.setLineDash([6, 6]);
+    ctx.setLineDash([7, 6]);
     ctx.beginPath();
-    ctx.moveTo(cardX + 28, currentY);
-    ctx.lineTo(cardX + cardW - 28, currentY);
+    ctx.moveTo(cardX + 24, currentY);
+    ctx.lineTo(cardX + cardW - 24, currentY);
     ctx.stroke();
     ctx.restore();
 
     // 7. Details: Layanan
     currentY += 34;
     ctx.save();
-    ctx.fillStyle = '#1e130d';
-    ctx.font = 'bold 21px Arial, sans-serif';
+    ctx.fillStyle = '#170e07';
+    ctx.font = 'bold 24px Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const serviceText = `Layanan ⇂ : ${data.serviceName || 'PLN 20.000'}`;
@@ -313,19 +282,19 @@ export async function generateOrderConfirmationSticker(data: ConfirmationSticker
     // Solid separator
     currentY += 24;
     ctx.save();
-    ctx.strokeStyle = '#d9c7ab';
-    ctx.lineWidth = 1.4;
+    ctx.strokeStyle = '#d9c4a5';
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(cardX + 36, currentY);
-    ctx.lineTo(cardX + cardW - 36, currentY);
+    ctx.moveTo(cardX + 32, currentY);
+    ctx.lineTo(cardX + cardW - 32, currentY);
     ctx.stroke();
     ctx.restore();
 
     // 8. Details: Nomor Tujuan
-    currentY += 30;
+    currentY += 32;
     ctx.save();
-    ctx.fillStyle = '#1e130d';
-    ctx.font = 'bold 22px Arial, sans-serif';
+    ctx.fillStyle = '#170e07';
+    ctx.font = 'bold 25px Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const targetText = `Nomor Tujuan : ${data.targetNo || '-'}`;
@@ -335,16 +304,16 @@ export async function generateOrderConfirmationSticker(data: ConfirmationSticker
     // Solid separator
     currentY += 24;
     ctx.save();
-    ctx.strokeStyle = '#d9c7ab';
-    ctx.lineWidth = 1.4;
+    ctx.strokeStyle = '#d9c4a5';
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(cardX + 36, currentY);
-    ctx.lineTo(cardX + cardW - 36, currentY);
+    ctx.moveTo(cardX + 32, currentY);
+    ctx.lineTo(cardX + cardW - 32, currentY);
     ctx.stroke();
     ctx.restore();
 
     // 9. Details: Total Bayar
-    currentY += 34;
+    currentY += 36;
     let formattedTotal = data.totalBayar;
     if (typeof formattedTotal === 'number') {
         formattedTotal = `Rp ${formattedTotal.toLocaleString('id-ID')}`;
@@ -354,8 +323,8 @@ export async function generateOrderConfirmationSticker(data: ConfirmationSticker
     }
 
     ctx.save();
-    ctx.fillStyle = '#1e130d';
-    ctx.font = '900 24px Arial, sans-serif';
+    ctx.fillStyle = '#170e07';
+    ctx.font = '900 28px Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const totalText = `✧ Total Bayar : ${formattedTotal}`;
@@ -365,22 +334,20 @@ export async function generateOrderConfirmationSticker(data: ConfirmationSticker
     // Dashed line before bottom message
     currentY += 30;
     ctx.save();
-    ctx.strokeStyle = '#bda584';
+    ctx.strokeStyle = '#bda07b';
     ctx.lineWidth = 2;
-    ctx.setLineDash([6, 6]);
+    ctx.setLineDash([7, 6]);
     ctx.beginPath();
-    ctx.moveTo(cardX + 28, currentY);
-    ctx.lineTo(cardX + cardW - 28, currentY);
+    ctx.moveTo(cardX + 24, currentY);
+    ctx.lineTo(cardX + cardW - 24, currentY);
     ctx.stroke();
     ctx.restore();
 
-    // 10. Bottom Footer Message (matching the user's text)
-    // "pembelianmu akan di proses ya kk"
-    // "mohon di tunggu"
+    // 10. Bottom Footer Message (Bold, clear, centered)
     currentY += 24;
     ctx.save();
-    ctx.fillStyle = '#110c08';
-    ctx.font = '900 15px Arial, sans-serif';
+    ctx.fillStyle = '#110904';
+    ctx.font = 'bold 18px Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
@@ -391,12 +358,21 @@ export async function generateOrderConfirmationSticker(data: ConfirmationSticker
     const notes = data.note ? data.note.split('\n') : defaultNotes;
 
     notes.forEach((line, index) => {
-        ctx.fillText(line, size / 2, currentY + index * 19);
+        ctx.fillText(line, size / 2, currentY + index * 22);
     });
     ctx.restore();
 
-    // Export to WebP buffer & attach WhatsApp sticker EXIF
+    // Export to WebP buffer & attach WhatsApp sticker EXIF properly with node-webpmux
     const rawWebp = canvas.toBuffer('image/webp');
-    const exif = createStickerExif('E4 STORE', 'Chuna E4 Store');
-    return injectExifToWebp(rawWebp, exif);
+    try {
+        const img = new webpmux.Image();
+        await img.load(rawWebp);
+        const exif = createStickerExif('E4 STORE', 'Chuna E4 Store');
+        img.exif = exif;
+        const finalWebp = await img.save(null);
+        return finalWebp;
+    } catch (err) {
+        console.error("Failed to inject sticker EXIF with webpmux, returning raw webp:", err);
+        return rawWebp;
+    }
 }

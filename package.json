@@ -39,6 +39,7 @@
     "nayan-media-downloaders": "^0.1.8",
     "node-cron": "^4.6.0",
     "node-edge-tts": "^1.2.10",
+    "node-webpmux": "^3.2.1",
     "nodemailer": "^9.0.3",
     "pino": "^10.3.1",
     "qrcode-terminal": "^0.12.0",
