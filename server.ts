@@ -24,6 +24,7 @@ console.error = function(...args) {
 
 import { fetchTiktok } from "./downloader";
 import { generateDebtSettlementReceipt } from "./debtReceipt";
+import { generateOrderConfirmationSticker } from "./stickerConfirmation";
 
 import path from 'path';
 
@@ -6481,7 +6482,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                     parse_mode: "Markdown",
                     reply_markup: { keyboard, resize_keyboard: true }
                 });
-                // Automatically send to WhatsApp
+                // Automatically send sticker to WhatsApp
                 const memberIdForPrepaid = state.data.memberId || `MBR-${ctx.from?.id}`;
                 const memberForPrepaid = members.find(m => m.id === memberIdForPrepaid || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
                 if (waSocket && memberForPrepaid && memberForPrepaid.whatsapp) {
@@ -6491,11 +6492,33 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                     try {
                         await waSocket.presenceSubscribe(jid);
                         await waSocket.sendPresenceUpdate('composing', jid);
-                        await new Promise(r => setTimeout(r, 1200));
+                        
+                        // Fetch customer's WhatsApp profile photo if available
+                        const waDetails = await getCustomerWaDetails(memberForPrepaid, ctx.from?.id);
+                        
+                        // Generate Sticker Konfirmasi Pembelian with photo profile or monogram
+                        const stickerBuffer = await generateOrderConfirmationSticker({
+                            serviceName: product.product_name,
+                            targetNo: targetNo,
+                            totalBayar: total,
+                            nickname: state.data.nickname,
+                            note: 'pembelianmu akan di proses ya kk\nmohon di tunggu',
+                            waPhotoUrl: waDetails?.waPhotoUrl || null
+                        });
+
+                        await new Promise(r => setTimeout(r, 1000));
                         await waSocket.sendPresenceUpdate('paused', jid);
-                        await waSocket.sendMessage(jid, { text: replyText });
+
+                        if (stickerBuffer) {
+                            await waSocket.sendMessage(jid, { sticker: stickerBuffer });
+                        } else {
+                            await waSocket.sendMessage(jid, { text: replyText });
+                        }
                     } catch (err) {
-                        console.error("Failed to send WA message:", err);
+                        console.error("Failed to send WA sticker/message:", err);
+                        try {
+                            await waSocket.sendMessage(jid, { text: replyText });
+                        } catch (e2) {}
                     }
                 }
                 break;
@@ -8250,6 +8273,28 @@ E4 Store`,
             res.send(buffer);
         } else {
             res.status(500).send("Gagal generate gambar");
+        }
+    } catch (e: any) {
+        res.status(500).send("Error: " + e.message);
+    }
+  });
+
+  // Route demo sticker konfirmasi pembelian WhatsApp (WebP Sticker dengan foto profil)
+  app.get("/api/demo-sticker-konfirmasi", async (req, res) => {
+    try {
+        const withAvatar = req.query.avatar !== 'false';
+        const stickerBuffer = await generateOrderConfirmationSticker({
+            serviceName: (req.query.layanan as string) || 'PLN 20.000',
+            targetNo: (req.query.tujuan as string) || '32185604272',
+            totalBayar: (req.query.total as string) || 25000,
+            note: 'pembelianmu akan di proses ya kk\nmohon di tunggu',
+            waPhotoUrl: withAvatar ? 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&h=200&fit=crop&crop=faces' : null
+        });
+        if (stickerBuffer) {
+            res.setHeader('Content-Type', 'image/webp');
+            res.send(stickerBuffer);
+        } else {
+            res.status(500).send("Gagal generate sticker");
         }
     } catch (e: any) {
         res.status(500).send("Error: " + e.message);

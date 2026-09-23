@@ -195,6 +195,13 @@ export function Transaksi({ onBack }: { onBack: () => void }) {
           >
             📜 Nota Pembayaran Lunas
           </button>
+          <button
+            type="button"
+            onClick={() => setPreviewModal({ url: '/api/demo-sticker-konfirmasi', title: 'Stiker WhatsApp: Konfirmasi Pembelian (PLN 20.000 + Foto Profil)', id: 'demo-stiker-konfirmasi' })}
+            className="px-3 py-1.5 bg-emerald-500/30 hover:bg-emerald-500/40 border border-emerald-400 text-emerald-200 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm ring-1 ring-emerald-500/50"
+          >
+            ⭐ Stiker WA Konfirmasi
+          </button>
         </div>
       </div>
 
