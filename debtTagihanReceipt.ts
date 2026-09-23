@@ -212,12 +212,19 @@ export async function generateVintageTagihanReceipt(data: VintageTagihanData): P
     }
 
     // TOTAL UTANG
+    const calculatedTotal = (data.items && data.items.length > 0)
+        ? data.items.reduce((acc, curr) => acc + (Number(curr.price) || 0), 0)
+        : 0;
+    const finalTotalDebt = (typeof data.totalDebt === 'number' && data.totalDebt > 0)
+        ? data.totalDebt
+        : calculatedTotal;
+
     curY += 10;
     ctx.textAlign = 'left';
     ctx.font = '900 24px "Times New Roman", Georgia, serif';
     ctx.fillText('TOTAL UTANG:', leftX, curY);
     ctx.textAlign = 'right';
-    ctx.fillText(`Rp ${data.totalDebt.toLocaleString('id-ID')}`, rightX, curY);
+    ctx.fillText(`Rp ${finalTotalDebt.toLocaleString('id-ID')}`, rightX, curY);
     curY += 34;
 
     // Horizontal Rule

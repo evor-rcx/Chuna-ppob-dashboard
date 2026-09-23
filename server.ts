@@ -1336,11 +1336,18 @@ export async function generateCanvasDebtReceipt(member: any, utangTxs: any[]): P
         } catch (e) {}
 
         const txList = Array.isArray(utangTxs) ? utangTxs : (utangTxs ? [utangTxs] : []);
-        const items = txList.map((t: any) => ({
-            name: t.product || t.layanan || 'Produk',
-            price: Number(t.price || t.nominal || 0)
-        }));
-        const totalDebt = items.reduce((acc, curr) => acc + curr.price, 0);
+        const items = txList.map((t: any) => {
+            const rawPrice = Number(t.price ?? t.total ?? t.nominal ?? 0);
+            const paid = Number(t.paidAmount || 0);
+            const sisa = Math.max(0, rawPrice - paid);
+            return {
+                name: t.product || t.layanan || 'Produk',
+                price: sisa
+            };
+        });
+        const unpaidItems = items.filter((i: any) => i.price > 0);
+        const displayItems = unpaidItems.length > 0 ? unpaidItems : items;
+        const totalDebt = displayItems.reduce((acc: number, curr: any) => acc + curr.price, 0);
 
         const firstDate = txList[0]?.date ? new Date(txList[0].date) : new Date();
         const dateFormatted = `${String(firstDate.getDate()).padStart(2, '0')}/${String(firstDate.getMonth() + 1).padStart(2, '0')}/${firstDate.getFullYear()}`;
@@ -1353,8 +1360,8 @@ export async function generateCanvasDebtReceipt(member: any, utangTxs: any[]): P
             phone: waPhone || '+6285822094851',
             date: dateFormatted,
             status: 'BELUM LUNAS',
-            items: items.length > 0 ? items : [{ name: 'Tagihan Utang', price: totalDebt || 12000 }],
-            totalDebt: totalDebt || 12000,
+            items: displayItems.length > 0 ? displayItems : [{ name: 'Tagihan Utang', price: totalDebt || 12000 }],
+            totalDebt: totalDebt,
             barcodeCode: barcodeCode,
             waPhotoUrl: waPhotoUrl
         });
