@@ -1,10 +1,6 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 // @ts-ignore
 import webpmux from 'node-webpmux';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import { execSync } from 'child_process';
 
 export interface ConfirmationStickerData {
     serviceName: string;      // e.g. "PLN 20.000"
@@ -14,20 +10,18 @@ export interface ConfirmationStickerData {
     note?: string;            // e.g. "pembelianmu akan di proses ya kk\nmohon di tunggu"
     waPhotoUrl?: string | null;
     avatarBuffer?: Buffer | null;
-    animated?: boolean;       // default true
 }
 
 /**
- * Creates EXIF metadata buffer expected by WhatsApp for stickers
+ * Creates EXIF metadata buffer expected by WhatsApp for static stickers
  */
-export function createStickerExif(packname: string = 'E4 STORE', author: string = 'Chuna E4 Store', isAnimated: boolean = true): Buffer {
+export function createStickerExif(packname: string = 'E4 STORE', author: string = 'Chuna E4 Store'): Buffer {
     const json = {
         'sticker-pack-id': 'e4-store-confirmation-' + Date.now(),
         'sticker-pack-name': packname,
         'sticker-pack-publisher': author,
         'emojis': ['✅', '⚡', '💎'],
-        'is-avatar-sticker': 0,
-        'is-animated-sticker': isAnimated ? 1 : 0
+        'is-avatar-sticker': 0
     };
     const jsonBuff = Buffer.from(JSON.stringify(json), 'utf-8');
     const exif = Buffer.concat([
@@ -93,12 +87,11 @@ function drawScallopedRect(
 }
 
 /**
- * Draws 4-point sparkle star with rotation
+ * Draws 4-point sparkle star
  */
-function drawSparkle(ctx: any, cx: number, cy: number, r: number, rot: number = 0, color: string = '#c48946') {
+function drawSparkle(ctx: any, cx: number, cy: number, r: number, color: string = '#c48946') {
     ctx.save();
     ctx.translate(cx, cy);
-    ctx.rotate(rot);
     ctx.fillStyle = color;
     ctx.beginPath();
     for (let i = 0; i < 4; i++) {
@@ -119,15 +112,28 @@ function drawSparkle(ctx: any, cx: number, cy: number, r: number, rot: number = 
 }
 
 /**
- * Renders a single frame of the confirmation sticker
+ * Generates regular static WhatsApp Sticker (512x512 WebP)
+ * Instant, high-contrast, crystal clear on phone chat
  */
-function renderFrame(data: ConfirmationStickerData, avatarImg: any, frameIndex: number, totalFrames: number): any {
+export async function generateOrderConfirmationSticker(data: ConfirmationStickerData): Promise<Buffer> {
     const size = 512;
     const canvas = createCanvas(size, size);
     const ctx = canvas.getContext('2d');
+
+    // 1. Transparent canvas
     ctx.clearRect(0, 0, size, size);
 
-    const phase = totalFrames > 1 ? (frameIndex / totalFrames) * Math.PI * 2 : 0;
+    // Load WhatsApp profile avatar if available
+    let avatarImg: any = null;
+    if (data.avatarBuffer) {
+        try {
+            avatarImg = await loadImage(data.avatarBuffer).catch(() => null);
+        } catch (e) {}
+    } else if (data.waPhotoUrl) {
+        try {
+            avatarImg = await loadImage(data.waPhotoUrl).catch(() => null);
+        } catch (e) {}
+    }
 
     // Card coordinates
     const cardX = 26;
@@ -135,7 +141,7 @@ function renderFrame(data: ConfirmationStickerData, avatarImg: any, frameIndex: 
     const cardW = 460;
     const cardH = 468;
 
-    // 1. Outer Kraft Layer with prominent scalloped border (creates vintage stamp shadow)
+    // 2. Outer Kraft Layer (vintage stamp shadow)
     ctx.save();
     ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
     ctx.shadowBlur = 10;
@@ -145,7 +151,7 @@ function renderFrame(data: ConfirmationStickerData, avatarImg: any, frameIndex: 
     ctx.fill();
     ctx.restore();
 
-    // 2. Main Ivory/Parchment Paper sheet with scalloped edge
+    // 3. Main Ivory/Parchment Paper sheet with scalloped edge
     ctx.save();
     const paperGrad = ctx.createLinearGradient(cardX, cardY, cardX, cardY + cardH);
     paperGrad.addColorStop(0, '#fffdf9');
@@ -160,23 +166,15 @@ function renderFrame(data: ConfirmationStickerData, avatarImg: any, frameIndex: 
     ctx.stroke();
     ctx.restore();
 
-    // 3. Avatar Profile Medallion at the TOP
+    // 4. Sparkles at top-right & bottom-left
+    drawSparkle(ctx, cardX + cardW - 42, cardY + 50, 16, '#c48946');
+    drawSparkle(ctx, cardX + cardW - 20, cardY + 76, 8, '#dca05b');
+    drawSparkle(ctx, cardX + 34, cardY + cardH - 42, 13, '#c48946');
+
+    // 5. Circular Profile Photo Medallion at the TOP
     const avatarCenterX = size / 2;
     const avatarCenterY = cardY + 12;
-    const avatarR = 40; // 80px diameter, clear & prominent
-
-    // ANIMATED: Pulsing Golden Halo around Avatar
-    if (totalFrames > 1) {
-        const pulseR = avatarR + 3 + Math.sin(phase) * 5;
-        const pulseAlpha = 0.35 + Math.sin(phase) * 0.25;
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(avatarCenterX, avatarCenterY, pulseR, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(218, 165, 32, ${pulseAlpha})`;
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
-        ctx.restore();
-    }
+    const avatarR = 40; // 80px diameter, prominent & sharp
 
     // Outer backing shadow
     ctx.save();
@@ -246,36 +244,6 @@ function renderFrame(data: ConfirmationStickerData, avatarImg: any, frameIndex: 
     ctx.arc(avatarCenterX, avatarCenterY, avatarR - 1.5, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
-
-    // 4. ANIMATED: Sparkles with Twinkling & Gentle Rotation
-    const s1R = totalFrames > 1 ? 14 + Math.sin(phase) * 4 : 15;
-    const s1Rot = totalFrames > 1 ? phase * 0.5 : 0;
-    drawSparkle(ctx, cardX + cardW - 42, cardY + 50, s1R, s1Rot, '#e5a350');
-
-    const s2R = totalFrames > 1 ? 8 + Math.cos(phase) * 3 : 8;
-    const s2Rot = totalFrames > 1 ? -phase * 0.5 : 0;
-    drawSparkle(ctx, cardX + cardW - 20, cardY + 76, s2R, s2Rot, '#e0ab68');
-
-    const s3R = totalFrames > 1 ? 12 + Math.sin(phase + Math.PI) * 3 : 13;
-    const s3Rot = totalFrames > 1 ? phase * 0.4 : 0;
-    drawSparkle(ctx, cardX + 34, cardY + cardH - 42, s3R, s3Rot, '#e5a350');
-
-    // 5. ANIMATED: Shimmer Light Beam gliding softly across the paper
-    if (totalFrames > 1) {
-        ctx.save();
-        ctx.beginPath();
-        drawScallopedRect(ctx, cardX, cardY, cardW, cardH, 7);
-        ctx.clip();
-        
-        const shimmerX = cardX - 120 + (frameIndex / totalFrames) * (cardW + 240);
-        const shimmerGrad = ctx.createLinearGradient(shimmerX, cardY, shimmerX + 80, cardY + cardH);
-        shimmerGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
-        shimmerGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.24)');
-        shimmerGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-        ctx.fillStyle = shimmerGrad;
-        ctx.fillRect(cardX, cardY, cardW, cardH);
-        ctx.restore();
-    }
 
     // 6. Header: "✔ Konfirmasi Pembelian" (Large, Bold, Crystal Clear)
     let currentY = avatarCenterY + avatarR + 25;
@@ -394,81 +362,16 @@ function renderFrame(data: ConfirmationStickerData, avatarImg: any, frameIndex: 
     });
     ctx.restore();
 
-    return canvas;
-}
-
-/**
- * Generates Animated WhatsApp Sticker (512x512 Animated WebP) with sparkling effects,
- * halo aura animation, and shimmer light effect!
- */
-export async function generateOrderConfirmationSticker(data: ConfirmationStickerData): Promise<Buffer> {
-    const isAnimated = data.animated !== false; // Animated by default!
-
-    // Load WhatsApp profile avatar if available
-    let avatarImg: any = null;
-    if (data.avatarBuffer) {
-        try {
-            avatarImg = await loadImage(data.avatarBuffer).catch(() => null);
-        } catch (e) {}
-    } else if (data.waPhotoUrl) {
-        try {
-            avatarImg = await loadImage(data.waPhotoUrl).catch(() => null);
-        } catch (e) {}
-    }
-
-    if (!isAnimated) {
-        // Still sticker fallback
-        const canvas = renderFrame(data, avatarImg, 0, 1);
-        const rawWebp = canvas.toBuffer('image/webp');
-        try {
-            const img = new webpmux.Image();
-            await img.load(rawWebp);
-            img.exif = createStickerExif('E4 STORE', 'Chuna E4 Store', false);
-            return await img.save(null);
-        } catch (err) {
-            return rawWebp;
-        }
-    }
-
-    // ANIMATED STICKER: 12 frames, 10 FPS, seamless loop (~1.2s duration)
-    const totalFrames = 12;
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'e4_sticker_anim_'));
-
+    // Export to WebP buffer & attach WhatsApp sticker EXIF properly with node-webpmux
+    const rawWebp = canvas.toBuffer('image/webp');
     try {
-        for (let f = 0; f < totalFrames; f++) {
-            const canvas = renderFrame(data, avatarImg, f, totalFrames);
-            const framePath = path.join(tempDir, `frame_${String(f).padStart(2, '0')}.png`);
-            fs.writeFileSync(framePath, canvas.toBuffer('image/png'));
-        }
-
-        const outWebpPath = path.join(tempDir, 'sticker.webp');
-        // Encode via ffmpeg to WebP animation: 10 fps, quality 70, loop 0 (infinite)
-        execSync(
-            `ffmpeg -y -framerate 10 -i ${tempDir}/frame_%02d.png -vcodec libwebp -lossless 0 -q:v 70 -loop 0 -an -vsync 0 -s 512:512 ${outWebpPath}`,
-            { stdio: 'pipe' }
-        );
-
-        const rawAnimatedWebp = fs.readFileSync(outWebpPath);
-
-        // Inject WhatsApp Sticker EXIF metadata
-        try {
-            const img = new webpmux.Image();
-            await img.load(rawAnimatedWebp);
-            img.exif = createStickerExif('E4 STORE', 'Chuna E4 Store', true);
-            const finalAnimatedWebp = await img.save(null);
-            return finalAnimatedWebp;
-        } catch (exifErr) {
-            console.error("Failed to attach EXIF to animated sticker, using raw WebP:", exifErr);
-            return rawAnimatedWebp;
-        }
-    } catch (e: any) {
-        console.error("Failed to generate animated sticker with ffmpeg, falling back to static:", e);
-        // Safe fallback to static sticker
-        const canvas = renderFrame(data, avatarImg, 0, 1);
-        return canvas.toBuffer('image/webp');
-    } finally {
-        try {
-            fs.rmSync(tempDir, { recursive: true, force: true });
-        } catch (e) {}
+        const img = new webpmux.Image();
+        await img.load(rawWebp);
+        const exif = createStickerExif('E4 STORE', 'Chuna E4 Store');
+        img.exif = exif;
+        return await img.save(null);
+    } catch (err) {
+        console.error("Failed to inject sticker EXIF with webpmux, returning raw webp:", err);
+        return rawWebp;
     }
 }

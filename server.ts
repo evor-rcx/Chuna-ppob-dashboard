@@ -3721,6 +3721,12 @@ Chuna – E4 Store`;
 
       const msg = `✅ LUNAS TOTAL! 🎉\nHalo Kak ${nama},\nDengan senang hati kami informasikan bahwa pembayaran utang kakak telah sukses dan lunas! Berikut detailnya ya:`;
       
+      let waPhotoUrl: string | null = null;
+      try {
+        const waDetails = await getCustomerWaDetails(member);
+        waPhotoUrl = waDetails?.waPhotoUrl || null;
+      } catch (e) {}
+
       let imgBuffer: Buffer | null = null;
       try {
         imgBuffer = await generateDebtSettlementReceipt({
@@ -3731,7 +3737,8 @@ Chuna – E4 Store`;
           dibayarkan: tx.price,
           kembalian: 0,
           tglUtang: tglUtangStr,
-          tglBayar: tglBayarStr
+          tglBayar: tglBayarStr,
+          waPhotoUrl: waPhotoUrl
         });
       } catch (err) {
         console.error("Failed to generate debt settlement image:", err);
@@ -6510,7 +6517,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                         await waSocket.sendPresenceUpdate('paused', jid);
 
                         if (stickerBuffer) {
-                            await waSocket.sendMessage(jid, { sticker: stickerBuffer, isAnimated: true });
+                            await waSocket.sendMessage(jid, { sticker: stickerBuffer });
                         } else {
                             await waSocket.sendMessage(jid, { text: replyText });
                         }
@@ -7190,6 +7197,12 @@ Halo Kak ${nama},
 Dengan senang hati kami informasikan bahwa pembayaran utang kakak telah kami terima sebagian! Berikut detailnya ya:`;
                   }
 
+                  let waPhotoUrl: string | null = null;
+                  try {
+                      const waDetails = await getCustomerWaDetails(member);
+                      waPhotoUrl = waDetails?.waPhotoUrl || null;
+                  } catch (e) {}
+
                   let lunasImageBuffer: Buffer | null = null;
                   try {
                       lunasImageBuffer = await generateDebtSettlementReceipt({
@@ -7201,7 +7214,8 @@ Dengan senang hati kami informasikan bahwa pembayaran utang kakak telah kami ter
                           kembalian: kembalian,
                           sisaUtang: sisa,
                           tglUtang: datesUtang,
-                          tglBayar: tglLunas
+                          tglBayar: tglLunas,
+                          waPhotoUrl: waPhotoUrl
                       });
                   } catch (imgErr) {
                       console.error("Failed to generate lunas receipt image:", imgErr);
@@ -8301,9 +8315,18 @@ E4 Store`,
     }
   });
 
-  // Route demo langsung untuk uji coba gambar nota pelunasan utang (sesuai template user: Kak Reza)
+  // Route demo langsung untuk uji coba gambar nota pelunasan utang (sesuai template user: Kak Reza + Foto Profil WA)
   app.get("/api/demo-nota-pelunasan", async (req, res) => {
     try {
+        let waPhotoUrl: string | null = null;
+        if (req.query.photo && typeof req.query.photo === 'string') {
+            waPhotoUrl = req.query.photo;
+        } else if (db.waProfilePhotos) {
+            const keys = Object.keys(db.waProfilePhotos);
+            if (keys.length > 0) {
+                waPhotoUrl = db.waProfilePhotos[keys[0]];
+            }
+        }
         const buffer = await generateDebtSettlementReceipt({
             nama: 'Kak Reza',
             isLunasTotal: true,
@@ -8312,7 +8335,38 @@ E4 Store`,
             dibayarkan: 105000,
             kembalian: 2000,
             tglUtang: '17 September 2026',
-            tglBayar: '19 September 2026'
+            tglBayar: '19 September 2026',
+            waPhotoUrl: waPhotoUrl
+        });
+        res.setHeader('Content-Type', 'image/png');
+        res.send(buffer);
+    } catch (e: any) {
+        res.status(500).send("Error: " + e.message);
+    }
+  });
+
+  // Route demo uji coba nota pembayaran angsuran (sebagian utang)
+  app.get("/api/demo-nota-angsuran", async (req, res) => {
+    try {
+        let waPhotoUrl: string | null = null;
+        if (req.query.photo && typeof req.query.photo === 'string') {
+            waPhotoUrl = req.query.photo;
+        } else if (db.waProfilePhotos) {
+            const keys = Object.keys(db.waProfilePhotos);
+            if (keys.length > 0) {
+                waPhotoUrl = db.waProfilePhotos[keys[0]];
+            }
+        }
+        const buffer = await generateDebtSettlementReceipt({
+            nama: 'Kak Reza',
+            isLunasTotal: false,
+            products: [{ name: 'Telkomsel 100.000', price: 103000 }],
+            totalDebt: 103000,
+            dibayarkan: 50000,
+            sisaUtang: 53000,
+            tglUtang: '17 September 2026',
+            tglBayar: '19 September 2026',
+            waPhotoUrl: waPhotoUrl
         });
         res.setHeader('Content-Type', 'image/png');
         res.send(buffer);
@@ -8335,6 +8389,14 @@ E4 Store`,
     const today = new Date();
     const tglBayarStr = `${today.getDate()} ${months[today.getMonth()]} ${today.getFullYear()}`;
 
+    let waPhotoUrl: string | null = null;
+    if (member) {
+        try {
+            const waDetails = await getCustomerWaDetails(member);
+            waPhotoUrl = waDetails?.waPhotoUrl || null;
+        } catch (e) {}
+    }
+
     const isLunas = (tx.status || '').toLowerCase().includes('lunas');
     try {
         const buffer = await generateDebtSettlementReceipt({
@@ -8346,7 +8408,8 @@ E4 Store`,
             kembalian: isLunas ? Math.max(0, (tx.paidAmount || tx.price) - tx.price) : 0,
             sisaUtang: isLunas ? 0 : Math.max(0, tx.price - (tx.paidAmount || 0)),
             tglUtang: tglUtangStr,
-            tglBayar: tglBayarStr
+            tglBayar: tglBayarStr,
+            waPhotoUrl: waPhotoUrl
         });
         if (buffer) {
             res.setHeader('Content-Type', 'image/png');

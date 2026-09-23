@@ -190,17 +190,24 @@ export function Transaksi({ onBack }: { onBack: () => void }) {
           </button>
           <button
             type="button"
-            onClick={() => setPreviewModal({ url: '/api/demo-nota-pelunasan', title: 'Contoh 7: Nota Pembayaran Lunas (Desain Chuna E4 Store)', id: 'demo-pelunasan-lunas' })}
-            className="px-3 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-200 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm"
+            onClick={() => setPreviewModal({ url: '/api/demo-nota-pelunasan', title: 'Nota Pembayaran Lunas (Chuna + Kotak Lunas Foto Profil WhatsApp)', id: 'demo-pelunasan-lunas' })}
+            className="px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm"
           >
-            📜 Nota Pembayaran Lunas
+            📜 Nota Lunas
           </button>
           <button
             type="button"
-            onClick={() => setPreviewModal({ url: '/api/demo-sticker-konfirmasi', title: 'Stiker Animasi WhatsApp: Konfirmasi Pembelian (Bergerak + Efek Kilau & Foto Profil)', id: 'demo-stiker-konfirmasi' })}
+            onClick={() => setPreviewModal({ url: '/api/demo-nota-angsuran', title: 'Nota Pembayaran Angsuran (Bayar Sebagian / Cicilan + Sisa Utang)', id: 'demo-pelunasan-angsuran' })}
+            className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm"
+          >
+            💳 Nota Angsuran
+          </button>
+          <button
+            type="button"
+            onClick={() => setPreviewModal({ url: '/api/demo-sticker-konfirmasi', title: 'Stiker WhatsApp: Konfirmasi Pembelian (PLN 20.000 + Foto Profil)', id: 'demo-stiker-konfirmasi' })}
             className="px-3 py-1.5 bg-emerald-500/30 hover:bg-emerald-500/40 border border-emerald-400 text-emerald-200 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm ring-1 ring-emerald-500/50"
           >
-            ✨ Stiker Animasi WA Konfirmasi
+            ⭐ Stiker WA Konfirmasi
           </button>
         </div>
       </div>
@@ -418,10 +425,17 @@ export function Transaksi({ onBack }: { onBack: () => void }) {
               </button>
               <button
                 type="button"
-                onClick={() => setPreviewModal({ url: '/api/demo-nota-pelunasan', title: 'Contoh 7: Nota Pembayaran Lunas (Desain Chuna E4 Store)', id: 'demo-pelunasan-lunas' })}
-                className={`px-2.5 py-1 rounded text-xs font-semibold whitespace-nowrap transition-colors ${previewModal.url.includes('/demo-nota-pelunasan') ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
+                onClick={() => setPreviewModal({ url: '/api/demo-nota-pelunasan', title: 'Nota Pembayaran Lunas (Chuna + Kotak Lunas Foto Profil WhatsApp)', id: 'demo-pelunasan-lunas' })}
+                className={`px-2.5 py-1 rounded text-xs font-semibold whitespace-nowrap transition-colors ${previewModal.url.includes('/demo-nota-pelunasan') ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
               >
-                📜 Nota Pembayaran Lunas
+                📜 Nota Lunas
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreviewModal({ url: '/api/demo-nota-angsuran', title: 'Nota Pembayaran Angsuran (Bayar Sebagian / Cicilan + Sisa Utang)', id: 'demo-pelunasan-angsuran' })}
+                className={`px-2.5 py-1 rounded text-xs font-semibold whitespace-nowrap transition-colors ${previewModal.url.includes('/demo-nota-angsuran') ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
+              >
+                💳 Nota Angsuran
               </button>
             </div>
 
