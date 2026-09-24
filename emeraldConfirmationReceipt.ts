@@ -353,7 +353,12 @@ export async function generateEmeraldConfirmationImage(data: EmeraldConfirmation
     ctx.restore();
 
     // 4. Details: Nama, Layanan, Nomor
-    const customerDisplayName = data.customerName || 'Pelanggan Setia';
+    let customerDisplayName = (data.customerName || '').trim();
+    const digitsOnly = customerDisplayName.replace(/\D/g, '');
+    const isPhone = /^\+?[\d\s\-\(\)\.]{6,}$/.test(customerDisplayName) || (digitsOnly.length >= 6 && customerDisplayName.replace(/[^a-zA-Z]/g, '').length < 3);
+    if (!customerDisplayName || customerDisplayName === '-' || customerDisplayName === 'undefined' || customerDisplayName === 'null' || isPhone) {
+        customerDisplayName = 'Pelanggan Setia';
+    }
     const cleanCustomerName = customerDisplayName.length > 22
         ? customerDisplayName.substring(0, 20) + '...'
         : customerDisplayName;
