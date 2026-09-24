@@ -2733,10 +2733,10 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                             try {
                                 await waSocket.presenceSubscribe(jid);
                                 await waSocket.sendPresenceUpdate("composing", jid);
-                                await new Promise(r => setTimeout(r, 1200));
-                                await waSocket.sendPresenceUpdate("paused", jid);
+                                await new Promise(r => setTimeout(r, 2000));
                                 
                                 if (status === 'Sukses') {
+                                    let edited = false;
                                     // 1. Try editing original pending message caption if available
                                     if (tx.waMsgKey) {
                                         if (tx.waOriginalMsg?.imageMessage) {
@@ -2750,15 +2750,23 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                                                         timestampMs: Date.now()
                                                     }
                                                 }, { additionalAttributes: { edit: '1' } });
+                                                edited = true;
                                             } catch (e) {
                                                 console.log("Failed to relay WA image caption edit for success:", e);
                                             }
                                         }
-                                        try {
-                                            await waSocket.sendMessage(jid, { text: msg, edit: tx.waMsgKey });
-                                        } catch (e) {}
+                                        if (!edited) {
+                                            try {
+                                                await waSocket.sendMessage(jid, { text: msg, edit: tx.waMsgKey });
+                                                edited = true;
+                                            } catch (e) {}
+                                        }
                                     }
                                     
+                                    // Show composing status while generating and sending the Nota receipt
+                                    await waSocket.sendPresenceUpdate("composing", jid);
+                                    await new Promise(r => setTimeout(r, 1200));
+
                                     // 2. Send the official Nota receipt canvas
                                     const buffer = await generateCanvasReceipt("nota", tx);
                                     if (buffer) {
@@ -2766,11 +2774,13 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                                             image: buffer, 
                                             caption: "✅ Transaksi Berhasil! Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰" 
                                         });
-                                    } else {
+                                    } else if (!edited) {
                                         await waSocket.sendMessage(jid, { text: msg });
                                     }
+                                    await waSocket.sendPresenceUpdate("paused", jid);
                                 } else {
                                     // Gagal / Failure
+                                    let edited = false;
                                     // 1. Attempt to edit the original pending message caption
                                     if (tx.waMsgKey) {
                                         if (tx.waOriginalMsg?.imageMessage) {
@@ -2784,21 +2794,28 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                                                         timestampMs: Date.now()
                                                     }
                                                 }, { additionalAttributes: { edit: '1' } });
+                                                edited = true;
                                             } catch (e) {
                                                 console.log("Failed to relay WA image caption edit for failure:", e);
                                             }
                                         }
-                                        try {
-                                            await waSocket.sendMessage(jid, { text: msg, edit: tx.waMsgKey });
-                                        } catch (e) {}
+                                        if (!edited) {
+                                            try {
+                                                await waSocket.sendMessage(jid, { text: msg, edit: tx.waMsgKey });
+                                                edited = true;
+                                            } catch (e) {}
+                                        }
                                     }
                                     
-                                    // 2. ALWAYS SEND the failure notification text directly to WhatsApp so the user never stays in pending!
-                                    await waSocket.sendMessage(
-                                        jid, 
-                                        { text: msg }, 
-                                        tx.waMsgKey ? { quoted: { key: tx.waMsgKey, message: tx.waOriginalMsg || { conversation: "⏳ Pesanan sedang diproses..." } } } : {}
-                                    );
+                                    // 2. ONLY send a separate failure message if edit was NOT successful (avoid duplicate!)
+                                    if (!edited) {
+                                        await waSocket.sendMessage(
+                                            jid, 
+                                            { text: msg }, 
+                                            tx.waMsgKey ? { quoted: { key: tx.waMsgKey, message: tx.waOriginalMsg || { conversation: "⏳ Pesanan sedang diproses..." } } } : {}
+                                        );
+                                    }
+                                    await waSocket.sendPresenceUpdate("paused", jid);
                                 }
                                 
                                 if (status === 'Sukses' || status === 'Gagal') {
@@ -4885,7 +4902,6 @@ Coba lihat angka: *${product.product_name}* saat ini mungkin sudah naik, melebih
                         await waSocket.presenceSubscribe(jid);
                         await waSocket.sendPresenceUpdate('composing', jid);
                         await new Promise(r => setTimeout(r, 1200));
-                        await waSocket.sendPresenceUpdate('paused', jid);
                         let waMsg;
                         if (status === 'Pending') {
                             const waPendingMsg = `⏳ Hai Kak${greetingWaName}!
@@ -4920,6 +4936,7 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
                         } else {
                             waMsg = await waSocket.sendMessage(jid, { text: msg });
                         }
+                        await waSocket.sendPresenceUpdate('paused', jid);
                         if (waMsg) {
                             waMsgKey = waMsg.key;
                             waOriginalMsg = waMsg.message;
@@ -5229,7 +5246,6 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
                         await waSocket.presenceSubscribe(jid);
                         await waSocket.sendPresenceUpdate('composing', jid);
                         await new Promise(r => setTimeout(r, 1200));
-                        await waSocket.sendPresenceUpdate('paused', jid);
                         let waMsg;
                         if (status === 'Pending') {
                             const waPendingMsg = `⏳ Hai Kak${greetingWaName}!
@@ -5264,6 +5280,7 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
                         } else {
                             waMsg = await waSocket.sendMessage(jid, { text: msg });
                         }
+                        await waSocket.sendPresenceUpdate('paused', jid);
                         if (waMsg) {
                             waMsgKey = waMsg.key;
                             waOriginalMsg = waMsg.message;
