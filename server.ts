@@ -2737,41 +2737,88 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                                 await waSocket.sendPresenceUpdate("paused", jid);
                                 
                                 if (status === 'Sukses') {
-                                    let edited = false;
+                                    // 1. Try editing original pending message caption if available
                                     if (tx.waMsgKey) {
+                                        if (tx.waOriginalMsg?.imageMessage) {
+                                            try {
+                                                const editedImageMsg = { ...tx.waOriginalMsg.imageMessage, caption: msg };
+                                                await waSocket.relayMessage(jid, {
+                                                    protocolMessage: {
+                                                        key: tx.waMsgKey,
+                                                        type: 14, // MESSAGE_EDIT
+                                                        editedMessage: { imageMessage: editedImageMsg },
+                                                        timestampMs: Date.now()
+                                                    }
+                                                }, { additionalAttributes: { edit: '1' } });
+                                            } catch (e) {
+                                                console.log("Failed to relay WA image caption edit for success:", e);
+                                            }
+                                        }
                                         try {
                                             await waSocket.sendMessage(jid, { text: msg, edit: tx.waMsgKey });
-                                            edited = true;
-                                        } catch (e) {
-                                            console.log("Failed to edit WA pending message for success:", e);
-                                        }
-                                    }
-                                    if (!edited && !tx.waMsgKey) {
-                                        await waSocket.sendMessage(jid, { text: msg });
+                                        } catch (e) {}
                                     }
                                     
+                                    // 2. Send the official Nota receipt canvas
                                     const buffer = await generateCanvasReceipt("nota", tx);
                                     if (buffer) {
                                         await waSocket.sendMessage(jid, { 
                                             image: buffer, 
                                             caption: "✅ Transaksi Berhasil! Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰" 
                                         });
-                                    }
-                                } else {
-                                    let edited = false;
-                                    if (tx.waMsgKey) {
-                                        try {
-                                            await waSocket.sendMessage(jid, { text: msg, edit: tx.waMsgKey });
-                                            edited = true;
-                                        } catch (e) {
-                                            console.log("Failed to edit WA pending message for failure:", e);
-                                        }
-                                    }
-                                    if (!edited) {
+                                    } else {
                                         await waSocket.sendMessage(jid, { text: msg });
                                     }
+                                } else {
+                                    // Gagal / Failure
+                                    // 1. Attempt to edit the original pending message caption
+                                    if (tx.waMsgKey) {
+                                        if (tx.waOriginalMsg?.imageMessage) {
+                                            try {
+                                                const editedImageMsg = { ...tx.waOriginalMsg.imageMessage, caption: msg };
+                                                await waSocket.relayMessage(jid, {
+                                                    protocolMessage: {
+                                                        key: tx.waMsgKey,
+                                                        type: 14, // MESSAGE_EDIT
+                                                        editedMessage: { imageMessage: editedImageMsg },
+                                                        timestampMs: Date.now()
+                                                    }
+                                                }, { additionalAttributes: { edit: '1' } });
+                                            } catch (e) {
+                                                console.log("Failed to relay WA image caption edit for failure:", e);
+                                            }
+                                        }
+                                        try {
+                                            await waSocket.sendMessage(jid, { text: msg, edit: tx.waMsgKey });
+                                        } catch (e) {}
+                                    }
+                                    
+                                    // 2. ALWAYS SEND the failure notification text directly to WhatsApp so the user never stays in pending!
+                                    await waSocket.sendMessage(
+                                        jid, 
+                                        { text: msg }, 
+                                        tx.waMsgKey ? { quoted: { key: tx.waMsgKey, message: tx.waOriginalMsg || { conversation: "⏳ Pesanan sedang diproses..." } } } : {}
+                                    );
                                 }
                                 
+                                if (status === 'Sukses' || status === 'Gagal') {
+                                    const tIndex = db.transactions.findIndex((t: any) => t.id === tx.id);
+                                    if (tIndex >= 0) {
+                                        db.transactions[tIndex].waReceiptSent = true;
+                                        writeDB(db);
+                                    }
+                                }
+                            } catch (e: any) {
+                                console.log("WA delivery error:", e.message);
+                                const tIndex = db.transactions.findIndex((t: any) => t.id === tx.id);
+                                if (tIndex >= 0) {
+                                    db.transactions[tIndex].waReceiptSent = false;
+                                    writeDB(db);
+                                }
+                            }
+                        }
+                    })();
+                }
 
                 if (status === 'Sukses' && member && member.gmail && db.gmailEmail && db.gmailAppPassword) {
                     (async () => {
@@ -2817,24 +2864,6 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                             }
                         } catch (e) {
                             console.log("Failed to send receipt to gmail:", e);
-                        }
-                    })();
-                }
-                                if (status === 'Sukses' || status === 'Gagal') {
-                                    const tIndex = db.transactions.findIndex((t: any) => t.id === tx.id);
-                                    if (tIndex >= 0) {
-                                        db.transactions[tIndex].waReceiptSent = true;
-                                        writeDB(db);
-                                    }
-                                }
-                            } catch (e: any) {
-                                console.log("WA delivery error:", e.message);
-                                const tIndex = db.transactions.findIndex((t: any) => t.id === tx.id);
-                                if (tIndex >= 0) {
-                                    db.transactions[tIndex].waReceiptSent = false;
-                                    writeDB(db);
-                                }
-                            }
                         }
                     })();
                 }
@@ -4701,6 +4730,7 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca") {
                 let msg = "";
                 let tgMsgId: number | undefined;
                 let waMsgKey: any | undefined;
+                let waOriginalMsg: any | undefined;
                 let waJid: string | undefined;
 
                 const waDetails = await getCustomerWaDetails(member, ctx.from?.id);
@@ -4890,7 +4920,10 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
                         } else {
                             waMsg = await waSocket.sendMessage(jid, { text: msg });
                         }
-                        if (waMsg) waMsgKey = waMsg.key;
+                        if (waMsg) {
+                            waMsgKey = waMsg.key;
+                            waOriginalMsg = waMsg.message;
+                        }
                     } catch (err) {
                         console.error("Failed to send WA message:", err);
                     }
@@ -4913,6 +4946,7 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
                     date: new Date().toISOString(),
                     tgMsgId,
                     waMsgKey,
+                    waOriginalMsg,
                     tgChatId: ctx.chat?.id,
                     waJid,
                     waReceiptSent: status === "Sukses" && waMsgKey !== undefined
@@ -5041,6 +5075,7 @@ async function processPascaPayment(ctx: any, ref_id: string, method: string, sta
                 let msg = "";
                 let tgMsgId: number | undefined;
                 let waMsgKey: any | undefined;
+                let waOriginalMsg: any | undefined;
                 let waJid: string | undefined;
 
                 const waDetails = await getCustomerWaDetails(member, ctx.from?.id);
@@ -5229,7 +5264,10 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
                         } else {
                             waMsg = await waSocket.sendMessage(jid, { text: msg });
                         }
-                        if (waMsg) waMsgKey = waMsg.key;
+                        if (waMsg) {
+                            waMsgKey = waMsg.key;
+                            waOriginalMsg = waMsg.message;
+                        }
                     } catch (err) {
                         console.error("Failed to send WA message:", err);
                     }
@@ -5253,6 +5291,7 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
                     date: new Date().toISOString(),
                     tgMsgId,
                     waMsgKey,
+                    waOriginalMsg,
                     tgChatId: ctx.chat?.id,
                     waJid,
                     waReceiptSent: status === "Sukses" && waMsgKey !== undefined
