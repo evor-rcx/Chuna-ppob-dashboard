@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Cpu, Thermometer, HardDrive, Server, Activity, Clock, ShieldCheck, RefreshCw, AlertTriangle, Usb, ArrowDown, ArrowUp, Wifi, Globe, Network } from 'lucide-react';
+import { Cpu, Thermometer, HardDrive, Server, Activity, Clock, ShieldCheck, RefreshCw, AlertTriangle, Usb, ArrowDown, ArrowUp, Wifi, Globe, Network, Trash2, Sparkles, CheckCircle2 } from 'lucide-react';
 
 export interface StorageDevice {
   name: string;
@@ -120,6 +120,10 @@ export function ServerHardwareWidget({ compact = false, className = '' }: Server
   const [error, setError] = useState<string | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
 
+  const [cleaning, setCleaning] = useState(false);
+  const [cleanerResult, setCleanerResult] = useState<any | null>(null);
+  const [cleanerStatus, setCleanerStatus] = useState<any | null>(null);
+
   const fetchStats = async () => {
     try {
       const res = await fetch('/api/system/server-stats');
@@ -134,8 +138,38 @@ export function ServerHardwareWidget({ compact = false, className = '' }: Server
     }
   };
 
+  const fetchCleanerStatus = async () => {
+    try {
+      const res = await fetch('/api/system/cleaner-status');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status) setCleanerStatus(data.status);
+      }
+    } catch (e) {}
+  };
+
+  const handleRunCleanup = async () => {
+    if (cleaning) return;
+    setCleaning(true);
+    setCleanerResult(null);
+    try {
+      const res = await fetch('/api/system/cleanup', { method: 'POST' });
+      const data = await res.json();
+      if (data.success && data.result) {
+        setCleanerResult(data.result);
+        await fetchStats();
+        await fetchCleanerStatus();
+      }
+    } catch (e) {
+      console.error('Cleanup error:', e);
+    } finally {
+      setCleaning(false);
+    }
+  };
+
   useEffect(() => {
     fetchStats();
+    fetchCleanerStatus();
     // Refresh stats every 4 seconds for live thermal & CPU monitoring
     const timer = setInterval(fetchStats, 4000);
     return () => clearInterval(timer);
@@ -513,6 +547,61 @@ export function ServerHardwareWidget({ compact = false, className = '' }: Server
                 )}
               </div>
 
+              {/* STB Armbian Safe Cleaner Section in Modal */}
+              <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Trash2 size={16} className="text-amber-400" />
+                    <div>
+                      <span className="text-xs font-bold text-white uppercase tracking-wider block">
+                        Pembersih Sampah Otomatis (STB Armbian Safe)
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        Membersihkan sisa audio VN, /tmp, file log, dan merapikan inode Baileys
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleRunCleanup}
+                    disabled={cleaning}
+                    className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-colors shrink-0"
+                  >
+                    {cleaning ? (
+                      <>
+                        <RefreshCw size={12} className="animate-spin text-amber-300" />
+                        Membersihkan...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={12} className="text-amber-400" />
+                        Bersihkan Sekarang
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {cleanerResult && (
+                  <div className="p-2.5 rounded-lg bg-emerald-950/30 border border-emerald-800/60 text-xs space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold text-emerald-400">
+                      <CheckCircle2 size={13} />
+                      Pembersihan Sampah Berhasil!
+                    </div>
+                    <div className="text-[11px] text-slate-300 leading-relaxed">
+                      • {cleanerResult.cleanedFilesCount} file sampah dibersihkan ({cleanerResult.freedFormatted})
+                      <br />
+                      • RAM Dibebaskan: +{cleanerResult.ramFreedMB} MB (Tersedia: {cleanerResult.memoryAfter.freeMB} MB)
+                      <br />
+                      • Ruang Disk Bebas: {cleanerResult.storage.freeGB} GB / {cleanerResult.storage.totalGB} GB
+                    </div>
+                  </div>
+                )}
+
+                <div className="text-[10px] text-slate-400 bg-slate-900/60 p-2 rounded-lg border border-slate-800 flex items-center justify-between">
+                  <span>Jadwal Berkala: <strong className="text-emerald-400">Aktif (Tiap 30 Menit)</strong></span>
+                  <span className="text-slate-500">db.json & sesi login WA dilindungi 100%</span>
+                </div>
+              </div>
+
               {/* IP & Reading method */}
               <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-[11px] font-mono text-slate-400">
                 <span>IP Host: <strong className="text-white">{stats.network.primaryIp}</strong></span>
@@ -877,6 +966,78 @@ export function ServerHardwareWidget({ compact = false, className = '' }: Server
             ))}
           </div>
         )}
+      </div>
+
+      {/* STB Armbian Safe System Cleaner Card */}
+      <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 shrink-0">
+              <Trash2 size={20} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="text-sm font-bold text-white tracking-wide">
+                  Pembersih Sisa Sampah & Optimasi RAM
+                </h4>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  Armbian STB Safe
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Menghapus file sisa VN, audio sementara, cache sistem /tmp, dan merapikan inode Baileys secara otomatis tanpa merusak <strong className="text-slate-300">db.json</strong> atau sesi login WhatsApp.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleRunCleanup}
+            disabled={cleaning}
+            className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-bold text-xs flex items-center gap-2 cursor-pointer shadow-lg shadow-amber-500/20 disabled:opacity-50 transition-all shrink-0"
+          >
+            {cleaning ? (
+              <>
+                <RefreshCw size={14} className="animate-spin text-slate-950" />
+                Membersihkan...
+              </>
+            ) : (
+              <>
+                <Sparkles size={14} />
+                Bersihkan Sampah & RAM
+              </>
+            )}
+          </button>
+        </div>
+
+        {cleanerResult && (
+          <div className="p-3 rounded-xl bg-emerald-950/30 border border-emerald-800/60 text-xs space-y-1.5 animate-fadeIn">
+            <div className="flex items-center gap-2 font-bold text-emerald-400">
+              <CheckCircle2 size={16} />
+              Pembersihan Sistem Berhasil Dijalankan!
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 font-mono text-[11px] text-slate-300">
+              <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-800">
+                🗑️ Sampah Dihapus: <strong className="text-white">{cleanerResult.cleanedFilesCount} File</strong> ({cleanerResult.freedFormatted})
+              </div>
+              <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-800">
+                💾 RAM Dibebaskan: <strong className="text-emerald-400">+{cleanerResult.ramFreedMB} MB</strong> (Tersedia: {cleanerResult.memoryAfter.freeMB} MB)
+              </div>
+              <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-800">
+                💽 Ruang Disk Bebas: <strong className="text-cyan-400">{cleanerResult.storage.freeGB} GB</strong> / {cleanerResult.storage.totalGB} GB
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400 pt-1 border-t border-slate-800/60">
+          <span className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+            Jadwal Berkala: <strong className="text-slate-200">Aktif Otomatis Setiap 30 Menit</strong>
+          </span>
+          <span className="font-mono text-slate-500">
+            Jaminan Integritas: Database & Akun WhatsApp 100% Terlindungi
+          </span>
+        </div>
       </div>
 
       {/* Storage & USB Flashdisk Storage Matrix */}

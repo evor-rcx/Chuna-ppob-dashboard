@@ -5,6 +5,9 @@ export function Bot({ onBack }: { onBack: () => void }) {
   const [token, setToken] = useState('');
   const [ownerId, setOwnerId] = useState('');
   const [ownerLoading, setOwnerLoading] = useState(false);
+  const [ownerWa, setOwnerWa] = useState('');
+  const [ownerWaLoading, setOwnerWaLoading] = useState(false);
+  const [ownerWaList, setOwnerWaList] = useState<string[]>([]);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [status, setStatus] = useState('Checking...');
   const [waStatus, setWaStatus] = useState('Checking...');
@@ -36,6 +39,10 @@ export function Bot({ onBack }: { onBack: () => void }) {
         .then(data => {
           if (data.owners && data.owners.length > 0) {
             setOwnerId(data.owners.join(', '));
+          }
+          if (data.ownerWhatsapps && data.ownerWhatsapps.length > 0) {
+            setOwnerWa(prev => prev === '' ? data.ownerWhatsapps.join(', ') : prev);
+            setOwnerWaList(data.ownerWhatsapps);
           }
         })
         .catch(console.error);
@@ -82,7 +89,7 @@ export function Bot({ onBack }: { onBack: () => void }) {
       });
       const data = await response.json();
       if (data.success) {
-        alert("ID Owner berhasil disimpan!");
+        alert("ID Owner Telegram berhasil disimpan!");
       } else {
         alert("Gagal: " + data.error);
       }
@@ -90,6 +97,33 @@ export function Bot({ onBack }: { onBack: () => void }) {
       alert("Terjadi kesalahan saat menyimpan ID Owner.");
     } finally {
       setOwnerLoading(false);
+    }
+  };
+
+  const handleUpdateOwnerWa = async () => {
+    if (!ownerWa) {
+      alert("Masukkan minimal satu nomor WhatsApp Owner!");
+      return;
+    }
+    setOwnerWaLoading(true);
+    try {
+      const numbers = ownerWa.split(',').map(n => n.trim()).filter(Boolean);
+      const response = await fetch('/api/bot/owner-wa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerWhatsapps: numbers })
+      });
+      const data = await response.json();
+      if (data.success) {
+        setOwnerWaList(data.ownerWhatsapps || numbers);
+        alert("Nomor WhatsApp Owner berhasil disimpan dan aktif di bot!");
+      } else {
+        alert("Gagal: " + data.error);
+      }
+    } catch (err) {
+      alert("Terjadi kesalahan saat menyimpan nomor WA Owner.");
+    } finally {
+      setOwnerWaLoading(false);
     }
   };
 
@@ -363,6 +397,58 @@ export function Bot({ onBack }: { onBack: () => void }) {
               </p>
             </div>
           )}
+        </div>
+
+        <div className="pt-4 border-t border-slate-800/50 bg-slate-900/40 p-4 rounded-2xl border border-amber-500/20">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-lg">👑</span>
+            <h3 className="text-sm font-semibold text-amber-300">Hak Akses & Pengenalan Nomor WhatsApp Owner</h3>
+          </div>
+          <p className="text-xs text-slate-400 mb-4 leading-relaxed">
+            Nomor WhatsApp yang didaftarkan di sini akan <strong className="text-amber-200">dikenali otomatis</strong> sebagai Owner oleh sistem bot:
+            <br />
+            • <span className="text-emerald-400">Bebas dari pesan autoreply pelanggan</span> &amp; penolakan panggilan umum.
+            <br />
+            • Akses penuh ke perintah kendali via chat WhatsApp (<code className="text-sky-300">!menu</code>, <code className="text-sky-300">!status</code>, <code className="text-sky-300">!bersihkan</code>, <code className="text-sky-300">!saldo</code>, <code className="text-sky-300">!tx</code>).
+          </p>
+
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+              Nomor WhatsApp Owner (Pisahkan koma jika lebih dari satu)
+            </label>
+            <input 
+              type="text" 
+              placeholder="Contoh: 6285169949218, 08123456789" 
+              value={ownerWa}
+              onChange={(e) => setOwnerWa(e.target.value)}
+              className="w-full bg-slate-800/50 border border-slate-700/50 p-3 rounded-xl text-white font-mono text-sm outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 transition-all"
+            />
+          </div>
+
+          {ownerWaList.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {ownerWaList.map((num, i) => (
+                <span 
+                  key={i} 
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-medium border ${
+                    num === '6285169949218'
+                      ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                      : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+                  }`}
+                >
+                  <span>📱</span> +{num} {num === '6285169949218' ? '(Utama)' : ''}
+                </span>
+              ))}
+            </div>
+          )}
+
+          <button 
+            onClick={handleUpdateOwnerWa}
+            disabled={ownerWaLoading}
+            className="w-full bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white font-medium py-3 px-4 rounded-xl cursor-pointer transition-colors mt-4 disabled:opacity-50 shadow-lg shadow-amber-900/20"
+          >
+            {ownerWaLoading ? 'Menyimpan...' : 'Simpan Nomor WhatsApp Owner'}
+          </button>
         </div>
       </div>
     </PageContainer>

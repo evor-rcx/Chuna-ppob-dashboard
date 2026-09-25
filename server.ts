@@ -62,6 +62,12 @@ function isTelegramMatch(telegram, userId, username) {
 import { getCalendarInfo, getHolidayInfo } from './src/utils/holidays';
 import { securitySuite } from './src/lib/securitySuite';
 import { getLiveServerHardwareStats } from './src/lib/serverHardwareMonitor';
+import {
+  performSystemCleanup,
+  getSystemCleanerStatus,
+  startAutoCleanerScheduler,
+  registerMemoryCleanupHook
+} from './src/lib/systemAutoCleaner';
 
 function roundRectPath(ctx: any, x: number, y: number, w: number, h: number, r: number) {
     ctx.beginPath();
@@ -1196,7 +1202,23 @@ process.on('uncaughtException', (err) => {
 
 let bot: Telegraf | null = null;
 let botStatus = "Disconnected";
-const userStates: Record<number, { step: string, data: any }> = {};
+const userStates: Record<number, { step: string, data: any, updatedAt?: number }> = {};
+
+// Register memory cleanup hook for abandoned user states
+registerMemoryCleanupHook(() => {
+  let cleared = 0;
+  const now = Date.now();
+  for (const idStr of Object.keys(userStates)) {
+    const id = Number(idStr);
+    const state = userStates[id];
+    // Clear states idle for more than 2 hours to conserve RAM on STB Armbian
+    if (state && state.updatedAt && (now - state.updatedAt > 2 * 60 * 60 * 1000)) {
+      delete userStates[id];
+      cleared++;
+    }
+  }
+  return { clearedCount: cleared, name: 'Abandoned User States' };
+});
 
 const DB_FILE = path.join(process.cwd(), "db.json");
 function readDB() {
@@ -1211,6 +1233,13 @@ function readDB() {
     db.owners.push(defaultOwnerId);
     fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
   }
+
+  if (!db.ownerWhatsapps) {
+    db.ownerWhatsapps = ["6285169949218"];
+    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+  } else if (!Array.isArray(db.ownerWhatsapps)) {
+    db.ownerWhatsapps = [String(db.ownerWhatsapps)];
+  }
   return db;
 }
 function writeDB(data: any) {
@@ -1218,6 +1247,60 @@ function writeDB(data: any) {
     securitySuite.auditDatabaseIntegrity(data);
   } catch (e) {}
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+}
+
+function normalizeWaNumber(phoneOrJid: string): string {
+  if (!phoneOrJid) return '';
+  let clean = String(phoneOrJid).split('@')[0].split(':')[0].trim();
+  clean = clean.replace(/\D/g, '');
+  if (clean.startsWith('08')) {
+    clean = '62' + clean.slice(1);
+  } else if (clean.startsWith('8') && clean.length >= 9 && clean.length <= 13) {
+    clean = '62' + clean;
+  }
+  return clean;
+}
+
+function isOwnerWhatsapp(jidOrPhone: string): boolean {
+  if (!jidOrPhone) return false;
+  const normalized = normalizeWaNumber(jidOrPhone);
+  if (!normalized) return false;
+
+  // 1. Check in db.ownerWhatsapps
+  if (Array.isArray(db.ownerWhatsapps)) {
+    if (db.ownerWhatsapps.some((ow: string) => normalizeWaNumber(ow) === normalized)) {
+      return true;
+    }
+  }
+
+  // 2. Check bot's own number (self / owner account)
+  if (waSocket?.user?.id) {
+    const botNum = normalizeWaNumber(waSocket.user.id);
+    if (botNum && botNum === normalized) return true;
+  }
+
+  // 3. Check members who are owners in Telegram
+  if (Array.isArray(db.members)) {
+    for (const m of db.members) {
+      if (m.whatsapp && normalizeWaNumber(m.whatsapp) === normalized) {
+        if (m.telegram && Array.isArray(db.owners)) {
+          if (Array.isArray(m.telegram)) {
+            if (m.telegram.some((tid: any) => db.owners.includes(Number(tid)))) return true;
+          } else {
+            const tid = Number(String(m.telegram).replace(/\D/g, ''));
+            if (db.owners.includes(tid)) return true;
+          }
+        }
+      }
+    }
+  }
+
+  // 4. Fallback primary default owner number
+  if (normalized === '6285169949218') {
+    return true;
+  }
+
+  return false;
 }
 
 let db = readDB();
@@ -1411,6 +1494,204 @@ function getCustomerDisplayName(member: any, waDetails?: any, telegramCtxOrUserI
     }
 
     return 'Pelanggan Setia';
+}
+
+interface SuccessMessageParams {
+    productName: string;
+    category?: string;
+    brand?: string;
+    sku?: string;
+    target: string;
+    customerName?: string;
+    isOwnerSelf?: boolean;
+    tagihan?: number | string;
+    price?: number | string;
+}
+
+export function generateSuccessMessage(params: SuccessMessageParams): string {
+    const {
+        productName = "Produk",
+        category = "",
+        brand = "",
+        sku = "",
+        target = "-",
+        customerName = "",
+        isOwnerSelf = false,
+        tagihan,
+        price
+    } = params;
+
+    // Format suffix nama pelanggan: (Nama Pelanggan)
+    let custSuffix = "";
+    const cleanTargetDigits = String(target).replace(/\D/g, "");
+    if (customerName && customerName.trim() && customerName.trim() !== "-" && customerName.trim() !== "null" && customerName.trim() !== "undefined") {
+        const cleanNameDigits = customerName.replace(/\D/g, "");
+        if (!cleanNameDigits || cleanNameDigits !== cleanTargetDigits) {
+            custSuffix = ` (${customerName.trim()})`;
+        }
+    }
+
+    const pNameLower = (productName || "").toLowerCase();
+    const catLower = (category || "").toLowerCase();
+    const brandLower = (brand || "").toLowerCase();
+    const skuLower = (sku || "").toLowerCase();
+
+    // Helper untuk mengekstrak nominal berformat angka (misal: "100.000", "50.000", "20.000")
+    const extractNominal = (name: string): string => {
+        const dotMatch = name.match(/(\d{1,3}(?:\.\d{3})+)/);
+        if (dotMatch) return dotMatch[1];
+        const numMatch = name.match(/(\d{4,})/);
+        if (numMatch) {
+            const n = parseInt(numMatch[1], 10);
+            if (!isNaN(n)) return n.toLocaleString('id-ID');
+        }
+        const anyNumMatch = name.match(/(\d+)/);
+        if (anyNumMatch) return anyNumMatch[1];
+        return name;
+    };
+
+    // Helper untuk mengekstrak item game & nama game
+    const extractGameItem = (name: string, brandName: string): { item: string, game: string } => {
+        let game = brandName || "";
+        let item = name;
+
+        const knownGames: Record<string, string> = {
+            'free fire': 'Free Fire',
+            'mobile legends': 'Mobile Legends',
+            'mobile legend': 'Mobile Legends',
+            'pubg': 'PUBG Mobile',
+            'genshin': 'Genshin Impact',
+            'valorant': 'Valorant',
+            'roblox': 'Roblox',
+            'call of duty': 'Call of Duty Mobile',
+            'codm': 'Call of Duty Mobile',
+            'aov': 'Arena of Valor',
+            'arena of valor': 'Arena of Valor',
+            'point blank': 'Point Blank',
+            'ragnarok': 'Ragnarok',
+            'honkai': 'Honkai Star Rail',
+            'steam': 'Steam Wallet',
+            'higgs': 'Higgs Domino'
+        };
+
+        for (const [k, v] of Object.entries(knownGames)) {
+            if (pNameLower.includes(k) || brandLower.includes(k)) {
+                game = v;
+                const reg = new RegExp(k, 'gi');
+                item = name.replace(reg, '').trim();
+                break;
+            }
+        }
+
+        if (!game) game = brand || "Game";
+        item = item.replace(/^[-–—:\s]+/, '').trim() || name;
+        return { item, game };
+    };
+
+    // Helper untuk mengekstrak brand dompet digital / e-wallet
+    const extractEWallet = (name: string, brandName: string): { eWallet: string, nominal: string } => {
+        const wallets = ['DANA', 'GOPAY', 'OVO', 'SHOPEEPAY', 'LINKAJA', 'MAXIM', 'ISAKU', 'ASTRAPAY', 'KASPRO'];
+        let foundWallet = brandName || "";
+        for (const w of wallets) {
+            if (pNameLower.includes(w.toLowerCase()) || brandLower.includes(w.toLowerCase())) {
+                foundWallet = w === 'GOPAY' ? 'GoPay' : (w === 'SHOPEEPAY' ? 'ShopeePay' : (w === 'LINKAJA' ? 'LinkAja' : w));
+                break;
+            }
+        }
+        if (!foundWallet) foundWallet = "E-Wallet";
+        const nominal = extractNominal(name);
+        return { eWallet: foundWallet, nominal };
+    };
+
+    let detailSukses = "";
+
+    // 1. ⚡ Token Listrik / PLN Prabayar (Bukan pascabayar!)
+    if (
+        (catLower.includes('pln') || brandLower === 'pln' || pNameLower.includes('token') || pNameLower.includes('pln') || skuLower.startsWith('pln')) &&
+        !catLower.includes('pasca') && !pNameLower.includes('pasca') && !pNameLower.includes('tagihan')
+    ) {
+        const nominal = extractNominal(productName);
+        detailSukses = `Token listrik ${nominal} sudah bisa diinput di meteran ${target}${custSuffix}.`;
+    }
+    // 2. 🏠 PLN Pascabayar
+    else if (
+        (catLower.includes('pln') || brandLower === 'pln' || pNameLower.includes('pln') || skuLower.includes('plnpasca')) &&
+        (catLower.includes('pasca') || pNameLower.includes('pasca') || pNameLower.includes('tagihan'))
+    ) {
+        const nominalStr = tagihan ? `sebesar Rp ${Number(tagihan).toLocaleString('id-ID')}` : (price ? `sebesar Rp ${Number(price).toLocaleString('id-ID')}` : extractNominal(productName));
+        detailSukses = `Pembayaran tagihan PLN ${nominalStr} untuk ID ${target}${custSuffix} sudah berhasil.`;
+    }
+    // 3. 🏥 BPJS
+    else if (catLower.includes('bpjs') || brandLower.includes('bpjs') || pNameLower.includes('bpjs') || skuLower.includes('bpjs')) {
+        const nominalStr = tagihan ? `sebesar Rp ${Number(tagihan).toLocaleString('id-ID')}` : (price ? `sebesar Rp ${Number(price).toLocaleString('id-ID')}` : extractNominal(productName));
+        detailSukses = `Pembayaran BPJS ${nominalStr} untuk nomor ${target}${custSuffix} sudah berhasil.`;
+    }
+    // 4. 🚰 PDAM
+    else if (catLower.includes('pdam') || brandLower.includes('pdam') || pNameLower.includes('pdam') || pNameLower.includes('air') || skuLower.includes('pdam')) {
+        const nominalStr = tagihan ? `sebesar Rp ${Number(tagihan).toLocaleString('id-ID')}` : (price ? `sebesar Rp ${Number(price).toLocaleString('id-ID')}` : extractNominal(productName));
+        detailSukses = `Pembayaran PDAM ${nominalStr} untuk ID ${target}${custSuffix} sudah berhasil.`;
+    }
+    // 5. 💰 E-Money / E-Toll (Kartu fisik seperti Brizzi, TapCash, Mandiri E-Money, Flazz)
+    else if (
+        pNameLower.includes('e-toll') || pNameLower.includes('etoll') ||
+        pNameLower.includes('brizzi') || brandLower.includes('brizzi') ||
+        pNameLower.includes('tapcash') || brandLower.includes('tapcash') ||
+        pNameLower.includes('flazz') || brandLower.includes('flazz') ||
+        (pNameLower.includes('e-money') && (pNameLower.includes('mandiri') || brandLower.includes('mandiri')))
+    ) {
+        const nominal = extractNominal(productName);
+        detailSukses = `Saldo ${nominal} sudah masuk ke kartu/e-money ${target}${custSuffix}.`;
+    }
+    // 6. 💳 E-Wallet / Saldo Dompet Digital (DANA, OVO, GoPay, ShopeePay, LinkAja, Maxim, dll)
+    else if (
+        catLower.includes('e-money') || catLower.includes('wallet') ||
+        ['dana', 'gopay', 'ovo', 'shopeepay', 'linkaja', 'maxim', 'isaku', 'astrapay'].some(w => brandLower.includes(w) || pNameLower.includes(w))
+    ) {
+        const { eWallet, nominal } = extractEWallet(productName, brand);
+        detailSukses = `Saldo ${nominal} sudah masuk ke akun ${eWallet} ${target}${custSuffix}.`;
+    }
+    // 7. 🎮 Game / Top Up Game
+    else if (
+        catLower.includes('game') ||
+        ['free fire', 'mobile legends', 'pubg', 'genshin', 'valorant', 'roblox', 'codm', 'call of duty', 'aov', 'point blank', 'ragnarok', 'honkai', 'steam', 'higgs'].some(g => brandLower.includes(g) || pNameLower.includes(g))
+    ) {
+        const { item, game } = extractGameItem(productName, brand);
+        detailSukses = `${item} sudah masuk ke akun ${game} ${target}${custSuffix}.`;
+    }
+    // 8. ⏳ Masa Aktif
+    else if (catLower.includes('masa aktif') || pNameLower.includes('masa aktif')) {
+        const masaMatch = productName.match(/(\d+\s*(?:hari|bulan|tahun|day|days))/i);
+        const nominal = masaMatch ? masaMatch[0] : extractNominal(productName);
+        detailSukses = `Masa aktif ${nominal} sudah masuk ke nomor ${target}${custSuffix}.`;
+    }
+    // 9. 🌐 Paket Data / Kuota
+    else if (
+        catLower === 'data' || catLower.includes('paket data') || catLower.includes('internet') ||
+        pNameLower.includes('data') || pNameLower.includes('kuota') || pNameLower.includes('gb')
+    ) {
+        const kuotaMatch = productName.match(/(\d+\s*(?:gb|mb))/i);
+        const kuota = kuotaMatch ? kuotaMatch[0].toUpperCase() : productName;
+        detailSukses = `Paket data ${kuota} sudah aktif di nomor ${target}${custSuffix}.`;
+    }
+    // 10. 🎟️ Voucher
+    else if (catLower.includes('voucher') || pNameLower.includes('voucher')) {
+        const cleanVoucherName = productName.replace(/^voucher\s+/i, '');
+        detailSukses = `Kode voucher ${cleanVoucherName} sudah berhasil dikirim ke ${target}${custSuffix}.`;
+    }
+    // 11. 📱 Pulsa (Reguler & Transfer)
+    else if (
+        catLower.includes('pulsa') || pNameLower.includes('pulsa') ||
+        ['telkomsel', 'indosat', 'xl', 'axis', 'tri', 'smartfren', 'three'].some(op => brandLower.includes(op) || pNameLower.includes(op))
+    ) {
+        const nominal = extractNominal(productName);
+        detailSukses = `Pulsa ${nominal} sudah masuk ke nomor ${target}${custSuffix}.`;
+    }
+    // 12. Fallback untuk produk lainnya
+    else {
+        detailSukses = `${productName} sudah masuk ke ${isOwnerSelf ? "nama" : "akun"} ${target}${custSuffix} ${isOwnerSelf ? "!" : "dan siap digunakan!"}`;
+    }
+
+    return `🎉 Horee! Sukses, Kak!\n\nPesanan sudah diproses otomatis oleh E4 Store. ${detailSukses} 💪🔥\n\nTerima kasih telah berbelanja di E4 Store! 🐾\n\nChuna ~ Asisten Imutmu siap bantu 24 jam!\nChuna tunggu transaksi berikutnya dari Kakak! 😊💖`;
 }
 
 
@@ -2539,6 +2820,25 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
     }
   });
 
+  // Safe System Auto-Cleaner APIs (STB Armbian, Linux Home Server)
+  app.get("/api/system/cleaner-status", (req, res) => {
+    try {
+      const status = getSystemCleanerStatus();
+      res.json({ success: true, status });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  app.post("/api/system/cleanup", async (req, res) => {
+    try {
+      const result = await performSystemCleanup();
+      res.json({ success: true, result });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
   // Layer 1 & 2: EGIS WAF Inspector & NYXGUARD Sentry
   app.use((req, res, next) => {
     securitySuite.egisInspector(req, res, next, triggerHeliosOwnerAlert);
@@ -2615,14 +2915,17 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
                             displayDayaMan = `\nDaya         : ${parts.slice(1).join(' / ')}`;
                         }
                     }
-                    msg = `🎉 Horee! Sukses, Kak!
-
-Pesanan sudah diproses otomatis oleh E4 Store. ${tx.product} sudah masuk ke ${isOwnerSelf ? "nama" : "akun"} ${nama || tx.target} ${isOwnerSelf ? "!" : "dan siap digunakan!"} 💪🔥
-
-Terima kasih telah berbelanja di E4 Store! 🐾
-
-Chuna ~ Asisten Imutmu siap bantu 24 jam!
-Chuna tunggu Transaksi berikutnya dari Kakak! 😊💖`;
+                    msg = generateSuccessMessage({
+                        productName: tx.product || data.buyer_sku_code,
+                        category: tx.category,
+                        brand: tx.brand,
+                        sku: tx.sku || data.buyer_sku_code,
+                        target: tx.target || data.customer_no,
+                        customerName: nama || (member && member.name),
+                        isOwnerSelf: isOwnerSelf,
+                        tagihan: tx.tagihan,
+                        price: tx.price
+                    });
                 } else if (status === 'Gagal') {
                     let refundMsg = tx.method === 'saldo' ? '✅ Saldo sebesar Rp ' + tx.price.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (tx.method === 'utang' ? '✅ Utang sebesar Rp ' + tx.price.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + tx.price.toLocaleString('id-ID') + ' kepada pelanggan.');
                     let isIpError = (data.message || '').toLowerCase().includes('ip');
@@ -3137,9 +3440,291 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
         }
 
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
-        const lowerText = text.toLowerCase();
+        const lowerText = text.toLowerCase().trim();
         
         if (!text.trim()) return;
+
+        const senderJid = msg.key?.participant || msg.key?.remoteJid || '';
+        const cleanSenderNum = normalizeWaNumber(senderJid);
+        const isSenderOwner = isOwnerWhatsapp(senderJid) || isOwnerWhatsapp(msg.key?.remoteJid || '') || Boolean(msg.key?.fromMe);
+        const jid = msg.key.remoteJid;
+
+        // Security check: If a non-owner tries to execute administrative commands, block immediately
+        if (!isSenderOwner && (
+            lowerText.startsWith('!status') || lowerText.startsWith('!bersihkan') || lowerText.startsWith('!clearcache') || 
+            lowerText.startsWith('!saldo') || lowerText.startsWith('!addowner') || lowerText.startsWith('!delowner') || 
+            lowerText.startsWith('!cleartmp') || lowerText.startsWith('!clean') || lowerText.startsWith('!bc ')
+        )) {
+            if (jid) {
+                await waSocket.sendMessage(jid, { 
+                    text: "🔒 *AKSES DITOLAK*\nPerintah kendali sistem ini hanya dapat dijalankan oleh nomor Owner WhatsApp resmi." 
+                }, { quoted: msg });
+            }
+            return;
+        }
+
+        // ==========================================
+        // 👑 OWNER WHATSAPP RECOGNITION & COMMAND HANDLER
+        // ==========================================
+        if (isSenderOwner && jid) {
+            console.log(`[WA Bot] 👑 Pesan dari Owner WA terdeteksi: +${cleanSenderNum} -> "${text}"`);
+
+            // 1. Menu & Bantuan Owner
+            if (
+                lowerText === '!menu' || lowerText === '!help' || lowerText === 'menu' || 
+                lowerText === 'help' || lowerText === '/start' || lowerText === 'halo' || 
+                lowerText === 'hai' || lowerText === 'p' || lowerText === 'chuna'
+            ) {
+                const ownerMenuText = 
+                  `👑 *PANEL KENDALI OWNER E4 STORE* 👑\n` +
+                  `━━━━━━━━━━━━━━━━━━━━━\n` +
+                  `Halo Bos/Owner! Nomor Anda (*+${cleanSenderNum}*) telah dikenali otomatis sebagai *OWNER RESMI WHATSAPP*.\n\n` +
+                  `🛠️ *Daftar Perintah Server & Bot:*\n` +
+                  `▫️ *!status* / *!cek* — Cek performa STB (RAM, CPU, Disk, Suhu, Uptime) & Bot\n` +
+                  `▫️ *!bersihkan* / *!clearcache* — Bersihkan sisa sampah temp & optimasi RAM STB\n` +
+                  `▫️ *!saldo* — Cek Saldo Pusat Digiflazz secara real-time\n` +
+                  `▫️ *!tx* / *!transaksi* — Cek 5 transaksi pesanan terbaru\n` +
+                  `▫️ *!member* — Ringkasan jumlah member & total saldo/utang\n` +
+                  `▫️ *!owner* — Lihat daftar nomor WA Owner & Telegram Owner\n` +
+                  `▫️ *!addowner <nomor>* — Daftarkan nomor WA Owner baru\n` +
+                  `▫️ *!delowner <nomor>* — Hapus nomor WA Owner\n` +
+                  `▫️ *!bc <pesan>* — Broadcast pengumuman ke target WhatsApp\n\n` +
+                  `💡 *Tips:* Perintah dapat diketik langsung tanpa tanda seru (contoh: *status*, *bersihkan*, *saldo*).`;
+                await waSocket.sendMessage(jid, { text: ownerMenuText }, { quoted: msg });
+                return;
+            }
+
+            // 2. Cek Hardware STB / Server & Status Bot
+            if (lowerText === '!status' || lowerText === '!cek' || lowerText === 'status' || lowerText === 'cek' || lowerText === '!info' || lowerText === 'info') {
+                try {
+                    const hw = getLiveServerHardwareStats();
+                    const todayStr = new Date().toISOString().split('T')[0];
+                    const todayTxs = (db.transactions || []).filter((t: any) => {
+                      const d = t.date || t.createdAt || '';
+                      return d.startsWith(todayStr) && (t.status === 'Sukses' || t.status === 'Success');
+                    });
+                    const todayCount = todayTxs.length;
+                    const todayTotal = todayTxs.reduce((sum: number, t: any) => sum + (Number(t.price) || 0), 0);
+
+                    const diskInfo = hw.storage && hw.storage.drives && hw.storage.drives.length > 0
+                      ? hw.storage.drives.map((d: any) => `  • ${d.mountPoint}: ${d.freeGB} GB bebas / ${d.totalGB} GB (${100 - d.usagePercent}% Bebas)`).join('\n')
+                      : `  • Disk Bebas: ${hw.storage.freeGB} GB / ${hw.storage.totalGB} GB (${100 - hw.storage.usagePercent}% Bebas)`;
+
+                    const ramPercent = hw.memory.usagePercent || Math.round((hw.memory.usedMB / hw.memory.totalMB) * 100);
+                    const barFilled = Math.min(10, Math.max(0, Math.round(ramPercent / 10)));
+                    const ramBar = '█'.repeat(barFilled) + '░'.repeat(10 - barFilled);
+                    const tempText = hw.temperature && hw.temperature.celsius 
+                      ? `${hw.temperature.celsius}°C (${hw.temperature.status})` 
+                      : 'Normal';
+
+                    const statusReply = 
+                      `📊 *STATUS SERVER & HARDWARE STB ARMBIAN*\n` +
+                      `━━━━━━━━━━━━━━━━━━━━━\n` +
+                      `🖥️ *Perangkat:* ${hw.deviceModel || hw.hostName} (${hw.osName || 'Linux/Armbian'})\n` +
+                      `⏱️ *Uptime:* ${hw.uptime.formatted}\n\n` +
+                      `💾 *Memory (RAM STB):*\n` +
+                      `• Terpakai: ${hw.memory.usedMB} MB / ${hw.memory.totalMB} MB (${ramPercent}%)\n` +
+                      `• Bebas: ${hw.memory.freeMB} MB (Tersedia: ${hw.memory.availableMB || hw.memory.freeMB} MB)\n` +
+                      `  [${ramBar}] ${ramPercent}%\n\n` +
+                      `💽 *Penyimpanan (Disk STB):*\n` +
+                      `${diskInfo}\n\n` +
+                      `⚡ *Performa CPU & Suhu:*\n` +
+                      `• Penggunaan CPU: ${hw.cpu.usagePercent}% (${hw.cpu.cores} Cores)\n` +
+                      `• Suhu STB: ${tempText}\n` +
+                      `• Load Average: ${hw.cpu.loadAvg.join(', ')}\n\n` +
+                      `🤖 *Koneksi Bot & PPOB:*\n` +
+                      `• WhatsApp Bot: ✅ Aktif (${cleanSenderNum} - Terverifikasi Owner)\n` +
+                      `• Telegram Bot: ${bot ? '✅ Aktif & Terhubung' : '⚠️ Offline'}\n` +
+                      `• Saldo Digiflazz: Rp ${digiflazzBalance.toLocaleString('id-ID')}\n\n` +
+                      `📈 *Penjualan Hari Ini:*\n` +
+                      `• Sukses: ${todayCount} transaksi\n` +
+                      `• Total Omset: Rp ${todayTotal.toLocaleString('id-ID')}\n\n` +
+                      `💡 *Ketik !bersihkan* untuk optimasi RAM & pembersihan cache.`;
+
+                    await waSocket.sendMessage(jid, { text: statusReply }, { quoted: msg });
+                } catch (e: any) {
+                    await waSocket.sendMessage(jid, { text: `❌ Gagal mengambil status server: ${e.message}` }, { quoted: msg });
+                }
+                return;
+            }
+
+            // 3. Pembersihan Sampah & RAM Aman STB
+            if (
+                lowerText === '!clearcache' || lowerText === '!bersihkan' || 
+                lowerText === '!cleartmp' || lowerText === '!clean' || 
+                lowerText === 'bersihkan' || lowerText === 'clearcache'
+            ) {
+                try {
+                    await waSocket.sendMessage(jid, { text: "🧹 *Sedang membersihkan sisa sampah & mengoptimalkan RAM server STB...*" }, { quoted: msg });
+                    const res = await performSystemCleanup();
+                    const replyText = 
+                      `🧹 *PEMBERSIHAN SAMPAH SELESAI!*\n` +
+                      `━━━━━━━━━━━━━━━━━━━━━\n` +
+                      `👤 *Eksekutor:* Owner WhatsApp (+${cleanSenderNum})\n` +
+                      `🗑️ *Sampah Dihapus:* ${res.cleanedFilesCount} file (${res.freedFormatted})\n` +
+                      `• Temp Media/VN: ${res.details.tempMediaFiles}\n` +
+                      `• Temp Sistem OS: ${res.details.tempOsFiles}\n` +
+                      `• Pre-key WA usang (inode): ${res.details.prunedPreKeys}\n` +
+                      `• In-memory cache dibebaskan: ${res.details.staleStatesCleared}\n\n` +
+                      `💾 *RAM Bebas:* ${res.memoryAfter.freeMB} MB / ${res.memoryAfter.totalMB} MB (+${res.ramFreedMB} MB dilepas)\n` +
+                      `💽 *Disk Bebas:* ${res.storage.freeGB} GB / ${res.storage.totalGB} GB\n\n` +
+                      `🛡️ *Jaminan Keamanan:*\n` +
+                      `✅ Database (db.json) utuh & aman\n` +
+                      `✅ Sesi login WA (creds.json) aman\n` +
+                      `⏰ Pembersihan otomatis berjalan tiap 30 menit.`;
+                    await waSocket.sendMessage(jid, { text: replyText }, { quoted: msg });
+                } catch (e: any) {
+                    await waSocket.sendMessage(jid, { text: `❌ Gagal membersihkan sampah: ${e.message}` }, { quoted: msg });
+                }
+                return;
+            }
+
+            // 4. Cek Saldo Pusat Digiflazz
+            if (lowerText === '!saldo' || lowerText === 'saldo' || lowerText === 'cek saldo') {
+                let curBalance = digiflazzBalance;
+                if (db.digiflazzUsername && db.digiflazzApiKey) {
+                  try {
+                    const crypto = await import('crypto');
+                    const sign = crypto.createHash("md5").update(db.digiflazzUsername + db.digiflazzApiKey + "depo").digest("hex");
+                    const resp = await fetch("https://api.digiflazz.com/v1/cek-saldo", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ cmd: "deposit", username: db.digiflazzUsername, sign: sign })
+                    });
+                    const d = await resp.json();
+                    if (d?.data?.deposit !== undefined) {
+                      curBalance = d.data.deposit;
+                      digiflazzBalance = curBalance;
+                    }
+                  } catch (e) {}
+                }
+                const saldoReply = 
+                  `💳 *SALDO PUSAT (DIGIFLAZZ)*\n` +
+                  `━━━━━━━━━━━━━━━━━━━━━\n` +
+                  `Status: ${digiflazzStatus}\n` +
+                  `Saldo Saat Ini: *Rp ${curBalance.toLocaleString('id-ID')}*\n` +
+                  `Waktu Cek: ${new Date().toLocaleTimeString('id-ID')} WIB\n\n` +
+                  `💡 Ketik *!tx* untuk melihat transaksi terbaru.`;
+                await waSocket.sendMessage(jid, { text: saldoReply }, { quoted: msg });
+                return;
+            }
+
+            // 5. Cek 5 Transaksi Terakhir
+            if (lowerText === '!tx' || lowerText === '!transaksi' || lowerText === 'tx' || lowerText === 'transaksi') {
+                const txList = (db.transactions || []).slice(-5).reverse();
+                if (txList.length === 0) {
+                    await waSocket.sendMessage(jid, { text: "Belum ada riwayat transaksi tercatat." }, { quoted: msg });
+                    return;
+                }
+                const txLines = txList.map((t: any, idx: number) => {
+                    const icon = (t.status === 'Sukses' || t.status === 'Success') ? '✅' : (t.status === 'Pending' ? '⏳' : '❌');
+                    return `${idx + 1}. ${icon} *${t.product || t.sku || 'Produk'}*\n   • Invoice: #${t.id || '-'}\n   • Tujuan: ${t.target || '-'}\n   • Harga: Rp ${(Number(t.price) || 0).toLocaleString('id-ID')}\n   • Status: ${t.status}\n   • Waktu: ${t.date || t.createdAt || '-'}`;
+                }).join('\n\n');
+                await waSocket.sendMessage(jid, { text: `🧾 *5 TRANSAKSI TERAKHIR*\n━━━━━━━━━━━━━━━━━━━━━\n${txLines}` }, { quoted: msg });
+                return;
+            }
+
+            // 6. Ringkasan Member
+            if (lowerText === '!member' || lowerText === 'member') {
+                const memberCount = (db.members || []).length;
+                const totalSaldo = (db.members || []).reduce((acc: number, m: any) => acc + (Number(m.balance || m.saldo) || 0), 0);
+                const totalUtang = (db.members || []).reduce((acc: number, m: any) => acc + (Number(m.debt || m.utang) || 0), 0);
+                const memberReply = 
+                  `👥 *RINGKASAN MEMBER E4 STORE*\n` +
+                  `━━━━━━━━━━━━━━━━━━━━━\n` +
+                  `• Total Member Terdaftar: *${memberCount} orang*\n` +
+                  `• Total Saldo Simpanan: *Rp ${totalSaldo.toLocaleString('id-ID')}*\n` +
+                  `• Total Piutang/Utang: *Rp ${totalUtang.toLocaleString('id-ID')}*\n\n` +
+                  `Ketik *!menu* untuk opsi lainnya.`;
+                await waSocket.sendMessage(jid, { text: memberReply }, { quoted: msg });
+                return;
+            }
+
+            // 7. Daftar Owner
+            if (lowerText === '!owner' || lowerText === '!listowner' || lowerText === 'owner' || lowerText === 'listowner') {
+                const ownerWas = (db.ownerWhatsapps || ["6285169949218"]).map((n: string, i: number) => 
+                  `${i + 1}. +${n} ${n === '6285169949218' ? '*(Owner Utama)*' : ''}`
+                ).join('\n');
+                const ownerTgs = (db.owners || []).map((id: any, i: number) => `${i + 1}. ID: ${id}`).join('\n');
+                const ownerReply = 
+                  `👑 *DAFTAR OWNER RESMI E4 STORE*\n` +
+                  `━━━━━━━━━━━━━━━━━━━━━\n` +
+                  `📱 *Nomor WhatsApp Owner:*\n${ownerWas}\n\n` +
+                  `✈️ *ID Telegram Owner:*\n${ownerTgs}\n\n` +
+                  `💡 *Manajemen Owner WA:*\n` +
+                  `• *!addowner <nomor>* — Tambah nomor Owner baru\n` +
+                  `• *!delowner <nomor>* — Hapus nomor Owner`;
+                await waSocket.sendMessage(jid, { text: ownerReply }, { quoted: msg });
+                return;
+            }
+
+            // 8. Tambah Owner WA Baru
+            if (lowerText.startsWith('!addowner') || lowerText.startsWith('/addowner') || lowerText.startsWith('!tambahowner')) {
+                const targetArg = text.replace(/^[!/]?(addowner|tambahowner)\s*/i, '').trim();
+                const cleanNew = normalizeWaNumber(targetArg);
+                if (cleanNew.length < 8) {
+                    await waSocket.sendMessage(jid, { text: "❌ Format nomor tidak valid. Contoh: *!addowner 08123456789*" }, { quoted: msg });
+                    return;
+                }
+                if (!db.ownerWhatsapps) db.ownerWhatsapps = [];
+                if (db.ownerWhatsapps.some((n: string) => normalizeWaNumber(n) === cleanNew)) {
+                    await waSocket.sendMessage(jid, { text: `⚠️ Nomor +${cleanNew} sudah terdaftar sebagai Owner WhatsApp.` }, { quoted: msg });
+                    return;
+                }
+                db.ownerWhatsapps.push(cleanNew);
+                writeDB(db);
+                await waSocket.sendMessage(jid, { 
+                    text: `✅ *BERHASIL MENAMBAHKAN OWNER WHATSAPP*\n\nNomor: *+${cleanNew}*\nNomor ini sekarang dikenali penuh sebagai Owner oleh sistem bot WhatsApp & server STB.` 
+                }, { quoted: msg });
+                try {
+                    for (const oId of db.owners) {
+                        await bot.telegram.sendMessage(oId, `👑 *INFO OWNER WHATSAPP BARU*\nNomor: +${cleanNew}\nDitambahkan via WhatsApp oleh: +${cleanSenderNum}`, { parse_mode: 'Markdown' });
+                    }
+                } catch(e) {}
+                return;
+            }
+
+            // 9. Hapus Owner WA
+            if (lowerText.startsWith('!delowner') || lowerText.startsWith('/delowner') || lowerText.startsWith('!hapusowner')) {
+                const targetArg = text.replace(/^[!/]?(delowner|hapusowner)\s*/i, '').trim();
+                const cleanDel = normalizeWaNumber(targetArg);
+                if (cleanDel === '6285169949218') {
+                    await waSocket.sendMessage(jid, { text: "❌ Nomor Owner utama (+6285169949218) dilindungi dan tidak dapat dihapus." }, { quoted: msg });
+                    return;
+                }
+                if (!db.ownerWhatsapps || !db.ownerWhatsapps.some((n: string) => normalizeWaNumber(n) === cleanDel)) {
+                    await waSocket.sendMessage(jid, { text: `⚠️ Nomor +${cleanDel} tidak ditemukan di daftar Owner WhatsApp.` }, { quoted: msg });
+                    return;
+                }
+                db.ownerWhatsapps = db.ownerWhatsapps.filter((n: string) => normalizeWaNumber(n) !== cleanDel);
+                writeDB(db);
+                await waSocket.sendMessage(jid, { 
+                    text: `✅ *BERHASIL MENGHAPUS OWNER WHATSAPP*\nNomor +${cleanDel} telah dihapus dari daftar Owner WhatsApp.` 
+                }, { quoted: msg });
+                return;
+            }
+
+            // 10. Broadcast Pengumuman
+            if (lowerText.startsWith('!bc ') || lowerText.startsWith('!broadcast ')) {
+                const bcText = text.replace(/^[!/]?(bc|broadcast)\s*/i, '').trim();
+                if (!bcText) {
+                    await waSocket.sendMessage(jid, { text: "Format broadcast: *!bc Isi pesan pengumuman di sini*" }, { quoted: msg });
+                    return;
+                }
+                if (db.waAnnouncementTarget) {
+                    await waSocket.sendMessage(db.waAnnouncementTarget, { text: `📢 *PENGUMUMAN DARI OWNER*\n━━━━━━━━━━━━━━━━━━━━━\n${bcText}` });
+                    await waSocket.sendMessage(jid, { text: `✅ Pengumuman berhasil dikirim ke target broadcast (${db.waAnnouncementTarget}).` }, { quoted: msg });
+                } else {
+                    await waSocket.sendMessage(jid, { text: "⚠️ Target broadcast belum diset. Atur terlebih dahulu di Dashboard atau Bot Telegram." }, { quoted: msg });
+                }
+                return;
+            }
+
+            // 11. Conversational Chat dari Owner: Balas sopan sebagai asisten pribadi tanpa autoreply pelanggan
+            const ownerGreeting = `👑 *Halo Bos/Owner!* Chuna mendeteksi pesan dari nomor Owner resmi (+${cleanSenderNum}).\n\nKetik *!menu* untuk membuka Panel Kendali STB & Bot.`;
+            await waSocket.sendMessage(jid, { text: ownerGreeting }, { quoted: msg });
+            return; // Penting: Jangan biarkan owner masuk ke autoreply pelanggan atau voice note!
+        }
         
         const thankYouWords = [
             "makasih", "mksih", "makasi", "terima kasih", "terimakasih", "suwun", "hatur nuhun", "trmks", "mksi", "mks", "trimakasih", "thx", "tq", "terimakasi", "trmksi", "terima kasi", "maksi", "teq", "terima kask",
@@ -3294,6 +3879,20 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
           try {
             if (waSocket) {
               await waSocket.rejectCall(call.id, call.from);
+              
+              if (isOwnerWhatsapp(call.from)) {
+                const cleanOwnerNum = normalizeWaNumber(call.from);
+                console.log(`[WA Bot] 👑 Panggilan WhatsApp dari Owner terdeteksi: +${cleanOwnerNum}`);
+                await waSocket.sendMessage(call.from, {
+                  text: `👑 *PANGGILAN DARI OWNER TERDETEKSI*\n\nHalo Bos/Owner! Sistem bot E4 Store aktif & siap beroperasi.\nKarena keterbatasan protokol WhatsApp bot Baileys tidak mendukung panggilan suara VoIP langsung, silakan gunakan chat teks untuk berkomunikasi atau mengelola server.\n\nKetik *!menu* untuk mengakses Panel Kendali Owner.`
+                });
+                try {
+                  for (const oId of db.owners) {
+                    await bot.telegram.sendMessage(oId, `👑 *PANGGILAN WHATSAPP DARI OWNER*\nNomor: +${cleanOwnerNum}\nWaktu: ${new Date().toLocaleString('id-ID')}\nStatus: Panggilan diidentifikasi sebagai Owner resmi.`, { parse_mode: 'Markdown' });
+                  }
+                } catch (e) {}
+                continue;
+              }
               
               let customerName = "";
               const cleanJid = call.from.split('@')[0];
@@ -4667,17 +5266,57 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca") {
   });
 
   app.get("/api/bot/owner", (req, res) => {
-    res.json({ owners: db.owners || [] });
+    res.json({ 
+      owners: db.owners || [],
+      ownerWhatsapps: db.ownerWhatsapps || ["6285169949218"]
+    });
   });
 
   app.post("/api/bot/owner", (req, res) => {
-    const { owners } = req.body;
-    if (!Array.isArray(owners)) {
-      return res.status(400).json({ error: "Owners must be an array" });
+    const { owners, ownerWhatsapps } = req.body;
+    if (owners && Array.isArray(owners)) {
+      db.owners = owners.map(id => Number(id));
     }
-    db.owners = owners.map(id => Number(id));
+    if (ownerWhatsapps && Array.isArray(ownerWhatsapps)) {
+      db.ownerWhatsapps = ownerWhatsapps
+        .map((n: any) => normalizeWaNumber(String(n)))
+        .filter((n: string) => n.length >= 8);
+      if (!db.ownerWhatsapps.includes("6285169949218")) {
+        db.ownerWhatsapps.push("6285169949218");
+      }
+    }
     writeDB(db);
-    res.json({ success: true, message: "Owner IDs updated" });
+    res.json({ 
+      success: true, 
+      message: "Data Owner berhasil diperbarui", 
+      owners: db.owners,
+      ownerWhatsapps: db.ownerWhatsapps 
+    });
+  });
+
+  app.get("/api/bot/owner-wa", (req, res) => {
+    res.json({
+      ownerWhatsapps: db.ownerWhatsapps || ["6285169949218"]
+    });
+  });
+
+  app.post("/api/bot/owner-wa", (req, res) => {
+    const { ownerWhatsapps } = req.body;
+    if (!Array.isArray(ownerWhatsapps)) {
+      return res.status(400).json({ error: "ownerWhatsapps must be an array" });
+    }
+    db.ownerWhatsapps = ownerWhatsapps
+      .map((n: any) => normalizeWaNumber(String(n)))
+      .filter((n: string) => n.length >= 8);
+    if (!db.ownerWhatsapps.includes("6285169949218")) {
+      db.ownerWhatsapps.push("6285169949218");
+    }
+    writeDB(db);
+    res.json({ 
+      success: true, 
+      message: "Nomor WhatsApp Owner berhasil disimpan", 
+      ownerWhatsapps: db.ownerWhatsapps 
+    });
   });
 
 
@@ -4800,14 +5439,16 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
 Daya         : ${parts.slice(1).join(' / ')}`;
                         }
                     }
-                    msg = `🎉 Horee! Sukses, Kak!
-
-Pesanan sudah diproses otomatis oleh E4 Store. ${product.product_name} sudah masuk ke ${isOwnerSelf ? "nama" : "akun"} ${member.name || targetDisplay} ${isOwnerSelf ? "!" : "dan siap digunakan!"} 💪🔥
-
-Terima kasih telah berbelanja di E4 Store! 🐾
-
-Chuna ~ Asisten Imutmu siap bantu 24 jam!
-Chuna tunggu Transaksi berikutnya dari Kakak! 😊💖`;
+                    msg = generateSuccessMessage({
+                        productName: product.product_name,
+                        category: product.category,
+                        brand: product.brand,
+                        sku: product.buyer_sku_code,
+                        target: targetDisplay,
+                        customerName: member.name || stateData.customerName,
+                        isOwnerSelf: isOwnerSelf,
+                        price: total
+                    });
                     const appUrl = "http://localhost:3000";
                     
                     if (pay_ref_id) { var notaBuffer: any = await generateCanvasReceipt("nota", { id: pay_ref_id, memberId: member.id, type: "prepaid", product: product.product_name, sku: product.buyer_sku_code, target: targetDisplay, price: total, modal: digiflazzPrice, cuan: cuan > 0 ? cuan : 0, status: status, method: method, sn: payJson.data?.sn || "-", date: new Date().toISOString() }); }
@@ -5145,14 +5786,17 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
 Daya         : ${parts.slice(1).join(' / ')}`;
                         }
                     }
-                    msg = `🎉 Horee! Sukses, Kak!
-
-Pesanan sudah diproses otomatis oleh E4 Store. ${stateData.product.product_name} sudah masuk ke ${isOwnerSelf ? "nama" : "akun"} ${checkResult?.customer_name || customerNo} ${isOwnerSelf ? "!" : "dan siap digunakan!"} 💪🔥
-
-Terima kasih telah berbelanja di E4 Store! 🐾
-
-Chuna ~ Asisten Imutmu siap bantu 24 jam!
-Chuna tunggu Transaksi berikutnya dari Kakak! 😊💖`;
+                    msg = generateSuccessMessage({
+                        productName: stateData.product.product_name,
+                        category: stateData.product.category,
+                        brand: stateData.product.brand,
+                        sku: stateData.product.buyer_sku_code,
+                        target: displayCustomerNo,
+                        customerName: checkResult?.customer_name || member.name,
+                        isOwnerSelf: isOwnerSelf,
+                        tagihan: stateData.checkResult?.selling_price,
+                        price: total
+                    });
                     const appUrl = "http://localhost:3000";
                     
                     if (pay_ref_id) { var notaBuffer: any = await generateCanvasReceipt("nota", { id: pay_ref_id, memberId: member.id, type: "pasca", product: stateData.product.product_name, sku: stateData.product.buyer_sku_code, target: displayCustomerNo, price: total, modal: digiflazzPrice, cuan: cuan > 0 ? cuan : 0, tagihan: stateData.checkResult?.selling_price || 0, admin_pel: stateData.adminFee || 0, status: status, method: method, sn: payJson.data?.sn || "-", date: new Date().toISOString() }); }
@@ -5462,7 +6106,8 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
                    [{ text: "📒 Cek Utang Member" }],
                       [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
                       [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
-                      [{ text: "📢 Pengumuman WA" }, { text: "📥 Fitur Download" }]
+                      [{ text: "🧹 Bersihkan Sampah" }, { text: "📢 Pengumuman WA" }],
+                      [{ text: "📥 Fitur Download" }]
                  ],
                  resize_keyboard: true
                }
@@ -5729,11 +6374,78 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
                       [{ text: "📒 Cek Utang Member" }],
                       [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
                       [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
-                      [{ text: "📢 Pengumuman WA" }, { text: "📥 Fitur Download" }]
+                      [{ text: "🧹 Bersihkan Sampah" }, { text: "📢 Pengumuman WA" }],
+                      [{ text: "📥 Fitur Download" }]
                   ],
                   resize_keyboard: true
               }
           });
+      });
+
+      bot.hears(["🧹 Bersihkan Sampah", "/clearcache", "/bersihkan", "/cleartmp"], async (ctx) => {
+          if (!db.owners.includes(ctx.from?.id || 0)) return;
+          const waitMsg = await ctx.reply("🧹 *Sedang membersihkan sisa sampah & mengoptimalkan RAM server STB...*", { parse_mode: 'Markdown' });
+          try {
+              const res = await performSystemCleanup();
+              const text = `🧹 *PEMBERSIHAN SAMPAH & OPTIMASI RAM SELESAI!*\n` +
+                `━━━━━━━━━━━━━━━━━━━━━\n` +
+                `🗑️ *File Sampah Dihapus:* ${res.cleanedFilesCount} file (${res.freedFormatted})\n` +
+                `• File temp audio/media/log: ${res.details.tempMediaFiles}\n` +
+                `• File temp sistem OS (/tmp): ${res.details.tempOsFiles}\n` +
+                `• Pre-key WA usang (inode STB): ${res.details.prunedPreKeys}\n` +
+                `• Cache & state kedaluwarsa: ${res.details.staleStatesCleared}\n\n` +
+                `💾 *Status RAM (Memory STB):*\n` +
+                `• Terpakai: ${res.memoryAfter.usedMB} MB / ${res.memoryAfter.totalMB} MB (${Math.round((res.memoryAfter.usedMB / res.memoryAfter.totalMB) * 100)}%)\n` +
+                `• RAM Dibebaskan: +${res.ramFreedMB} MB\n\n` +
+                `💽 *Status Penyimpanan (Disk STB):*\n` +
+                `• Ruang Bebas: ${res.storage.freeGB} GB / ${res.storage.totalGB} GB (${100 - res.storage.usagePercent}% Bebas)\n\n` +
+                `🛡️ *Jaminan Keamanan Sistem:*\n` +
+                `✅ File database \`db.json\` utuh & aman\n` +
+                `✅ Sesi login WhatsApp (\`creds.json\`) 100% aman\n` +
+                `⏰ Pembersihan otomatis aktif berkala setiap 30 menit.`;
+              await ctx.telegram.editMessageText(ctx.chat?.id, waitMsg.message_id, undefined, text, { parse_mode: 'Markdown' });
+          } catch (e: any) {
+              await ctx.telegram.editMessageText(ctx.chat?.id, waitMsg.message_id, undefined, `❌ Gagal pembersihan: ${e.message}`);
+          }
+      });
+
+      bot.hears(["👑 Owner WA", "/ownerwa", "/listownerwa"], async (ctx) => {
+          if (!db.owners.includes(ctx.from?.id || 0)) return;
+          const waList = (db.ownerWhatsapps || ["6285169949218"]).map((n: string, i: number) => 
+            `${i + 1}. +${n} ${n === '6285169949218' ? '*(Owner Utama)*' : ''}`
+          ).join('\n');
+          ctx.reply(`👑 *DAFTAR NOMOR WHATSAPP OWNER*\n━━━━━━━━━━━━━━━━━━━━━\n${waList}\n\n💡 *Perintah Manajemen:*\n• \`/addownerwa <nomor>\` - Tambah nomor Owner WA\n• \`/delownerwa <nomor>\` - Hapus nomor Owner WA`, { parse_mode: 'Markdown' });
+      });
+
+      bot.hears(/^\/addownerwa (.+)$/i, async (ctx) => {
+          if (!db.owners.includes(ctx.from?.id || 0)) return;
+          const target = ctx.match[1].trim();
+          const clean = normalizeWaNumber(target);
+          if (clean.length < 8) {
+            return ctx.reply("❌ Format nomor tidak valid. Contoh: `/addownerwa 085169949218` atau `/addownerwa 6281234567890`", { parse_mode: 'Markdown' });
+          }
+          if (!db.ownerWhatsapps) db.ownerWhatsapps = [];
+          if (db.ownerWhatsapps.some((n: string) => normalizeWaNumber(n) === clean)) {
+            return ctx.reply(`⚠️ Nomor +${clean} sudah terdaftar sebagai Owner WhatsApp!`);
+          }
+          db.ownerWhatsapps.push(clean);
+          writeDB(db);
+          ctx.reply(`✅ *BERHASIL MENAMBAHKAN OWNER WHATSAPP*\nNomor: +${clean}\nNomor ini sekarang dikenali otomatis oleh Bot WhatsApp dengan hak akses penuh Owner.`, { parse_mode: 'Markdown' });
+      });
+
+      bot.hears(/^\/delownerwa (.+)$/i, async (ctx) => {
+          if (!db.owners.includes(ctx.from?.id || 0)) return;
+          const target = ctx.match[1].trim();
+          const clean = normalizeWaNumber(target);
+          if (clean === '6285169949218') {
+            return ctx.reply("❌ Nomor Owner utama (+6285169949218) tidak dapat dihapus!");
+          }
+          if (!db.ownerWhatsapps || !db.ownerWhatsapps.some((n: string) => normalizeWaNumber(n) === clean)) {
+            return ctx.reply(`⚠️ Nomor +${clean} tidak ditemukan di daftar Owner WhatsApp.`);
+          }
+          db.ownerWhatsapps = db.ownerWhatsapps.filter((n: string) => normalizeWaNumber(n) !== clean);
+          writeDB(db);
+          ctx.reply(`✅ *BERHASIL MENGHAPUS OWNER WHATSAPP*\nNomor: +${clean} telah dihapus dari hak akses Owner WhatsApp.`, { parse_mode: 'Markdown' });
       });
 
             bot.hears("🔙 Kembali", async (ctx) => {
@@ -6494,6 +7206,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
               }
               
               const caption = msg.caption || "";
+              let localPath = "";
               
               try {
                   const fileLink = await ctx.telegram.getFileLink(fileId);
@@ -6503,7 +7216,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                   
                   // Save to disk
                   const ext = fileName ? fileName.split('.').pop() : (mediaType === 'image' ? 'jpg' : 'mp4');
-                  const localPath = 'announcement_media.' + ext;
+                  localPath = 'announcement_media.' + ext;
                   fs.writeFileSync(localPath, buffer);
                   
                   await ctx.reply("✅ Mengirim pengumuman media ke WhatsApp...");
@@ -6527,8 +7240,10 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                   } else {
                       await ctx.reply("⚠️ WhatsApp belum terhubung. Pengumuman akan dikirim saat WA terhubung.");
                   }
-              } catch (e) {
+              } catch (e: any) {
                   await ctx.reply("❌ Gagal mendownload atau memproses media: " + e.message);
+              } finally {
+                  try { if (fs.existsSync(localPath)) fs.unlinkSync(localPath); } catch (e) {}
               }
               return;
           }
@@ -6565,7 +7280,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
         if (text.startsWith('/')) { return next(); }
         if (text === "🔙 Kembali") { return next(); }
         
-        const ownerMenu = ["📒 Cek Utang Member", "📝 Tambah Member", "👑 List Member", "💳 Saldo Pusat", "⚙️ Pengaturan", "📢 Pengumuman WA", "📸 Buat Story WA"];
+        const ownerMenu = ["📒 Cek Utang Member", "📝 Tambah Member", "👑 List Member", "💳 Saldo Pusat", "⚙️ Pengaturan", "📢 Pengumuman WA", "📸 Buat Story WA", "🧹 Bersihkan Sampah", "👑 Owner WA"];
         if (ownerMenu.includes(text) && db.owners.includes(userId)) {
            delete userStates[userId];
            return next(); 
@@ -8902,6 +9617,8 @@ if (process.env.NODE_ENV !== "production") {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    // Start automated system cleanup scheduler (runs every 30 minutes, STB Armbian safe)
+    startAutoCleanerScheduler(30);
   });
 }
 
