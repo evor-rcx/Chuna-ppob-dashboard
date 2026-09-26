@@ -6491,28 +6491,28 @@ Kirim linknya sekarang ya! 🥰`);
           }
         };
 
+        const memberName = member.name || 'Member';
+        const taxLine = pajak > 0 ? `📊 Biaya Pajak (0.3%)\n` : `✨ Biaya Pajak: Gratis (Rp 0)\n`;
+        const taxNote = pajak > 0 ? `ℹ️ Catatan Pajak: Transaksi isi saldo Rp 400.000 ke atas dikenakan pajak 0,3%. Saldo yang masuk ke akun Anda tetap utuh sebesar Rp ${nominal.toLocaleString('id-ID')}.\n\n` : '';
+
         const caption = 
-          `🧾 *TAGIHAN ISI SALDO E4 STORE*\n` +
+          `🧾 TAGIHAN ISI SALDO E4 STORE\n` +
           `━━━━━━━━━━━━━━━━━━━━━\n` +
-          `🏪 *Nama Merchant:* E4store, Elektronik\n` +
-          `💼 *Kategori Usaha:* Elektronik\n` +
-          `📍 *Kota:* Bontang, Kalimantan Timur\n` +
-          `🆔 *NMID:* ID1024335995857\n` +
+          `🏪 Nama Merchant: E4store, Elektronik\n` +
           `━━━━━━━━━━━━━━━━━━━━━\n` +
-          `👤 *Nama Akun:* ${member.name || 'Member'}\n` +
-          `💰 *Nominal Saldo:* Rp ${nominal.toLocaleString('id-ID')}\n` +
-          (pajak > 0 ? `📊 *Biaya Pajak (0.3%):* Rp ${pajak.toLocaleString('id-ID')}\n` : `✨ *Biaya Pajak:* Gratis (Rp 0)\n`) +
-          `💵 *TOTAL PEMBAYARAN:* *Rp ${totalBayar.toLocaleString('id-ID')}*\n` +
+          `👤 Nama Akun: ${memberName}\n` +
+          `💰 Nominal Saldo: Rp ${nominal.toLocaleString('id-ID')}\n` +
+          taxLine +
+          `💵 TOTAL PEMBAYARAN: Rp ${totalBayar.toLocaleString('id-ID')}\n` +
           `━━━━━━━━━━━━━━━━━━━━━\n` +
-          (pajak > 0 ? `ℹ️ *Catatan Pajak:* Transaksi isi saldo Rp 400.000 ke atas dikenakan pajak 0,3%. Saldo yang masuk ke akun Anda tetap utuh sebesar *Rp ${nominal.toLocaleString('id-ID')}*.\n\n` : '') +
-          `📌 *PANDUAN PEMBAYARAN:*\n` +
+          taxNote +
+          `📌 PANDUAN PEMBAYARAN:\n` +
           `1. Simpan atau tangkap layar (screenshot) kode QRIS di atas.\n` +
-          `2. Buka aplikasi *GoPay, BCA, Livin Mandiri, BRImo, DANA, OVO, ShopeePay*, atau m-Banking Anda.\n` +
-          `3. Pilih menu *Scan QR / QRIS*, lalu unggah gambar QRIS ini dari galeri ponsel.\n` +
-          `4. Pastikan nama toko tujuan: *E4store, Elektronik* (Bontang).\n` +
-          `5. Masukkan nominal transfer pas: *Rp ${totalBayar.toLocaleString('id-ID')}*.\n` +
-          `6. Setelah transfer berhasil, *KIRIMKAN FOTO / SCREENSHOT STRUK BUKTI TRANSFER* langsung ke chat bot ini.\n\n` +
-          `🤖 *Asisten Chuna akan memindai & memverifikasi bukti transfer secara otomatis dengan AI!*`;
+          `2. Buka aplikasi GoPay, BCA, Livin Mandiri, BRImo, DANA, OVO, ShopeePay, atau m-Banking Anda.\n` +
+          `3. Pilih menu Scan QR / QRIS, lalu unggah gambar QRIS ini dari galeri ponsel.\n` +
+          `4. Pastikan nama toko tujuan: E4store, Elektronik (Bontang).\n` +
+          `5. Masukkan nominal transfer pas: Rp ${totalBayar.toLocaleString('id-ID')}.\n` +
+          `6. Setelah transfer berhasil, KIRIMKAN FOTO / SCREENSHOT STRUK BUKTI TRANSFER langsung ke chat bot ini.`;
 
         const cancelKeyboard = {
           keyboard: [[{ text: "❌ Batalkan Isi Saldo" }]],
@@ -7788,192 +7788,125 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
               const memberId = `MBR-${userId}`;
               const member = members.find(m => m.id === memberId || isTelegramMatch(m.telegram, userId, ctx.from?.username));
 
-              if (state?.step === 'AWAITING_TOPUP_RECEIPT' || member) {
-                  const photos = (ctx.message as any).photo;
-                  const fileId = photos[photos.length - 1].file_id;
-
-                  const statusMsg = await ctx.reply("⏳ *Chuna sedang memindai dan memverifikasi bukti transfer dengan AI Vision...*", { parse_mode: 'Markdown' });
-
-                  try {
-                      const fileLink = await ctx.telegram.getFileLink(fileId);
-                      const response = await fetch(fileLink.href);
-                      const arrayBuffer = await response.arrayBuffer();
-                      const buffer = Buffer.from(arrayBuffer);
-
-                      const analysis = await analyzeTransferReceipt(buffer);
-
-                      if (!analysis.isReceipt) {
-                          try { await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id); } catch(e) {}
-                          if (state?.step === 'AWAITING_TOPUP_RECEIPT') {
-                              await ctx.reply(
-                                  `⚠️ *Bukan Bukti Transfer Resmi*\n\n` +
-                                  `Halo Kak, gambar yang dikirimkan terdeteksi bukan bukti transfer atau struk pembayaran resmi.\n\n` +
-                                  `Keterangan: ${analysis.reason || "Format tidak sesuai"}.\n\n` +
-                                  `Mohon kirimkan screenshot bukti transfer pembayaran yang valid dan jelas ya Kak! 😊`,
-                                  { parse_mode: 'Markdown' }
-                              );
-                          } else {
-                              await ctx.reply(
-                                  `Halo Kak! Gambar yang dikirimkan bukan bukti transfer resmi.\n\n` +
-                                  `Jika Kakak ingin mengisi saldo akun, silakan ketik atau klik tombol *💳 Isi Saldo* terlebih dahulu ya Kak! 😊`,
-                                  { parse_mode: 'Markdown' }
-                              );
+              if (state?.step !== 'AWAITING_TOPUP_RECEIPT') {
+                  const dbNow = readDB();
+                  await ctx.reply(
+                      `Halo Kak! Untuk mengisi saldo akun, silakan klik tombol *💳 Isi Saldo* dan pilih nominal terlebih dahulu, lalu kirimkan foto struk bukti transfernya ya Kak! 😊`,
+                      {
+                          parse_mode: 'Markdown',
+                          reply_markup: {
+                              keyboard: getCustomerMenuKeyboard(dbNow.owners.includes(userId)),
+                              resize_keyboard: true
                           }
-                          return;
                       }
+                  );
+                  return;
+              }
 
-                      if (analysis.isExpired) {
-                          try { await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id); } catch(e) {}
-                          await ctx.reply(
-                              `⚠️ *Bukti Pembayaran Kedaluwarsa!*\n\n` +
-                              `Bukti transfer yang Kakak kirimkan tercatat bertanggal *${analysis.date || "lampau"}*. Bukti transfer ini sudah kedaluwarsa.\n\n` +
-                              `Mohon lakukan transfer baru dan kirimkan bukti pembayaran transaksi hari ini ya Kak! 😊`,
-                              { parse_mode: 'Markdown' }
-                          );
-                          return;
+              const photos = (ctx.message as any).photo;
+              const fileId = photos[photos.length - 1].file_id;
+
+              try {
+                  const fileLink = await ctx.telegram.getFileLink(fileId);
+                  const response = await fetch(fileLink.href);
+                  const arrayBuffer = await response.arrayBuffer();
+                  const buffer = Buffer.from(arrayBuffer);
+
+                  const dbNow = readDB();
+                  const nominalSaldo = state?.data?.nominal || 0;
+                  const pajak = state?.data?.pajak || (nominalSaldo >= 400000 ? Math.ceil(nominalSaldo * 0.003) : 0);
+                  const totalBayar = state?.data?.totalBayar || (nominalSaldo + pajak);
+                  const memberName = member ? member.name : (ctx.from.first_name || 'Member');
+                  const memberMid = member ? member.id : `MBR-${userId}`;
+
+                  const reqId = `TOPUP-${Date.now()}`;
+                  const topupReq: any = {
+                      id: reqId,
+                      memberId: memberMid,
+                      memberName: memberName,
+                      memberTelegram: userId,
+                      memberUsername: ctx.from.username ? `@${ctx.from.username}` : '-',
+                      memberWhatsapp: member?.whatsapp || '-',
+                      nominalSaldo,
+                      pajak,
+                      totalBayar,
+                      transferredAmount: totalBayar,
+                      transactionId: `TRX-${Date.now()}`,
+                      dateStr: new Date().toLocaleDateString('id-ID'),
+                      timeStr: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+                      targetMerchant: 'E4store, Elektronik',
+                      senderName: memberName,
+                      status: 'pending',
+                      photoFileId: fileId,
+                      createdAt: new Date().toISOString()
+                  };
+
+                  if (!dbNow.topupRequests) dbNow.topupRequests = [];
+                  dbNow.topupRequests.unshift(topupReq);
+                  writeDB(dbNow);
+                  delete userStates[userId];
+
+                  // Kirim konfirmasi ke Customer
+                  await ctx.reply(
+                      `✅ *BUKTI TRANSFER BERHASIL DITERIMA!*\n` +
+                      `━━━━━━━━━━━━━━━━━━━━━\n` +
+                      `Terima kasih Kak *${memberName}*! Bukti transfer Anda telah berhasil kami terima dan langsung diteruskan ke Owner E4 Store untuk verifikasi manual.\n\n` +
+                      `📋 *Rincian Pengajuan Isi Saldo:*\n` +
+                      `• 👤 *Nama Akun:* ${memberName}\n` +
+                      `• 💰 *Nominal Saldo:* Rp ${nominalSaldo.toLocaleString('id-ID')}\n` +
+                      (pajak > 0 ? `• 📊 *Biaya Pajak (0.3%):* Rp ${pajak.toLocaleString('id-ID')}\n` : `• ✨ *Biaya Pajak:* Gratis (Rp 0)\n`) +
+                      `• 💵 *Total Pembayaran:* Rp ${totalBayar.toLocaleString('id-ID')}\n` +
+                      `• 🏪 *Tujuan Toko:* E4store, Elektronik (Bontang)\n` +
+                      `• 🕒 *Waktu Kirim:* ${new Date().toLocaleString('id-ID')}\n\n` +
+                      `⏳ *Mohon menunggu konfirmasi ya Kak!*\n` +
+                      `Owner akan segera mengecek mutasi transfer dan menyetujui pengisian saldo. Saldo akan otomatis masuk ke akun Anda begitu di-ACC! 🥰💖`,
+                      {
+                          parse_mode: 'Markdown',
+                          reply_markup: {
+                              keyboard: getCustomerMenuKeyboard(dbNow.owners.includes(userId)),
+                              resize_keyboard: true
+                          }
                       }
+                  );
 
-                      if (analysis.isMerchantMatch === false && analysis.targetMerchantOrAccount) {
-                          try { await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id); } catch(e) {}
-                          await ctx.reply(
-                              `⚠️ *Tujuan Transfer Tidak Sesuai!*\n\n` +
-                              `Pada bukti transfer yang dikirimkan, nama tujuan transfer terdeteksi: *${analysis.targetMerchantOrAccount}*.\n\n` +
-                              `Toko resmi kami terdaftar dengan nama merchant *E4store, Elektronik* (Bontang).\n` +
-                              `Mohon pastikan Kakak mentransfer ke QRIS resmi toko kami ya Kak! 😊`,
-                              { parse_mode: 'Markdown' }
-                          );
-                          return;
-                      }
+                  // Forward foto bukti transfer + detail rincian ke semua Telegram Owner
+                  for (const ownerId of dbNow.owners) {
+                      try {
+                          const ownerMsg = 
+                              `📥 *PERMINTAAN ISI SALDO MASUK (BUKTI TRANSFER)*\n` +
+                              `━━━━━━━━━━━━━━━━━━━━━\n` +
+                              `👤 *Member:* ${memberName} (${ctx.from.username ? '@' + ctx.from.username : 'ID: ' + userId})\n` +
+                              `📱 *Kontak Member:* ${member?.whatsapp || '-'}\n` +
+                              `💰 *Nominal Saldo Diminta:* *Rp ${nominalSaldo.toLocaleString('id-ID')}*\n` +
+                              (pajak > 0 ? `📊 *Pajak (0.3%):* Rp ${pajak.toLocaleString('id-ID')}\n` : `✨ *Biaya Pajak:* Gratis (Rp 0)\n`) +
+                              `💵 *Total Tagihan Transfer:* *Rp ${totalBayar.toLocaleString('id-ID')}*\n` +
+                              `🕒 *Waktu Pengajuan:* ${new Date().toLocaleString('id-ID')}\n` +
+                              `━━━━━━━━━━━━━━━━━━━━━\n` +
+                              `👉 *Tindakan Owner (Manual):*\n` +
+                              `Silakan periksa mutasi di aplikasi GoPay Merchant / Rekening Bank Anda.\n` +
+                              `Jika uang sudah masuk, klik tombol di bawah untuk menyetujui, atau kelola lewat Dashboard Web:`;
 
-                      const dbNow = readDB();
-                      if (analysis.transactionId && (dbNow.processedReceiptIds || []).includes(analysis.transactionId)) {
-                          try { await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id); } catch(e) {}
-                          await ctx.reply(
-                              `🚨 *Bukti Transfer Sudah Pernah Digunakan!*\n\n` +
-                              `Bukti transfer dengan ID transaksi *${analysis.transactionId}* sudah pernah diproses sebelumnya di sistem E4 Store.\n\n` +
-                              `Satu bukti transfer tidak dapat dipakai berulang kali untuk menjaga keamanan transaksi.`,
-                              { parse_mode: 'Markdown' }
-                          );
-                          return;
-                      }
-
-                      if (analysis.status !== 'SUCCESS' && analysis.status !== 'UNKNOWN') {
-                          try { await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id); } catch(e) {}
-                          await ctx.reply(
-                              `⚠️ *Transaksi Belum Selesai / Berhasil*\n\n` +
-                              `Status pada bukti transfer terdeteksi *${analysis.status}*. Pastikan transfer Kakak sudah berstatus Berhasil/Selesai di aplikasi bank/e-wallet sebelum mengirimkan bukti struk ya Kak! 😊`,
-                              { parse_mode: 'Markdown' }
-                          );
-                          return;
-                      }
-
-                      // Valid transfer proof!
-                      if (analysis.transactionId) {
-                          if (!dbNow.processedReceiptIds) dbNow.processedReceiptIds = [];
-                          dbNow.processedReceiptIds.push(analysis.transactionId);
-                      }
-
-                      const nominalSaldo = state?.data?.nominal || analysis.nominal || 0;
-                      const pajak = state?.data?.pajak || (nominalSaldo >= 400000 ? Math.ceil(nominalSaldo * 0.003) : 0);
-                      const totalBayar = state?.data?.totalBayar || (nominalSaldo + pajak);
-                      const memberName = member ? member.name : (ctx.from.first_name || 'Member');
-                      const memberMid = member ? member.id : `MBR-${userId}`;
-
-                      const reqId = `TOPUP-${Date.now()}`;
-                      const topupReq: any = {
-                          id: reqId,
-                          memberId: memberMid,
-                          memberName: memberName,
-                          memberTelegram: userId,
-                          memberUsername: ctx.from.username ? `@${ctx.from.username}` : '-',
-                          memberWhatsapp: member?.whatsapp || '-',
-                          nominalSaldo,
-                          pajak,
-                          totalBayar,
-                          transferredAmount: analysis.nominal || totalBayar,
-                          transactionId: analysis.transactionId || `TRX-${Date.now()}`,
-                          dateStr: analysis.date || new Date().toLocaleDateString('id-ID'),
-                          timeStr: analysis.time || '',
-                          targetMerchant: analysis.targetMerchantOrAccount || 'E4store, Elektronik',
-                          senderName: analysis.senderName || '-',
-                          status: 'pending',
-                          photoFileId: fileId,
-                          createdAt: new Date().toISOString()
-                      };
-
-                      if (!dbNow.topupRequests) dbNow.topupRequests = [];
-                      dbNow.topupRequests.unshift(topupReq);
-                      writeDB(dbNow);
-                      delete userStates[userId];
-
-                      try { await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id); } catch(e) {}
-
-                      // Confirm to customer
-                      await ctx.reply(
-                          `✅ *BUKTI TRANSFER BERHASIL DITERIMA!*\n` +
-                          `━━━━━━━━━━━━━━━━━━━━━\n` +
-                          `Terima kasih Kak *${memberName}*! Bukti transfer telah terbaca oleh sistem dan otomatis diteruskan ke Owner E4 Store untuk verifikasi saldo.\n\n` +
-                          `📋 *Rincian Salinan Bukti Transfer:*\n` +
-                          `• 💰 *Nominal Saldo:* Rp ${nominalSaldo.toLocaleString('id-ID')}\n` +
-                          (pajak > 0 ? `• 📊 *Biaya Pajak (0.3%):* Rp ${pajak.toLocaleString('id-ID')}\n` : '') +
-                          `• 💵 *Total di Struk:* Rp ${(analysis.nominal || totalBayar).toLocaleString('id-ID')}\n` +
-                          `• 🆔 *ID Transaksi:* \`${analysis.transactionId || '-'}\`\n` +
-                          `• 📅 *Waktu:* ${analysis.date} ${analysis.time}\n` +
-                          `• 🏦 *Pengirim/Metode:* ${analysis.senderName || '-'}\n` +
-                          `• 🏪 *Tujuan Struk:* ${analysis.targetMerchantOrAccount || 'E4store, Elektronik'}\n\n` +
-                          `⏳ *Mohon menunggu sebentar ya Kak!* Owner akan segera memverifikasi dan mengisi saldo ke akun Kakak. Chuna akan langsung memberi tahu Kakak begitu saldo masuk! 🥰💖`,
-                          {
+                          await bot.telegram.sendPhoto(ownerId, { source: buffer }, {
+                              caption: ownerMsg,
                               parse_mode: 'Markdown',
                               reply_markup: {
-                                  keyboard: getCustomerMenuKeyboard(dbNow.owners.includes(userId)),
-                                  resize_keyboard: true
-                              }
-                          }
-                      );
-
-                      // Forward photo + details to all Telegram Owners
-                      for (const ownerId of dbNow.owners) {
-                          try {
-                              const ownerMsg = 
-                                  `📥 *PERMINTAAN ISI SALDO MASUK (BUKTI TRANSFER)*\n` +
-                                  `━━━━━━━━━━━━━━━━━━━━━\n` +
-                                  `👤 *Member:* ${memberName} (${ctx.from.username ? '@' + ctx.from.username : 'ID: ' + userId})\n` +
-                                  `📱 *Kontak Member:* ${member?.whatsapp || '-'}\n` +
-                                  `💰 *Nominal Saldo Diminta:* *Rp ${nominalSaldo.toLocaleString('id-ID')}*\n` +
-                                  (pajak > 0 ? `📊 *Pajak (0.3%):* Rp ${pajak.toLocaleString('id-ID')}\n` : '') +
-                                  `💵 *Total di Struk:* *Rp ${(analysis.nominal || totalBayar).toLocaleString('id-ID')}*\n` +
-                                  `🆔 *ID Transaksi:* \`${analysis.transactionId || '-'}\`\n` +
-                                  `📅 *Waktu Struk:* ${analysis.date} ${analysis.time}\n` +
-                                  `🏦 *Pengirim:* ${analysis.senderName || '-'}\n` +
-                                  `🏪 *Tujuan:* ${analysis.targetMerchantOrAccount || 'E4store, Elektronik'}\n` +
-                                  `━━━━━━━━━━━━━━━━━━━━━\n` +
-                                  `👉 *Tindakan Owner:*\n` +
-                                  `Silakan cek mutasi di GoPay Merchant / Bank Anda.\n` +
-                                  `Kakak bisa isi manual lewat Dashboard web, ATAU klik tombol instan di bawah:`;
-
-                              await bot.telegram.sendPhoto(ownerId, { source: buffer }, {
-                                  caption: ownerMsg,
-                                  parse_mode: 'Markdown',
-                                  reply_markup: {
-                                      inline_keyboard: [
-                                          [
-                                              { text: `✅ Setujui & Tambah Saldo Rp ${nominalSaldo.toLocaleString('id-ID')}`, callback_data: `APPROVE_TOPUP_${reqId}` },
-                                              { text: `❌ Tolak`, callback_data: `REJECT_TOPUP_${reqId}` }
-                                          ]
+                                  inline_keyboard: [
+                                      [
+                                          { text: `✅ Setujui & Tambah Saldo Rp ${nominalSaldo.toLocaleString('id-ID')}`, callback_data: `APPROVE_TOPUP_${reqId}` },
+                                          { text: `❌ Tolak`, callback_data: `REJECT_TOPUP_${reqId}` }
                                       ]
-                                  }
-                              });
-                          } catch (err: any) {
-                              console.error("Failed to notify owner for topup:", err.message);
-                          }
+                                  ]
+                              }
+                          });
+                      } catch (err: any) {
+                          console.error("Failed to notify owner for topup:", err.message);
                       }
-                      return;
-                  } catch (err: any) {
-                      console.error("Error processing receipt:", err.message);
-                      try { await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id); } catch(e) {}
-                      await ctx.reply("❌ Terjadi kendala saat memproses gambar. Mohon kirim ulang bukti transfer yang jelas ya Kak!");
-                      return;
                   }
+                  return;
+              } catch (err: any) {
+                  console.error("Error processing receipt:", err.message);
+                  await ctx.reply("❌ Terjadi kendala saat menerima gambar. Mohon kirim ulang bukti transfer Anda ya Kak!");
+                  return;
               }
           }
           
