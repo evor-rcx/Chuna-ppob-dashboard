@@ -326,11 +326,21 @@ export async function generateOrderConfirmationSticker(data: ConfirmationSticker
         ctx.restore();
 
         // Customer initials or E4 monogram in crisp white
-        ctx.font = '900 36px Arial, "Segoe UI", sans-serif';
+        ctx.font = '900 36px Arial, "Segoe UI", "Liberation Sans", sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = '#ffffff';
-        const fallbackText = (data.nickname ? data.nickname.slice(0, 2).toUpperCase() : 'E4');
+        let fallbackText = 'E4';
+        if (data.nickname) {
+            if (/selamat\s*datang\s*owner/i.test(data.nickname)) {
+                fallbackText = 'OW';
+            } else {
+                const words = data.nickname.trim().split(/\s+/).filter(Boolean);
+                fallbackText = words.length >= 2 
+                    ? (words[0][0] + words[1][0]).toUpperCase()
+                    : data.nickname.slice(0, 2).toUpperCase();
+            }
+        }
         ctx.fillText(fallbackText, circleX, circleY + 4);
     }
     ctx.restore(); // Restore clip

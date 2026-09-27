@@ -182,7 +182,7 @@ export async function generateEmeraldConfirmationImage(data: EmeraldConfirmation
     ctx.fill();
     ctx.restore();
 
-    // Load WhatsApp Avatar or Fallback Character
+    // Load WhatsApp / Telegram Avatar
     let avatarImg: any = null;
     if (data.avatarBuffer) {
         try {
@@ -191,15 +191,6 @@ export async function generateEmeraldConfirmationImage(data: EmeraldConfirmation
     } else if (data.waPhotoUrl) {
         try {
             avatarImg = await loadImage(data.waPhotoUrl).catch(() => null);
-        } catch (e) {}
-    }
-
-    // If no WhatsApp profile photo, fallback to anime Chuna character
-    if (!avatarImg) {
-        try {
-            if (fs.existsSync('./Picsart_26-08-15_13-04-05-605.png')) {
-                avatarImg = await loadImage('./Picsart_26-08-15_13-04-05-605.png').catch(() => null);
-            }
         } catch (e) {}
     }
 
@@ -268,13 +259,24 @@ export async function generateEmeraldConfirmationImage(data: EmeraldConfirmation
         ctx.font = 'italic 700 86px "Times New Roman", Georgia, serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        const initials = data.customerName ? data.customerName.slice(0, 2).toUpperCase() : 'E4';
+        let rawName = (data.customerName || '').trim();
+        const isOwnerGreeting = /selamat\s*datang\s*owner/i.test(rawName);
+        if (/^(e4\s*store|e4store|e4|admin|bot)$/i.test(rawName)) rawName = '';
+        let initials = 'E4';
+        if (isOwnerGreeting) {
+            initials = 'OW';
+        } else if (rawName) {
+            const words = rawName.split(/\s+/).filter(Boolean);
+            initials = words.length >= 2 
+                ? (words[0][0] + words[1][0]).toUpperCase()
+                : rawName.slice(0, 2).toUpperCase();
+        }
         ctx.fillText(initials, frameLeft + frameW / 2, frameTop + frameH / 2 - 20);
 
-        ctx.font = '600 24px "Segoe UI", Arial, sans-serif';
+        ctx.font = '600 24px "Segoe UI", "Liberation Sans", Arial, sans-serif';
         ctx.fillStyle = '#e2d5bd';
         ctx.shadowBlur = 0;
-        ctx.fillText("E4 STORE MEMBER", frameLeft + frameW / 2, frameTop + frameH / 2 + 50);
+        ctx.fillText(isOwnerGreeting ? "E4 STORE OWNER" : "E4 STORE MEMBER", frameLeft + frameW / 2, frameTop + frameH / 2 + 50);
         ctx.restore();
     }
     ctx.restore(); // Restore clip
@@ -354,13 +356,20 @@ export async function generateEmeraldConfirmationImage(data: EmeraldConfirmation
 
     // 4. Details: Nama, Layanan, Nomor
     let customerDisplayName = (data.customerName || '').trim();
-    const digitsOnly = customerDisplayName.replace(/\D/g, '');
-    const isPhone = /^\+?[\d\s\-\(\)\.]{6,}$/.test(customerDisplayName) || (digitsOnly.length >= 6 && customerDisplayName.replace(/[^a-zA-Z]/g, '').length < 3);
-    if (!customerDisplayName || customerDisplayName === '-' || customerDisplayName === 'undefined' || customerDisplayName === 'null' || isPhone) {
-        customerDisplayName = 'Pelanggan Setia';
+    const isOwnerGreetingDetail = /selamat\s*datang\s*owner/i.test(customerDisplayName);
+    if (isOwnerGreetingDetail) {
+        customerDisplayName = 'Selamat datang Owner';
+    } else {
+        const nonPhoneChars = customerDisplayName.replace(/[\d\s\+\-\(\)\.]/g, '');
+        const digitsOnly = customerDisplayName.replace(/\D/g, '');
+        const isPhone = (nonPhoneChars.length === 0 && digitsOnly.length >= 7);
+        const isStoreName = /^(e4\s*store|e4store|e4|admin|bot)$/i.test(customerDisplayName.replace(/[\s_\-\.]+/g, ''));
+        if (!customerDisplayName || customerDisplayName === '-' || customerDisplayName === 'undefined' || customerDisplayName === 'null' || isPhone || isStoreName) {
+            customerDisplayName = 'Pelanggan Setia';
+        }
     }
-    const cleanCustomerName = customerDisplayName.length > 22
-        ? customerDisplayName.substring(0, 20) + '...'
+    const cleanCustomerName = customerDisplayName.length > 25
+        ? customerDisplayName.substring(0, 23) + '...'
         : customerDisplayName;
 
     const cleanServiceName = (data.serviceName || 'Produk').length > 24
@@ -372,7 +381,7 @@ export async function generateEmeraldConfirmationImage(data: EmeraldConfirmation
     // Field 1: Nama
     ctx.save();
     ctx.fillStyle = '#ffffff';
-    ctx.font = '600 36px "Segoe UI", Arial, sans-serif';
+    ctx.font = '600 36px "Segoe UI", "Liberation Sans", "FreeSans", "IPAPGothic", "KacstArt", Arial, sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText(`Nama : ${cleanCustomerName}`, contentStartX, 424);

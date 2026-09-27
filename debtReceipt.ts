@@ -123,6 +123,7 @@ function draw3DGiftIcon(ctx: any, x: number, y: number, size: number) {
 function getInitials(name: string): string {
     const clean = (name || '').replace(/^(kak|mas|mba|om|tante|bapak|ibu)\s+/i, '').trim();
     if (!clean) return 'E4';
+    if (/selamat\s*datang\s*owner/i.test(clean)) return 'OW';
     const words = clean.split(/\s+/).filter(Boolean);
     if (words.length >= 2) {
         return (words[0][0] + words[1][0]).toUpperCase();

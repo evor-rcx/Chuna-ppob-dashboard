@@ -160,7 +160,7 @@ export async function generateVintageTagihanReceipt(data: VintageTagihanData): P
     let curY = 415;
 
     ctx.textAlign = 'left';
-    ctx.font = 'bold 24px "Times New Roman", Georgia, serif';
+    ctx.font = 'bold 24px "Times New Roman", "Liberation Serif", "FreeSans", "IPAPGothic", "KacstArt", Georgia, serif';
     ctx.fillStyle = '#1e110a';
     ctx.fillText('Customer:', leftX, curY);
     ctx.textAlign = 'right';
