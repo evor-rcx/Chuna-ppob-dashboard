@@ -646,13 +646,15 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
                         memberName = m.waProfileName.trim();
                     } else if (data.customerDisplayName && !isPhoneNumberOrEmpty(data.customerDisplayName) && data.customerDisplayName !== 'Pelanggan Setia' && data.customerDisplayName !== 'Kakak') {
                         memberName = data.customerDisplayName.trim();
-                    } else if (m?.name && !isPhoneNumberOrEmpty(m.name) && m.name !== '-') {
-                        memberName = m.name.trim();
                     } else if (clean && clean.length >= 8) {
                         memberName = `+${clean}`;
                     } else {
-                        memberName = 'Kakak';
+                        memberName = 'Pelanggan Setia';
                     }
+                }
+
+                if (!memberName || memberName === '-' || memberName === 'Kakak' || isPhoneNumberOrEmpty(memberName) || /uji\s*coba|mamaku/i.test(memberName)) {
+                    memberName = 'Pelanggan Setia';
                 }
 
                 if (!waPhotoUrl && currentDb.waProfilePhotos && currentDb.waProfilePhotos[clean]) {
@@ -1266,9 +1268,17 @@ function readDB() {
   if (!db.processedReceiptIds) {
     db.processedReceiptIds = [];
   }
+  if (!db.waProfiles) {
+    db.waProfiles = {};
+  }
+  if (!db.waProfilePhotos) {
+    db.waProfilePhotos = {};
+  }
   return db;
 }
 function writeDB(data: any) {
+  if (!data.waProfiles) data.waProfiles = {};
+  if (!data.waProfilePhotos) data.waProfilePhotos = {};
   try {
     securitySuite.auditDatabaseIntegrity(data);
   } catch (e) {}
@@ -1489,9 +1499,9 @@ function isPhoneNumberOrEmpty(val?: string | null): boolean {
         return false;
     }
 
-    // Check if store / bot / admin name
+    // Check if store / bot / admin name or test customer
     const lower = trimmed.toLowerCase().replace(/[\s_\-\.]+/g, '');
-    if (lower === 'e4store' || lower === 'e4' || lower === 'admin' || lower === 'bot') {
+    if (lower === 'e4store' || lower === 'e4' || lower === 'admin' || lower === 'bot' || lower.includes('ujicobacostumer') || lower.includes('ujicobacustomer') || lower.includes('mamaku')) {
         return true;
     }
 
@@ -1546,57 +1556,9 @@ function getCustomerDisplayName(member: any, waDetails?: any, telegramCtxOrUserI
         return fallbackTargetName.trim();
     }
 
-    // 4. INSTRUKSI PENGGUNA:
-    // Jika nomor tujuan belum pernah chat/call ke WhatsApp sehingga nama profilnya belum terekam,
-    // sistem akan menampilkan panggilan yang ada di dashboard member offline maupun telegram customer,
-    // dan tidak akan pernah lagi memanggil nama kontak buku telepon lama.
-
-    // A. Dashboard Member Offline:
-    const memberOfflineName = (member?.name || member?.nama || '').trim();
-    if (memberOfflineName && !isPhoneNumberOrEmpty(memberOfflineName) && memberOfflineName !== '-' && !/^(kakak|member|pelanggan setia)$/i.test(memberOfflineName)) {
-        return memberOfflineName;
-    }
-    if (cleanPhone && Array.isArray(db.members)) {
-        const matchedMember = db.members.find((m: any) => cleanWaPhone(m.whatsapp || '') === cleanPhone);
-        const matchedName = (matchedMember?.name || matchedMember?.nama || '').trim();
-        if (matchedName && !isPhoneNumberOrEmpty(matchedName) && matchedName !== '-' && !/^(kakak|member|pelanggan setia)$/i.test(matchedName)) {
-            return matchedName;
-        }
-    }
-
-    // B. Telegram Customer (sesuai yang terdaftar di tabel dashboard / registeredUsers / akun Telegram):
-    if (tgUserId) {
-        // Cek data member Telegram di db.members (yang tampil di tabel dashboard Member)
-        if (Array.isArray(db.members)) {
-            const tgMember = db.members.find((m: any) => isTelegramMatch(m.telegram, tgUserId, typeof telegramCtxOrUserId === 'object' ? telegramCtxOrUserId?.from?.username : undefined));
-            const tgMemberName = (tgMember?.name || tgMember?.nama || '').trim();
-            if (tgMemberName && !isPhoneNumberOrEmpty(tgMemberName) && tgMemberName !== '-' && !/^(kakak|member|pelanggan setia)$/i.test(tgMemberName)) {
-                return tgMemberName;
-            }
-        }
-        // Cek data akun terdaftar di registeredUsers
-        if (typeof registeredUsers !== 'undefined') {
-            const regUser = registeredUsers[tgUserId] || registeredUsers[Number(tgUserId)];
-            const regName = (regUser?.username || '').trim();
-            if (regName && !isPhoneNumberOrEmpty(regName) && !/^(kakak|member|pelanggan setia)$/i.test(regName)) {
-                return regName;
-            }
-        }
-    }
-
-    if (telegramCtxOrUserId && typeof telegramCtxOrUserId === 'object' && telegramCtxOrUserId.from) {
-        const u = telegramCtxOrUserId.from;
-        const tgFullName = [u.first_name, u.last_name].filter(Boolean).join(' ').trim();
-        if (tgFullName && !isPhoneNumberOrEmpty(tgFullName) && !/^(kakak|member|pelanggan setia)$/i.test(tgFullName)) {
-            return tgFullName;
-        }
-        if (u.username && !isPhoneNumberOrEmpty(u.username)) {
-            return `@${u.username}`;
-        }
-    }
-
-    // 5. Fallback terakhir jika profil WA, dashboard member offline, maupun Telegram customer belum ada:
-    // (DILARANG: Tidak pernah lagi mengambil dari buku kontak telepon)
+    // 4. FALLBACK AMAN:
+    // DILARANG dan HAPUS semua baris yang mengambil member.name / contact.name (seperti "Uji Coba Costumer" / "Mamaku").
+    // Jika profil WhatsApp asli belum terdeteksi, gunakan nomor pengirim atau 'Kakak'
     if (cleanPhone && cleanPhone.length >= 8) {
         return `+${cleanPhone}`;
     }
@@ -1952,12 +1914,15 @@ let isRequestingPairingCode = false;
 
 export async function generateCanvasDebtReceipt(member: any, utangTxs: any[]): Promise<Buffer | null> {
     try {
-        let memberName = member?.name || member?.nama || 'Pelanggan';
+        let memberName = 'Pelanggan Setia';
         let waPhone = member?.whatsapp || '';
         let waPhotoUrl: string | null = null;
 
         try {
             const waDetails = await getCustomerWaDetails(member);
+            if (waDetails.waProfile && waDetails.waProfile !== '-' && !isPhoneNumberOrEmpty(waDetails.waProfile)) {
+                memberName = waDetails.waProfile;
+            }
             if (waDetails.waPhone && waDetails.waPhone !== '-') waPhone = waDetails.waPhone;
             if (waDetails.waPhotoUrl) waPhotoUrl = waDetails.waPhotoUrl;
         } catch (e) {}
@@ -2002,7 +1967,7 @@ async function legacyCanvasDebtReceipt(member: any, utangTxs: any[]): Promise<Bu
     try {
         const width = 800;
         const height = 800;
-        let memberName = member?.name || '-';
+        let memberName = 'Pelanggan Setia';
         let waProfileName = '';
         let waPhone = '';
         let waPhotoUrl: string | null = null;
@@ -2011,8 +1976,9 @@ async function legacyCanvasDebtReceipt(member: any, utangTxs: any[]): Promise<Bu
         try {
             const waDetails = await getCustomerWaDetails(member);
             waPhone = waDetails.waPhone !== '-' ? waDetails.waPhone : (member?.whatsapp || '-');
-            waProfileName = waDetails.waProfile !== '-' ? waDetails.waProfile : '';
+            waProfileName = waDetails.waProfile !== '-' && !isPhoneNumberOrEmpty(waDetails.waProfile) ? waDetails.waProfile : '';
             waPhotoUrl = waDetails.waPhotoUrl;
+            if (waProfileName) memberName = waProfileName;
         } catch (e) {}
 
         if (waPhotoUrl) {
@@ -7526,7 +7492,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
             const cleanWa = rawWa.startsWith("0") ? "62" + rawWa.substring(1) : rawWa;
             const waProfileName = (cleanWa && db.waProfiles && db.waProfiles[cleanWa]) || member?.waProfileName;
             const isOwner = cleanWa && isOwnerWhatsapp(cleanWa);
-            const nama = isOwner ? "Selamat datang Owner" : (waProfileName || member?.name || memberId);
+            const nama = isOwner ? "Selamat datang Owner" : (waProfileName || (cleanWa ? `+${cleanWa}` : memberId));
             const wa = member ? (member.whatsapp || "-") : "-";
             buttons.push([{
                 text: `👤 ${nama} (${wa})`,
@@ -7550,7 +7516,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
           const cleanWa = rawWa.startsWith("0") ? "62" + rawWa.substring(1) : rawWa;
           const waProfileName = (cleanWa && db.waProfiles && db.waProfiles[cleanWa]) || member?.waProfileName;
           const isOwner = cleanWa && isOwnerWhatsapp(cleanWa);
-          const nama = isOwner ? "Selamat datang Owner" : (waProfileName || member?.name || memberId);
+          const nama = isOwner ? "Selamat datang Owner" : (waProfileName || (cleanWa ? `+${cleanWa}` : memberId));
           const wa = member ? (member.whatsapp || "-") : "-";
           
           const utangTx = transactions.filter((t: any) => t.method === 'utang' && t.status === 'Sukses' && t.memberId === memberId);
