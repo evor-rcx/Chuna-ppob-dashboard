@@ -646,6 +646,8 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
                         memberName = m.waProfileName.trim();
                     } else if (data.customerDisplayName && !isPhoneNumberOrEmpty(data.customerDisplayName) && data.customerDisplayName !== 'Pelanggan Setia' && data.customerDisplayName !== 'Kakak') {
                         memberName = data.customerDisplayName.trim();
+                    } else if (m?.name && !isPhoneNumberOrEmpty(m.name) && m.name !== '-') {
+                        memberName = m.name.trim();
                     } else if (clean && clean.length >= 8) {
                         memberName = `+${clean}`;
                     } else {
@@ -1387,6 +1389,51 @@ for (const [k, v] of Object.entries(db.waProfiles)) {
     }
 }
 
+// Helper untuk membersihkan nomor WhatsApp ke format 62...
+function cleanWaPhone(raw: string): string {
+    if (!raw) return '';
+    return raw.replace(/@.*$/, '').replace(/:\d+$/, '').replace(/\D/g, '').replace(/^0/, '62');
+}
+
+// Simpan profil asli WhatsApp (pushName / notify) ke db.waProfiles dan member.waProfileName
+function saveWaProfile(rawJidOrPhone: string, pushName?: string | null) {
+    if (!pushName || typeof pushName !== 'string') return;
+    const cleanName = pushName.trim();
+    if (!cleanName || isPhoneNumberOrEmpty(cleanName)) return;
+
+    const cleanPhone = cleanWaPhone(rawJidOrPhone);
+    if (!cleanPhone || cleanPhone.length < 8) return;
+
+    if (!db.waProfiles) db.waProfiles = {};
+    let changed = false;
+
+    if (db.waProfiles[cleanPhone] !== cleanName) {
+        db.waProfiles[cleanPhone] = cleanName;
+        changed = true;
+    }
+    const localPhone = "0" + cleanPhone.replace(/^62/, '');
+    if (db.waProfiles[localPhone] !== cleanName) {
+        db.waProfiles[localPhone] = cleanName;
+        changed = true;
+    }
+
+    if (Array.isArray(db.members)) {
+        for (const m of db.members) {
+            const mClean = cleanWaPhone(m.whatsapp || '');
+            if (mClean && mClean === cleanPhone) {
+                if (m.waProfileName !== cleanName) {
+                    m.waProfileName = cleanName;
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    if (changed) {
+        writeDB(db);
+    }
+}
+
 async function getCustomerWaDetails(member: any, telegramUserId?: any, targetPhone?: string) {
     let rawWa = targetPhone || member?.whatsapp || (telegramUserId ? (registeredUsers[telegramUserId]?.wa || registeredUsers[Number(telegramUserId)]?.wa) : '') || '';
     let waPhone = rawWa || '-';
@@ -1394,12 +1441,14 @@ async function getCustomerWaDetails(member: any, telegramUserId?: any, targetPho
     let waPhotoUrl: string | null = null;
 
     if (rawWa) {
-        let clean = rawWa.replace(/\D/g, "");
-        if (clean.startsWith("0")) clean = "62" + clean.substring(1);
+        let clean = cleanWaPhone(rawWa);
+        const local = "0" + clean.replace(/^62/, '');
 
         // 1. Cek Nama Profil ASLI WhatsApp (notify / pushName dari WhatsApp, BUKAN nama kontak telepon / dashboard)
         if (db.waProfiles && db.waProfiles[clean] && !isPhoneNumberOrEmpty(db.waProfiles[clean])) {
             waProfile = db.waProfiles[clean];
+        } else if (db.waProfiles && db.waProfiles[local] && !isPhoneNumberOrEmpty(db.waProfiles[local])) {
+            waProfile = db.waProfiles[local];
         } else if (member?.waProfileName && !isPhoneNumberOrEmpty(member.waProfileName)) {
             waProfile = member.waProfileName;
         }
@@ -1476,12 +1525,16 @@ function getCustomerDisplayName(member: any, waDetails?: any, telegramCtxOrUserI
     // 2. ATURAN PROFILE WHATSAPP:
     // WAJIB 100% selalu memprioritaskan Nama Profil WhatsApp asli (msg.pushName / notify / db.waProfiles)
     // Cek dari waDetails (hasil resolve WhatsApp)
-    if (waDetails?.waProfile && !isPhoneNumberOrEmpty(waDetails.waProfile)) {
+    if (waDetails?.waProfile && !isPhoneNumberOrEmpty(waDetails.waProfile) && waDetails.waProfile !== '-' && waDetails.waProfile !== 'Pelanggan Setia' && waDetails.waProfile !== 'Kakak') {
         return waDetails.waProfile.trim();
     }
+    const localPhone = "0" + cleanPhone.replace(/^62/, '');
     // Cek dari cache profil WhatsApp asli (notify/pushName di db.waProfiles)
     if (cleanPhone && db.waProfiles && db.waProfiles[cleanPhone] && !isPhoneNumberOrEmpty(db.waProfiles[cleanPhone])) {
         return db.waProfiles[cleanPhone].trim();
+    }
+    if (localPhone && db.waProfiles && db.waProfiles[localPhone] && !isPhoneNumberOrEmpty(db.waProfiles[localPhone])) {
+        return db.waProfiles[localPhone].trim();
     }
     // Cek dari waProfileName yang tersimpan di data member
     if (member?.waProfileName && !isPhoneNumberOrEmpty(member.waProfileName)) {
@@ -1493,9 +1546,57 @@ function getCustomerDisplayName(member: any, waDetails?: any, telegramCtxOrUserI
         return fallbackTargetName.trim();
     }
 
-    // 4. FALLBACK AMAN:
-    // DILARANG mengambil dari buku kontak telepon (member.name / contact.name)
-    // Jika profil WA belum terdeteksi, gunakan nomor pengirim atau 'Kakak'
+    // 4. INSTRUKSI PENGGUNA:
+    // Jika nomor tujuan belum pernah chat/call ke WhatsApp sehingga nama profilnya belum terekam,
+    // sistem akan menampilkan panggilan yang ada di dashboard member offline maupun telegram customer,
+    // dan tidak akan pernah lagi memanggil nama kontak buku telepon lama.
+
+    // A. Dashboard Member Offline:
+    const memberOfflineName = (member?.name || member?.nama || '').trim();
+    if (memberOfflineName && !isPhoneNumberOrEmpty(memberOfflineName) && memberOfflineName !== '-' && !/^(kakak|member|pelanggan setia)$/i.test(memberOfflineName)) {
+        return memberOfflineName;
+    }
+    if (cleanPhone && Array.isArray(db.members)) {
+        const matchedMember = db.members.find((m: any) => cleanWaPhone(m.whatsapp || '') === cleanPhone);
+        const matchedName = (matchedMember?.name || matchedMember?.nama || '').trim();
+        if (matchedName && !isPhoneNumberOrEmpty(matchedName) && matchedName !== '-' && !/^(kakak|member|pelanggan setia)$/i.test(matchedName)) {
+            return matchedName;
+        }
+    }
+
+    // B. Telegram Customer (sesuai yang terdaftar di tabel dashboard / registeredUsers / akun Telegram):
+    if (tgUserId) {
+        // Cek data member Telegram di db.members (yang tampil di tabel dashboard Member)
+        if (Array.isArray(db.members)) {
+            const tgMember = db.members.find((m: any) => isTelegramMatch(m.telegram, tgUserId, typeof telegramCtxOrUserId === 'object' ? telegramCtxOrUserId?.from?.username : undefined));
+            const tgMemberName = (tgMember?.name || tgMember?.nama || '').trim();
+            if (tgMemberName && !isPhoneNumberOrEmpty(tgMemberName) && tgMemberName !== '-' && !/^(kakak|member|pelanggan setia)$/i.test(tgMemberName)) {
+                return tgMemberName;
+            }
+        }
+        // Cek data akun terdaftar di registeredUsers
+        if (typeof registeredUsers !== 'undefined') {
+            const regUser = registeredUsers[tgUserId] || registeredUsers[Number(tgUserId)];
+            const regName = (regUser?.username || '').trim();
+            if (regName && !isPhoneNumberOrEmpty(regName) && !/^(kakak|member|pelanggan setia)$/i.test(regName)) {
+                return regName;
+            }
+        }
+    }
+
+    if (telegramCtxOrUserId && typeof telegramCtxOrUserId === 'object' && telegramCtxOrUserId.from) {
+        const u = telegramCtxOrUserId.from;
+        const tgFullName = [u.first_name, u.last_name].filter(Boolean).join(' ').trim();
+        if (tgFullName && !isPhoneNumberOrEmpty(tgFullName) && !/^(kakak|member|pelanggan setia)$/i.test(tgFullName)) {
+            return tgFullName;
+        }
+        if (u.username && !isPhoneNumberOrEmpty(u.username)) {
+            return `@${u.username}`;
+        }
+    }
+
+    // 5. Fallback terakhir jika profil WA, dashboard member offline, maupun Telegram customer belum ada:
+    // (DILARANG: Tidak pernah lagi mengambil dari buku kontak telepon)
     if (cleanPhone && cleanPhone.length >= 8) {
         return `+${cleanPhone}`;
     }
@@ -3095,7 +3196,7 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
                     const isFailOwner = (finalDisplayName && finalDisplayName.toLowerCase().includes("owner")) || isOwnerSelf;
                     const failGreeting = isFailOwner
                         ? "❌ Maaf Owner, pembayaran untuk pesanan Anda gagal diproses."
-                        : (finalDisplayName && finalDisplayName !== 'Pelanggan Setia'
+                        : (finalDisplayName && finalDisplayName !== 'Pelanggan Setia' && finalDisplayName !== 'Kakak'
                             ? `❌ Maaf Kak ${finalDisplayName}, pembayaran untuk pesanan Anda gagal diproses.`
                             : "❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.");
 
@@ -3103,7 +3204,7 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
 
 Keterangan : ${customerErrorMsg}
 📦 Produk  : ${tx.product}
-🎯 Tujuan   : ${tx.target} (${finalDisplayName})
+🎯 Tujuan   : ${tx.target}${(finalDisplayName && finalDisplayName !== 'Pelanggan Setia' && finalDisplayName !== 'Kakak') ? ` (${finalDisplayName})` : ''}
 
 ${refundMsg}
 
@@ -3452,70 +3553,46 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
     waSocket.ev.on("creds.update", saveCreds);
 
     waSocket.ev.on("contacts.upsert", (contacts) => {
-      let changed = false;
       if (!db.waContacts) db.waContacts = [];
-      if (!db.waProfiles) db.waProfiles = {};
       for (const contact of contacts) {
           if (contact.id && contact.id.endsWith('@s.whatsapp.net')) {
               if (!db.waContacts.includes(contact.id)) {
                   db.waContacts.push(contact.id);
-                  changed = true;
               }
-              // Ambil HANYA nama profil asli WhatsApp (notify / verifiedName), JANGAN gunakan contact.name (nama kontak buku telepon)
-              const pName = (contact as any).notify || (contact as any).verifiedName;
-              const phone = contact.id.split('@')[0];
-              if (pName && !isPhoneNumberOrEmpty(pName) && db.waProfiles[phone] !== pName) {
-                  db.waProfiles[phone] = pName;
-                  const matched = (db.members || []).find((m: any) => (m.whatsapp || '').replace(/\D/g, '').replace(/^0/, '62') === phone);
-                  if (matched) matched.waProfileName = pName;
-                  changed = true;
+              const pName = (contact as any).notify || (contact as any).pushName || (contact as any).verifiedName;
+              if (pName) {
+                  saveWaProfile(contact.id, pName);
               }
           }
       }
-      if (changed) writeDB(db);
+      writeDB(db);
     });
 
     waSocket.ev.on("contacts.update", (contacts) => {
-      let changed = false;
-      if (!db.waProfiles) db.waProfiles = {};
       for (const contact of contacts) {
-          if (contact.id && contact.id.endsWith('@s.whatsapp.net')) {
-              // Ambil HANYA nama profil asli WhatsApp (notify / verifiedName), JANGAN gunakan contact.name (nama kontak buku telepon)
-              const pName = (contact as any).notify || (contact as any).verifiedName;
-              const phone = contact.id.split('@')[0];
-              if (pName && !isPhoneNumberOrEmpty(pName) && db.waProfiles[phone] !== pName) {
-                  db.waProfiles[phone] = pName;
-                  const matched = (db.members || []).find((m: any) => (m.whatsapp || '').replace(/\D/g, '').replace(/^0/, '62') === phone);
-                  if (matched) matched.waProfileName = pName;
-                  changed = true;
+          if (contact.id) {
+              const pName = (contact as any).notify || (contact as any).pushName || (contact as any).verifiedName;
+              if (pName) {
+                  saveWaProfile(contact.id, pName);
               }
           }
       }
-      if (changed) writeDB(db);
     });
     
     waSocket.ev.on("messaging-history.set", (history) => {
-      let changed = false;
       if (!db.waContacts) db.waContacts = [];
-      if (!db.waProfiles) db.waProfiles = {};
       for (const contact of history.contacts || []) {
           if (contact.id && contact.id.endsWith('@s.whatsapp.net')) {
               if (!db.waContacts.includes(contact.id)) {
                   db.waContacts.push(contact.id);
-                  changed = true;
               }
-              // Ambil HANYA nama profil asli WhatsApp (notify / verifiedName), JANGAN gunakan contact.name (nama kontak buku telepon)
-              const pName = (contact as any).notify || (contact as any).verifiedName;
-              const phone = contact.id.split('@')[0];
-              if (pName && !isPhoneNumberOrEmpty(pName) && db.waProfiles[phone] !== pName) {
-                  db.waProfiles[phone] = pName;
-                  const matched = (db.members || []).find((m: any) => (m.whatsapp || '').replace(/\D/g, '').replace(/^0/, '62') === phone);
-                  if (matched) matched.waProfileName = pName;
-                  changed = true;
+              const pName = (contact as any).notify || (contact as any).pushName || (contact as any).verifiedName;
+              if (pName) {
+                  saveWaProfile(contact.id, pName);
               }
           }
       }
-      if (changed) writeDB(db);
+      writeDB(db);
     });
 
     
@@ -3558,20 +3635,14 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
     const repliedThanks = new Set<string>();
     const repliedGeneral = new Set<string>();
     waSocket.ev.on("messages.upsert", async (m) => {
-      const msg = m.messages[0];
-      if (msg && msg.pushName && !isPhoneNumberOrEmpty(msg.pushName)) {
-        const senderJid = msg.key?.participant || msg.key?.remoteJid || '';
-        if (senderJid.endsWith('@s.whatsapp.net')) {
-          const phone = senderJid.split('@')[0];
-          if (!db.waProfiles) db.waProfiles = {};
-          if (db.waProfiles[phone] !== msg.pushName) {
-            db.waProfiles[phone] = msg.pushName;
-            const matched = (db.members || []).find((m: any) => (m.whatsapp || '').replace(/\D/g, '').replace(/^0/, '62') === phone);
-            if (matched) matched.waProfileName = msg.pushName;
-            writeDB(db);
-          }
+      for (const msgItem of m.messages || []) {
+        if (msgItem && msgItem.pushName) {
+          const senderJid = msgItem.key?.participant || msgItem.key?.remoteJid || '';
+          saveWaProfile(senderJid, msgItem.pushName);
         }
       }
+      const msg = m.messages[0];
+      if (!msg) return;
       if (!msg.key.fromMe && m.type === "notify" && msg.message) {
         // Anti View Once Logic
         const isViewOnce = msg.message?.viewOnceMessage || msg.message?.viewOnceMessageV2 || msg.message?.viewOnceMessageV2Extension;
@@ -4084,13 +4155,16 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
               }
               
               let customerName = "";
-              const cleanJid = call.from.split('@')[0];
+              const cleanJid = cleanWaPhone(call.from);
+              const callPushName = (call as any).notify || (call as any).pushName;
+              if (callPushName) {
+                  saveWaProfile(call.from, callPushName);
+              }
               let resolvedCallName = "";
               if (cleanJid && db.waProfiles && db.waProfiles[cleanJid] && !isPhoneNumberOrEmpty(db.waProfiles[cleanJid])) {
                   resolvedCallName = db.waProfiles[cleanJid].trim();
-              } else if ((call as any).notify || (call as any).pushName) {
-                  const rawCallName = (call as any).notify || (call as any).pushName;
-                  if (!isPhoneNumberOrEmpty(rawCallName)) resolvedCallName = rawCallName.trim();
+              } else if (callPushName && !isPhoneNumberOrEmpty(callPushName)) {
+                  resolvedCallName = callPushName.trim();
               }
               // Sesuai instruksi: HAPUS penimpaan oleh member.name
               if (resolvedCallName) {
@@ -9098,10 +9172,13 @@ Dengan senang hati kami informasikan bahwa pembayaran utang kakak telah kami ter
               case 'OWNER_ADD_MEMBER_WA':
                 state.data.wa = text;
                 const newMemberId = `MBR-${Date.now()}`;
+                const cleanPhoneMember = cleanWaPhone(text);
+                const existingWaProfile = (cleanPhoneMember && db.waProfiles ? (db.waProfiles[cleanPhoneMember] || db.waProfiles["0" + cleanPhoneMember.replace(/^62/, '')]) : '') || '';
                 members.push({
                   id: newMemberId,
                   name: state.data.username,
                   whatsapp: state.data.wa,
+                  waProfileName: existingWaProfile,
                   telegram: '',
                   balance: 0,
                   type: 'Biasa'
