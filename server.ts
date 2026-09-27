@@ -646,15 +646,17 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
                         memberName = m.waProfileName.trim();
                     } else if (data.customerDisplayName && !isPhoneNumberOrEmpty(data.customerDisplayName) && data.customerDisplayName !== 'Pelanggan Setia' && data.customerDisplayName !== 'Kakak') {
                         memberName = data.customerDisplayName.trim();
+                    } else if (m?.name && !isPhoneNumberOrEmpty(m.name)) {
+                        memberName = m.name.trim();
                     } else if (clean && clean.length >= 8) {
                         memberName = `+${clean}`;
                     } else {
-                        memberName = 'Pelanggan Setia';
+                        memberName = 'Kakak';
                     }
                 }
 
-                if (!memberName || memberName === '-' || memberName === 'Kakak' || isPhoneNumberOrEmpty(memberName) || /uji\s*coba|mamaku/i.test(memberName)) {
-                    memberName = 'Pelanggan Setia';
+                if (!memberName || memberName === '-' || memberName === 'Pelanggan Setia') {
+                    memberName = (clean && clean.length >= 8) ? `+${clean}` : 'Kakak';
                 }
 
                 if (!waPhotoUrl && currentDb.waProfilePhotos && currentDb.waProfilePhotos[clean]) {
@@ -1399,6 +1401,15 @@ for (const [k, v] of Object.entries(db.waProfiles)) {
     }
 }
 
+function isLikelyIndonesianPhone(num?: string | null): boolean {
+    if (!num) return false;
+    const clean = String(num).replace(/\D/g, '');
+    if ((clean.startsWith('08') || clean.startsWith('628') || (clean.startsWith('8') && clean.length >= 9)) && clean.length >= 10 && clean.length <= 15) {
+        return true;
+    }
+    return false;
+}
+
 // Helper untuk membersihkan nomor WhatsApp ke format 62...
 function cleanWaPhone(raw: string): string {
     if (!raw) return '';
@@ -1492,16 +1503,16 @@ async function getCustomerWaDetails(member: any, telegramUserId?: any, targetPho
 function isPhoneNumberOrEmpty(val?: string | null): boolean {
     if (!val || typeof val !== 'string') return true;
     const trimmed = val.trim();
-    if (!trimmed || trimmed === '-' || trimmed === 'undefined' || trimmed === 'null') return true;
+    if (!trimmed || trimmed === '-' || trimmed === 'undefined' || trimmed === 'null' || trimmed === 'Pelanggan Setia') return true;
     
     // Explicitly allow "Selamat datang Owner"
     if (/selamat\s*datang\s*owner/i.test(trimmed)) {
         return false;
     }
 
-    // Check if store / bot / admin name or test customer
+    // Hanya filter nama toko / bot itu sendiri agar bot tidak memanggil dirinya sendiri
     const lower = trimmed.toLowerCase().replace(/[\s_\-\.]+/g, '');
-    if (lower === 'e4store' || lower === 'e4' || lower === 'admin' || lower === 'bot' || lower.includes('ujicobacostumer') || lower.includes('ujicobacustomer') || lower.includes('mamaku')) {
+    if (lower === 'e4store' || lower === 'chuna' || lower === 'chunabot') {
         return true;
     }
 
@@ -1517,13 +1528,14 @@ function isPhoneNumberOrEmpty(val?: string | null): boolean {
 
 function getCustomerDisplayName(member: any, waDetails?: any, telegramCtxOrUserId?: any, fallbackTargetName?: string, targetPhone?: string): string {
     const tgUserId = typeof telegramCtxOrUserId === 'object' ? telegramCtxOrUserId?.from?.id : telegramCtxOrUserId;
+    const tgUsername = typeof telegramCtxOrUserId === 'object' ? telegramCtxOrUserId?.from?.username : undefined;
     const isOwnerUser = tgUserId && db.owners.includes(Number(tgUserId));
 
     // Ekstrak nomor WhatsApp yang relevan
     const rawTarget = targetPhone || member?.whatsapp || waDetails?.waPhone || '';
     const cleanPhone = rawTarget.replace(/\D/g, '').replace(/^0/, '62');
 
-    // 1. ATURAN OWNER: "kalau nomor owner yg masuk di situ berarti namanya di ganti menjadi selamat datang owner"
+    // 1. ATURAN OWNER:
     if (cleanPhone && isOwnerWhatsapp(cleanPhone)) {
         return "Selamat datang Owner";
     }
@@ -1532,33 +1544,67 @@ function getCustomerDisplayName(member: any, waDetails?: any, telegramCtxOrUserI
         return "Selamat datang Owner";
     }
 
-    // 2. ATURAN PROFILE WHATSAPP:
-    // WAJIB 100% selalu memprioritaskan Nama Profil WhatsApp asli (msg.pushName / notify / db.waProfiles)
-    // Cek dari waDetails (hasil resolve WhatsApp)
-    if (waDetails?.waProfile && !isPhoneNumberOrEmpty(waDetails.waProfile) && waDetails.waProfile !== '-' && waDetails.waProfile !== 'Pelanggan Setia' && waDetails.waProfile !== 'Kakak') {
+    // 2. PRIORITAS 1: PROFIL WHATSAPP ASLI (100% Mengikuti nama profil WA pengirim: pushName/notify/db.waProfiles)
+    // Berlaku untuk semua karakter termasuk huruf Jepang, emoji, spasi, dsb.
+    if (waDetails?.waProfile && !isPhoneNumberOrEmpty(waDetails.waProfile) && waDetails.waProfile !== '-' && waDetails.waProfile !== 'Kakak') {
         return waDetails.waProfile.trim();
     }
     const localPhone = "0" + cleanPhone.replace(/^62/, '');
-    // Cek dari cache profil WhatsApp asli (notify/pushName di db.waProfiles)
     if (cleanPhone && db.waProfiles && db.waProfiles[cleanPhone] && !isPhoneNumberOrEmpty(db.waProfiles[cleanPhone])) {
         return db.waProfiles[cleanPhone].trim();
     }
     if (localPhone && db.waProfiles && db.waProfiles[localPhone] && !isPhoneNumberOrEmpty(db.waProfiles[localPhone])) {
         return db.waProfiles[localPhone].trim();
     }
-    // Cek dari waProfileName yang tersimpan di data member
     if (member?.waProfileName && !isPhoneNumberOrEmpty(member.waProfileName)) {
         return member.waProfileName.trim();
     }
 
-    // 3. Fallback nama akun pascabayar (hanya jika berasal dari respon PLN/BPJS resmi, BUKAN nama kontak telepon)
+    // 3. PRIORITAS 2 (INSTRUKSI PENGGUNA):
+    // Jika nomor tujuan belum pernah chat/call ke WhatsApp sehingga nama profilnya belum terekam,
+    // sistem akan menampilkan panggilan yang ada di dashboard member offline maupun telegram customer,
+    // dan tidak akan pernah lagi memanggil nama kontak buku telepon lama.
+    if (member?.name && !isPhoneNumberOrEmpty(member.name)) {
+        return member.name.trim();
+    }
+
+    // Cek apakah nomor atau telegram ID ini terdaftar di tabel db.members (Dashboard Member)
+    if (cleanPhone || tgUserId) {
+        const foundM = (db.members || []).find((m: any) => {
+            const mClean = cleanWaPhone(m.whatsapp || '');
+            return (cleanPhone && mClean === cleanPhone) || (tgUserId && isTelegramMatch(m.telegram, tgUserId, tgUsername));
+        });
+        if (foundM?.name && !isPhoneNumberOrEmpty(foundM.name)) {
+            return foundM.name.trim();
+        }
+    }
+
+    // Cek Akun Telegram Customer:
+    if (tgUserId) {
+        const regUser = registeredUsers[tgUserId] || registeredUsers[Number(tgUserId)];
+        if (regUser?.username && !isPhoneNumberOrEmpty(regUser.username)) {
+            return regUser.username.trim();
+        }
+    }
+    if (telegramCtxOrUserId && typeof telegramCtxOrUserId === 'object' && telegramCtxOrUserId.from) {
+        const u = telegramCtxOrUserId.from;
+        const tgFullName = [u.first_name, u.last_name].filter(Boolean).join(' ').trim();
+        if (tgFullName && !isPhoneNumberOrEmpty(tgFullName)) {
+            return tgFullName;
+        }
+        if (u.username && !isPhoneNumberOrEmpty(u.username)) {
+            return `@${u.username}`;
+        }
+    }
+
+    // 4. PRIORITAS 3: Respon Resmi Tagihan Pascabayar (PLN/BPJS/PDAM, dsb.)
     if (fallbackTargetName && !isPhoneNumberOrEmpty(fallbackTargetName) && !/^(kakak|member|pelanggan)$/i.test(fallbackTargetName.trim())) {
         return fallbackTargetName.trim();
     }
 
-    // 4. FALLBACK AMAN:
-    // DILARANG dan HAPUS semua baris yang mengambil member.name / contact.name (seperti "Uji Coba Costumer" / "Mamaku").
-    // Jika profil WhatsApp asli belum terdeteksi, gunakan nomor pengirim atau 'Kakak'
+    // 5. FALLBACK TERAKHIR (AMAN & BEBAS BUKU TELEPON):
+    // DILARANG KERAS memanggil nama dari buku telepon lama (contact.name / HP sync).
+    // DILARANG KERAS memanggil "Pelanggan Setia".
     if (cleanPhone && cleanPhone.length >= 8) {
         return `+${cleanPhone}`;
     }
@@ -1914,7 +1960,7 @@ let isRequestingPairingCode = false;
 
 export async function generateCanvasDebtReceipt(member: any, utangTxs: any[]): Promise<Buffer | null> {
     try {
-        let memberName = 'Pelanggan Setia';
+        let memberName = member?.name || 'Kakak';
         let waPhone = member?.whatsapp || '';
         let waPhotoUrl: string | null = null;
 
@@ -1967,7 +2013,7 @@ async function legacyCanvasDebtReceipt(member: any, utangTxs: any[]): Promise<Bu
     try {
         const width = 800;
         const height = 800;
-        let memberName = 'Pelanggan Setia';
+        let memberName = member?.name || 'Kakak';
         let waProfileName = '';
         let waPhone = '';
         let waPhotoUrl: string | null = null;
@@ -3104,7 +3150,8 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
                     }
                 }
 
-                const targetRawPhone = (tx.target || member?.whatsapp || "").replace(/\D/g, "");
+                const isTargetPhone = isLikelyIndonesianPhone(tx.target);
+                const targetRawPhone = isTargetPhone ? (tx.target || "").replace(/\D/g, "") : (member?.whatsapp || "").replace(/\D/g, "");
                 const waDetails = await getCustomerWaDetails(member, undefined, targetRawPhone.length >= 8 ? targetRawPhone : undefined);
                 const customerDisplayName = getCustomerDisplayName(member, waDetails, undefined, undefined, targetRawPhone.length >= 8 ? targetRawPhone : undefined);
                 const finalDisplayName = (tx.customerDisplayName && tx.customerDisplayName !== 'Pelanggan Setia' && tx.customerDisplayName !== 'Kakak')
@@ -5722,7 +5769,8 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca") {
                 let waOriginalMsg: any | undefined;
                 let waJid: string | undefined;
 
-                const targetRawPhone = (targetNo || "").replace(/\D/g, "");
+                const isTargetPhone = isLikelyIndonesianPhone(targetNo);
+                const targetRawPhone = isTargetPhone ? (targetNo || "").replace(/\D/g, "") : (member?.whatsapp || "").replace(/\D/g, "");
                 const waDetails = await getCustomerWaDetails(member, ctx.from?.id, targetRawPhone.length >= 8 ? targetRawPhone : undefined);
                 const customerDisplayName = getCustomerDisplayName(member, waDetails, ctx, undefined, targetRawPhone.length >= 8 ? targetRawPhone : undefined);
                 const isOwner = (customerDisplayName && customerDisplayName.toLowerCase().includes("owner")) || isOwnerSelf;
@@ -6085,7 +6133,8 @@ async function processPascaPayment(ctx: any, ref_id: string, method: string, sta
                 let waOriginalMsg: any | undefined;
                 let waJid: string | undefined;
 
-                const targetRawPhone = (displayCustomerNo || "").replace(/\D/g, "");
+                const isTargetPhone = isLikelyIndonesianPhone(displayCustomerNo);
+                const targetRawPhone = isTargetPhone ? (displayCustomerNo || "").replace(/\D/g, "") : (member?.whatsapp || "").replace(/\D/g, "");
                 const waDetails = await getCustomerWaDetails(member, ctx.from?.id, targetRawPhone.length >= 8 ? targetRawPhone : undefined);
                 const customerDisplayName = getCustomerDisplayName(member, waDetails, ctx, payJson.data?.customer_name || checkResult?.customer_name, targetRawPhone.length >= 8 ? targetRawPhone : undefined);
                 const isOwner = (customerDisplayName && customerDisplayName.toLowerCase().includes("owner")) || isOwnerSelf;
@@ -8347,7 +8396,8 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                         await waSocket.sendPresenceUpdate('composing', jid);
                         
                         // Fetch customer's WhatsApp profile photo if available
-                        const targetRawPhone = (targetNo || "").replace(/\D/g, "");
+                        const isTargetPhone = isLikelyIndonesianPhone(targetNo);
+                        const targetRawPhone = isTargetPhone ? (targetNo || "").replace(/\D/g, "") : (memberForPrepaid?.whatsapp || "").replace(/\D/g, "");
                         const waDetails = await getCustomerWaDetails(memberForPrepaid, ctx.from?.id, targetRawPhone.length >= 8 ? targetRawPhone : undefined);
                         const customerDisplayName = getCustomerDisplayName(memberForPrepaid, waDetails, ctx, state.data.nickname, targetRawPhone.length >= 8 ? targetRawPhone : undefined);
                         

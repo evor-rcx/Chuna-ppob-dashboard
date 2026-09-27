@@ -360,13 +360,10 @@ export async function generateEmeraldConfirmationImage(data: EmeraldConfirmation
     if (isOwnerGreetingDetail) {
         customerDisplayName = 'Selamat datang Owner';
     } else {
-        const nonPhoneChars = customerDisplayName.replace(/[\d\s\+\-\(\)\.]/g, '');
-        const digitsOnly = customerDisplayName.replace(/\D/g, '');
-        const isPhone = (nonPhoneChars.length === 0 && digitsOnly.length >= 7);
-        const isStoreName = /^(e4\s*store|e4store|e4|admin|bot)$/i.test(customerDisplayName.replace(/[\s_\-\.]+/g, ''));
-        const isTestName = /uji\s*coba\s*costumer|uji\s*coba\s*customer|mamaku/i.test(customerDisplayName);
-        if (!customerDisplayName || customerDisplayName === '-' || customerDisplayName === 'undefined' || customerDisplayName === 'null' || customerDisplayName === 'Kakak' || isPhone || isStoreName || isTestName) {
-            customerDisplayName = 'Pelanggan Setia';
+        // Gunakan nama apa adanya (nama profil WA asli, member dashboard, username Telegram, atau nomor HP)
+        // DILARANG keras mengubah nama menjadi "Pelanggan Setia"!
+        if (!customerDisplayName || customerDisplayName === '-' || customerDisplayName === 'undefined' || customerDisplayName === 'null' || customerDisplayName === 'Pelanggan Setia') {
+            customerDisplayName = (data.targetNo && data.targetNo !== '-') ? data.targetNo : 'Kakak';
         }
     }
     const cleanCustomerName = customerDisplayName.length > 25
