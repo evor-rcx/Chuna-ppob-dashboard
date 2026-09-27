@@ -638,13 +638,18 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
                 const isOwnerNum = isOwnerWhatsapp(clean) || (m && Array.isArray(m.telegram) && m.telegram.some((tid: any) => (currentDb.owners || []).includes(parseInt(tid))));
                 if (isOwnerNum || (memberName && memberName.toLowerCase().includes("owner"))) {
                     memberName = 'Selamat datang Owner';
-                } else if (!data.customerDisplayName && (!data.customerName || data.customerName === '-')) {
-                    if (clean && currentDb.waProfiles && currentDb.waProfiles[clean]) {
-                        memberName = currentDb.waProfiles[clean];
-                    } else if (m?.waProfileName) {
-                        memberName = m.waProfileName;
-                    } else if (m?.name) {
-                        memberName = m.name;
+                } else {
+                    // Prioritaskan 100% Nama Profil WhatsApp asli (db.waProfiles / waProfileName)
+                    if (clean && currentDb.waProfiles && currentDb.waProfiles[clean] && !isPhoneNumberOrEmpty(currentDb.waProfiles[clean])) {
+                        memberName = currentDb.waProfiles[clean].trim();
+                    } else if (m?.waProfileName && !isPhoneNumberOrEmpty(m.waProfileName)) {
+                        memberName = m.waProfileName.trim();
+                    } else if (data.customerDisplayName && !isPhoneNumberOrEmpty(data.customerDisplayName) && data.customerDisplayName !== 'Pelanggan Setia' && data.customerDisplayName !== 'Kakak') {
+                        memberName = data.customerDisplayName.trim();
+                    } else if (clean && clean.length >= 8) {
+                        memberName = `+${clean}`;
+                    } else {
+                        memberName = 'Kakak';
                     }
                 }
 
@@ -1468,72 +1473,34 @@ function getCustomerDisplayName(member: any, waDetails?: any, telegramCtxOrUserI
         return "Selamat datang Owner";
     }
 
-    // 2. ATURAN PROFILE WHATSAPP: "harus mengambil nama profile di whatsapp liat di whatsapp apakah namanya ke baca apa tidak"
-    // "Seharus nya nama profile whatsapp jangan pakai nama kontak contohnya di gambar 2 jangan pakai nama ini sesuaikan nama profile whatsapp"
-    // "Contoh nya di gambar 3 ok sesuaikan yg ada tulisan itu kalau nama profilenya cma emot aja sesuaikan jg"
-    // "jika nama profilenya pakai bahasa negara lain sesuaikan yg tertulis di situ"
-    
+    // 2. ATURAN PROFILE WHATSAPP:
+    // WAJIB 100% selalu memprioritaskan Nama Profil WhatsApp asli (msg.pushName / notify / db.waProfiles)
     // Cek dari waDetails (hasil resolve WhatsApp)
     if (waDetails?.waProfile && !isPhoneNumberOrEmpty(waDetails.waProfile)) {
         return waDetails.waProfile.trim();
     }
-    // Cek dari cache profil WhatsApp asli (notify/pushName)
+    // Cek dari cache profil WhatsApp asli (notify/pushName di db.waProfiles)
     if (cleanPhone && db.waProfiles && db.waProfiles[cleanPhone] && !isPhoneNumberOrEmpty(db.waProfiles[cleanPhone])) {
         return db.waProfiles[cleanPhone].trim();
     }
-    // Cek dari waProfileName yang tersimpan di member
+    // Cek dari waProfileName yang tersimpan di data member
     if (member?.waProfileName && !isPhoneNumberOrEmpty(member.waProfileName)) {
         return member.waProfileName.trim();
     }
 
-    // 3. ATURAN DASHBOARD: "kalau tidak baru mengambik data nya di dasbord yg uda terdaftar"
-    // Jika nama profil WhatsApp tidak terbaca / tidak ada, ambil dari dashboard data yang sudah terdaftar
-    if (member?.name && !isPhoneNumberOrEmpty(member.name)) {
-        return member.name.trim();
-    }
-    if (member?.nama && !isPhoneNumberOrEmpty(member.nama)) {
-        return member.nama.trim();
-    }
-    if (cleanPhone) {
-        const found = (db.members || []).find((m: any) => {
-            const mWa = (m.whatsapp || "").replace(/\D/g, "").replace(/^0/, "62");
-            return mWa && mWa === cleanPhone;
-        });
-        if (found?.name && !isPhoneNumberOrEmpty(found.name)) {
-            return found.name.trim();
-        }
-        if (found?.nama && !isPhoneNumberOrEmpty(found.nama)) {
-            return found.nama.trim();
-        }
-    }
-
-    // 4. Nickname akun / nama produk pascabayar jika tersedia
-    if (fallbackTargetName && !isPhoneNumberOrEmpty(fallbackTargetName)) {
+    // 3. Fallback nama akun pascabayar (hanya jika berasal dari respon PLN/BPJS resmi, BUKAN nama kontak telepon)
+    if (fallbackTargetName && !isPhoneNumberOrEmpty(fallbackTargetName) && !/^(kakak|member|pelanggan)$/i.test(fallbackTargetName.trim())) {
         return fallbackTargetName.trim();
     }
 
-    // 5. Nama Akun Telegram HANYA jika yang memesan adalah CUSTOMER langsung (BUKAN Owner yang memakai bot toko)
-    if (!isOwnerUser && tgUserId) {
-        const regUser = registeredUsers[tgUserId] || registeredUsers[Number(tgUserId)] || registeredUsers[String(tgUserId)];
-        if (regUser) {
-            if (regUser.name && !isPhoneNumberOrEmpty(regUser.name)) return regUser.name.trim();
-            if (regUser.username && !isPhoneNumberOrEmpty(regUser.username)) return regUser.username.trim();
-        }
-
-        if (typeof telegramCtxOrUserId === 'object') {
-            const first = telegramCtxOrUserId?.from?.first_name || '';
-            const last = telegramCtxOrUserId?.from?.last_name || '';
-            const fullTgName = [first, last].filter(Boolean).join(' ').trim();
-            if (fullTgName && !isPhoneNumberOrEmpty(fullTgName)) {
-                return fullTgName;
-            }
-            if (telegramCtxOrUserId?.from?.username && !isPhoneNumberOrEmpty(telegramCtxOrUserId.from.username)) {
-                return telegramCtxOrUserId.from.username.trim();
-            }
-        }
+    // 4. FALLBACK AMAN:
+    // DILARANG mengambil dari buku kontak telepon (member.name / contact.name)
+    // Jika profil WA belum terdeteksi, gunakan nomor pengirim atau 'Kakak'
+    if (cleanPhone && cleanPhone.length >= 8) {
+        return `+${cleanPhone}`;
     }
 
-    return 'Pelanggan Setia';
+    return 'Kakak';
 }
 
 interface SuccessMessageParams {
@@ -1564,7 +1531,7 @@ export function generateSuccessMessage(params: SuccessMessageParams): string {
     // Format suffix nama pelanggan: (Nama Pelanggan)
     let custSuffix = "";
     const cleanTargetDigits = String(target).replace(/\D/g, "");
-    if (customerName && customerName.trim() && customerName.trim() !== "-" && customerName.trim() !== "null" && customerName.trim() !== "undefined") {
+    if (customerName && customerName.trim() && customerName.trim() !== "-" && customerName.trim() !== "null" && customerName.trim() !== "undefined" && customerName.trim() !== "Kakak" && customerName.trim() !== "Pelanggan Setia") {
         const cleanNameDigits = customerName.replace(/\D/g, "");
         if (!cleanNameDigits || cleanNameDigits !== cleanTargetDigits) {
             custSuffix = ` (${customerName.trim()})`;
@@ -1731,7 +1698,7 @@ export function generateSuccessMessage(params: SuccessMessageParams): string {
         detailSukses = `${productName} sudah masuk ke ${isOwnerSelf ? "nama" : "akun"} ${target}${custSuffix} ${isOwnerSelf ? "!" : "dan siap digunakan!"}`;
     }
 
-    const cleanCustName = customerName && customerName.trim() && customerName.trim() !== "-" && customerName.trim() !== "null" && customerName.trim() !== "undefined" ? customerName.trim() : "";
+    const cleanCustName = customerName && customerName.trim() && customerName.trim() !== "-" && customerName.trim() !== "null" && customerName.trim() !== "undefined" && customerName.trim() !== "Kakak" && customerName.trim() !== "Pelanggan Setia" ? customerName.trim() : "";
     let greetingHeader = "🎉 Horee! Sukses, Kak!";
     if (cleanCustName) {
         if (cleanCustName.toLowerCase().includes("owner") || isOwnerSelf) {
@@ -3072,10 +3039,10 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
 
                 const targetRawPhone = (tx.target || member?.whatsapp || "").replace(/\D/g, "");
                 const waDetails = await getCustomerWaDetails(member, undefined, targetRawPhone.length >= 8 ? targetRawPhone : undefined);
-                const customerDisplayName = getCustomerDisplayName(member, waDetails, undefined, tx.customerDisplayName || tx.nama || member?.name, targetRawPhone.length >= 8 ? targetRawPhone : undefined);
-                const finalDisplayName = (tx.customerDisplayName && tx.customerDisplayName !== 'Pelanggan Setia')
+                const customerDisplayName = getCustomerDisplayName(member, waDetails, undefined, undefined, targetRawPhone.length >= 8 ? targetRawPhone : undefined);
+                const finalDisplayName = (tx.customerDisplayName && tx.customerDisplayName !== 'Pelanggan Setia' && tx.customerDisplayName !== 'Kakak')
                     ? tx.customerDisplayName
-                    : (customerDisplayName !== 'Pelanggan Setia' ? customerDisplayName : (nama || "-"));
+                    : (customerDisplayName !== 'Pelanggan Setia' ? customerDisplayName : (targetRawPhone.length >= 8 ? `+${targetRawPhone}` : 'Kakak'));
 
                 tx.customerDisplayName = finalDisplayName;
                 tx.customerName = finalDisplayName;
@@ -3961,12 +3928,19 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                 if (!isGroup && !repliedThanks.has(replyKey)) {
                     repliedThanks.add(replyKey);
                     
-                    let customerName = msg.pushName || "Kakak";
-                    if (member && member.name) {
-                        customerName = member.name;
-                    } else if (tx && tx.target && !tx.target.match(/^\d+$/)) {
-                        customerName = tx.target;
+                    let customerName = "Kakak";
+                    if (msg.pushName && !isPhoneNumberOrEmpty(msg.pushName)) {
+                        customerName = msg.pushName.trim();
+                    } else if (cleanJid && db.waProfiles && db.waProfiles[cleanJid] && !isPhoneNumberOrEmpty(db.waProfiles[cleanJid])) {
+                        customerName = db.waProfiles[cleanJid].trim();
+                    } else if (member?.waProfileName && !isPhoneNumberOrEmpty(member.waProfileName)) {
+                        customerName = member.waProfileName.trim();
+                    } else if (cleanJid && cleanJid.length >= 8) {
+                        customerName = `+${cleanJid}`;
+                    } else {
+                        customerName = "Kakak";
                     }
+                    // Sesuai instruksi: HAPUS penimpaan oleh member.name atau tx.target!
                     
                     try {
                         const vnText = `Sama-sama Kak ${customerName}! Makasih banyak ya udah belanja di E4 Store. Semoga rezekinya makin lancar. Chuna tunggu pesanan selanjutnya ya kak!`;
@@ -4022,13 +3996,19 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                     repliedGeneral.add(replyKey);
                     
                     const cleanJid = jid.split('@')[0];
-                    const member = db.members.find((m: any) => m.whatsapp && m.whatsapp.replace(/\D/g, '').includes(cleanJid));
-                    let customerName = msg.pushName || "";
-                    if (member && member.name) {
-                        customerName = " " + member.name;
-                    } else if (customerName) {
-                        customerName = " " + customerName;
+                    let resolvedName = "";
+                    if (msg.pushName && !isPhoneNumberOrEmpty(msg.pushName)) {
+                        resolvedName = msg.pushName.trim();
+                    } else if (cleanJid && db.waProfiles && db.waProfiles[cleanJid] && !isPhoneNumberOrEmpty(db.waProfiles[cleanJid])) {
+                        resolvedName = db.waProfiles[cleanJid].trim();
+                    } else {
+                        const matchedMember = (db.members || []).find((m: any) => (m.whatsapp || '').replace(/\D/g, '').includes(cleanJid));
+                        if (matchedMember?.waProfileName && !isPhoneNumberOrEmpty(matchedMember.waProfileName)) {
+                            resolvedName = matchedMember.waProfileName.trim();
+                        }
                     }
+                    // Sesuai instruksi: HAPUS penimpaan oleh member.name!
+                    const customerName = resolvedName ? " " + resolvedName : "";
 
                     try {
                         const vnText = `Halo Kak${customerName}, mohon maaf mengganggu waktunya. Saya Chuna, asisten otomatis E4 Store. Nomor ini dioperasikan oleh sistem bot, jadi tidak bisa membalas pesan atau menerima telepon. Apabila Kakak mau memesan produk atau ada yang ingin ditanyakan, silakan kontak langsung ke Owner kami lewat link berikut. Sekian dari Chuna, mohon maaf sebesar-besarnya dan terima kasih!`;
@@ -4105,9 +4085,16 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
               
               let customerName = "";
               const cleanJid = call.from.split('@')[0];
-              const member = db.members.find((m: any) => m.whatsapp && m.whatsapp.replace(/\D/g, '').includes(cleanJid));
-              if (member && member.name) {
-                  customerName = " " + member.name;
+              let resolvedCallName = "";
+              if (cleanJid && db.waProfiles && db.waProfiles[cleanJid] && !isPhoneNumberOrEmpty(db.waProfiles[cleanJid])) {
+                  resolvedCallName = db.waProfiles[cleanJid].trim();
+              } else if ((call as any).notify || (call as any).pushName) {
+                  const rawCallName = (call as any).notify || (call as any).pushName;
+                  if (!isPhoneNumberOrEmpty(rawCallName)) resolvedCallName = rawCallName.trim();
+              }
+              // Sesuai instruksi: HAPUS penimpaan oleh member.name
+              if (resolvedCallName) {
+                  customerName = " " + resolvedCallName;
               }
               
               const replyMsg = `Maaf banget, Kak${customerName}! Chuna nggak bisa angkat telepon sekarang (lagi sibuk ngurus pelanggan lain, hihi). Tapi jangan khawatir, mending langsung chat Bot Telegram resmi E4Store aja! Di sana Chuna 24 jam siap bantu jawab semua pertanyaan kamu dengan cepat dan ramah~Chuna asisten E4Store, transaksi langsung otomatis kok, tetap aman dan terpercaya! Yuk, mampir~ Chuna tunggu, ya! 😘🐾`;
@@ -5697,9 +5684,9 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca") {
 
                 const targetRawPhone = (targetNo || "").replace(/\D/g, "");
                 const waDetails = await getCustomerWaDetails(member, ctx.from?.id, targetRawPhone.length >= 8 ? targetRawPhone : undefined);
-                const customerDisplayName = getCustomerDisplayName(member, waDetails, ctx, member?.name || stateData.customerName, targetRawPhone.length >= 8 ? targetRawPhone : undefined);
+                const customerDisplayName = getCustomerDisplayName(member, waDetails, ctx, undefined, targetRawPhone.length >= 8 ? targetRawPhone : undefined);
                 const isOwner = (customerDisplayName && customerDisplayName.toLowerCase().includes("owner")) || isOwnerSelf;
-                const greetingWaName = (customerDisplayName && customerDisplayName !== 'Pelanggan Setia')
+                const greetingWaName = (customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak')
                     ? (isOwner ? " Owner" : ` ${customerDisplayName}`)
                     : "";
                 const pendingHeader = isOwner ? "⏳ Selamat datang Owner!" : `⏳ Hai Kak${greetingWaName}!`;
@@ -5710,7 +5697,7 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca") {
 Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa saat, nanti akan kami kabari setelah selesai.
 
 📦 Produk  : ${product.product_name}
-🎯 Tujuan   : ${targetDisplay} (${customerDisplayName !== 'Pelanggan Setia' ? customerDisplayName : (member.name || "-")})
+🎯 Tujuan   : ${targetDisplay}${(customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak') ? ` (${customerDisplayName})` : ''}
 
 Chuna menunggu kabar baik dari Kakak! 😊`;
 
@@ -5795,7 +5782,7 @@ Daya         : ${parts.slice(1).join(' / ')}`;
 
 Keterangan : ${customerErrorMsg}
 📦 Produk  : ${product.product_name}
-🎯 Tujuan   : ${targetDisplay} (${customerDisplayName !== 'Pelanggan Setia' ? customerDisplayName : (member.name || "-")})
+🎯 Tujuan   : ${targetDisplay}${(customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak') ? ` (${customerDisplayName})` : ''}
 
 ${refundMsg}
 
@@ -5869,7 +5856,7 @@ Coba lihat angka: *${product.product_name}* saat ini mungkin sudah naik, melebih
 Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa saat, nanti akan kami kabari setelah selesai.
 
 📦 Produk : ${product.product_name}
-🎯 Tujuan : ${targetDisplay} (${customerDisplayName !== 'Pelanggan Setia' ? customerDisplayName : (member.name || "-")})
+🎯 Tujuan : ${targetDisplay}${(customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak') ? ` (${customerDisplayName})` : ''}
 
 Chuna menunggu kabar baik dari Kakak! 😊`;
 
@@ -6060,9 +6047,9 @@ async function processPascaPayment(ctx: any, ref_id: string, method: string, sta
 
                 const targetRawPhone = (displayCustomerNo || "").replace(/\D/g, "");
                 const waDetails = await getCustomerWaDetails(member, ctx.from?.id, targetRawPhone.length >= 8 ? targetRawPhone : undefined);
-                const customerDisplayName = getCustomerDisplayName(member, waDetails, ctx, payJson.data?.customer_name || checkResult?.customer_name || member?.name, targetRawPhone.length >= 8 ? targetRawPhone : undefined);
+                const customerDisplayName = getCustomerDisplayName(member, waDetails, ctx, payJson.data?.customer_name || checkResult?.customer_name, targetRawPhone.length >= 8 ? targetRawPhone : undefined);
                 const isOwner = (customerDisplayName && customerDisplayName.toLowerCase().includes("owner")) || isOwnerSelf;
-                const greetingWaName = (customerDisplayName && customerDisplayName !== 'Pelanggan Setia')
+                const greetingWaName = (customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak')
                     ? (isOwner ? " Owner" : ` ${customerDisplayName}`)
                     : "";
                 const pendingHeader = isOwner ? "⏳ Selamat datang Owner!" : `⏳ Hai Kak${greetingWaName}!`;
@@ -6073,7 +6060,7 @@ async function processPascaPayment(ctx: any, ref_id: string, method: string, sta
 Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa saat, nanti akan kami kabari setelah selesai.
 
 📦 Tagihan : ${stateData.product.product_name}
-🎯 Tujuan   : ${displayCustomerNo} (${customerDisplayName !== 'Pelanggan Setia' ? customerDisplayName : (payJson.data?.customer_name || checkResult?.customer_name || member?.name || "-")})
+🎯 Tujuan   : ${displayCustomerNo}${(customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak') ? ` (${customerDisplayName})` : (payJson.data?.customer_name || checkResult?.customer_name ? ` (${payJson.data?.customer_name || checkResult?.customer_name})` : '')}
 
 Chuna menunggu kabar baik dari Kakak! 😊`;
 
@@ -6158,7 +6145,7 @@ Daya         : ${parts.slice(1).join(' / ')}`;
 
 Keterangan : ${customerErrorMsg}
 📦 Tagihan : ${stateData.product.product_name}
-🎯 Tujuan   : ${displayCustomerNo} (${customerDisplayName !== 'Pelanggan Setia' ? customerDisplayName : (payJson.data?.customer_name || checkResult?.customer_name || member?.name || "-")})
+🎯 Tujuan   : ${displayCustomerNo}${(customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak') ? ` (${customerDisplayName})` : (payJson.data?.customer_name || checkResult?.customer_name ? ` (${payJson.data?.customer_name || checkResult?.customer_name})` : '')}
 
 ${refundMsg}
 
@@ -6232,7 +6219,7 @@ Coba lihat angka: *${stateData.product.product_name}* saat ini mungkin sudah nai
 Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa saat, nanti akan kami kabari setelah selesai.
 
 📦 Tagihan : ${stateData.product.product_name}
-🎯 Tujuan : ${displayCustomerNo} (${payJson.data?.customer_name || checkResult?.customer_name || (customerDisplayName !== 'Pelanggan Setia' ? customerDisplayName : "-")})
+🎯 Tujuan : ${displayCustomerNo}${(customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak') ? ` (${customerDisplayName})` : (payJson.data?.customer_name || checkResult?.customer_name ? ` (${payJson.data?.customer_name || checkResult?.customer_name})` : '')}
 
 Chuna menunggu kabar baik dari Kakak! 😊`;
 
@@ -8322,14 +8309,14 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                         // Fetch customer's WhatsApp profile photo if available
                         const targetRawPhone = (targetNo || "").replace(/\D/g, "");
                         const waDetails = await getCustomerWaDetails(memberForPrepaid, ctx.from?.id, targetRawPhone.length >= 8 ? targetRawPhone : undefined);
-                        const customerDisplayName = getCustomerDisplayName(memberForPrepaid, waDetails, ctx, state.data.nickname || memberForPrepaid?.name, targetRawPhone.length >= 8 ? targetRawPhone : undefined);
+                        const customerDisplayName = getCustomerDisplayName(memberForPrepaid, waDetails, ctx, state.data.nickname, targetRawPhone.length >= 8 ? targetRawPhone : undefined);
                         
                         // Generate Sticker Konfirmasi Pembelian with photo profile or monogram
                         const stickerBuffer = await generateOrderConfirmationSticker({
                             serviceName: product.product_name,
                             targetNo: targetNo,
                             totalBayar: total,
-                            nickname: customerDisplayName !== 'Pelanggan Setia' ? customerDisplayName : state.data.nickname,
+                            nickname: (customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak') ? customerDisplayName : state.data.nickname,
                             note: 'pembelianmu akan di proses ya kk\nmohon di tunggu',
                             waPhotoUrl: waDetails?.waPhotoUrl || null
                         });
