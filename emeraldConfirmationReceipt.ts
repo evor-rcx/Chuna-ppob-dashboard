@@ -363,7 +363,7 @@ export async function generateEmeraldConfirmationImage(data: EmeraldConfirmation
         // Gunakan nama apa adanya (nama profil WA asli, member dashboard, username Telegram, atau nomor HP)
         // DILARANG keras mengubah nama menjadi "Pelanggan Setia"!
         if (!customerDisplayName || customerDisplayName === '-' || customerDisplayName === 'undefined' || customerDisplayName === 'null' || customerDisplayName === 'Pelanggan Setia') {
-            customerDisplayName = (data.targetNo && data.targetNo !== '-') ? data.targetNo : 'Kakak';
+            customerDisplayName = 'Kakak';
         }
     }
     const cleanCustomerName = customerDisplayName.length > 25

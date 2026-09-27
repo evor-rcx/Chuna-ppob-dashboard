@@ -8399,14 +8399,14 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                         const isTargetPhone = isLikelyIndonesianPhone(targetNo);
                         const targetRawPhone = isTargetPhone ? (targetNo || "").replace(/\D/g, "") : (memberForPrepaid?.whatsapp || "").replace(/\D/g, "");
                         const waDetails = await getCustomerWaDetails(memberForPrepaid, ctx.from?.id, targetRawPhone.length >= 8 ? targetRawPhone : undefined);
-                        const customerDisplayName = getCustomerDisplayName(memberForPrepaid, waDetails, ctx, state.data.nickname, targetRawPhone.length >= 8 ? targetRawPhone : undefined);
+                        const customerDisplayName = getCustomerDisplayName(memberForPrepaid, waDetails, ctx, undefined, targetRawPhone.length >= 8 ? targetRawPhone : undefined);
                         
                         // Generate Sticker Konfirmasi Pembelian with photo profile or monogram
                         const stickerBuffer = await generateOrderConfirmationSticker({
                             serviceName: product.product_name,
                             targetNo: targetNo,
                             totalBayar: total,
-                            nickname: (customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak') ? customerDisplayName : state.data.nickname,
+                            nickname: (customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak') ? customerDisplayName : undefined,
                             note: 'pembelianmu akan di proses ya kk\nmohon di tunggu',
                             waPhotoUrl: waDetails?.waPhotoUrl || null
                         });
