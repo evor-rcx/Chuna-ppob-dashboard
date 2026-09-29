@@ -56,6 +56,9 @@ export interface RoyalStrukData {
     
     cetakDate?: string;
     holidayNotice?: string;
+    whatsapp?: string;
+    customerWa?: string;
+    buyerWa?: string;
     waPhotoUrl?: string | null;
     avatarBuffer?: Buffer | null;
 }
@@ -504,14 +507,12 @@ export async function generateRoyalTidakLunasReceipt(data: RoyalStrukData): Prom
                 }
 
                 if (!data.waPhotoUrl) {
-                    const candidate = data.target || data.no || data.noHp ? String(data.target || data.no || data.noHp).replace(/[^0-9]/g, '') : '';
+                    // HANYA cek jika ada nomor WhatsApp eksplisit pembeli (JANGAN samakan nomor tujuan GoPay/produk dengan WA agar hemat limit)
+                    const candidate = data.whatsapp || data.customerWa || data.buyerWa ? String(data.whatsapp || data.customerWa || data.buyerWa).replace(/[^0-9]/g, '') : '';
                     if (candidate && photos[candidate]) {
                         data.waPhotoUrl = photos[candidate];
-                    } else {
-                        const keys = Object.keys(photos);
-                        if (keys.length > 0) {
-                            data.waPhotoUrl = photos[keys[keys.length - 1]];
-                        }
+                    } else if (photos['default']) {
+                        data.waPhotoUrl = photos['default'];
                     }
                 }
             }
@@ -537,6 +538,15 @@ export async function generateRoyalTidakLunasReceipt(data: RoyalStrukData): Prom
         }
     }
 
+    if (!userAvatarImg) {
+        try {
+            const defPath = path.join(process.cwd(), 'public', 'default_wa_photo.png');
+            if (fs.existsSync(defPath)) {
+                userAvatarImg = await loadImage(defPath);
+            }
+        } catch (e) {}
+    }
+
     // Base background under the hole
     ctx.fillStyle = '#1c0f0f';
     ctx.fillRect(0, 0, width, height);
@@ -555,22 +565,22 @@ export async function generateRoyalTidakLunasReceipt(data: RoyalStrukData): Prom
         const sy = (sh - minDim) / 2;
         ctx.drawImage(userAvatarImg, sx, sy, minDim, minDim, avatarCenterX - avatarRadius, avatarCenterY - avatarRadius, avatarRadius * 2, avatarRadius * 2);
     } else {
-        // Fallback luxury dark blood-gold monogram
-        const monoGrad = ctx.createLinearGradient(avatarCenterX - avatarRadius, avatarCenterY - avatarRadius, avatarCenterX + avatarRadius, avatarCenterY + avatarRadius);
-        monoGrad.addColorStop(0, '#2e1212');
-        monoGrad.addColorStop(0.5, '#190a0a');
-        monoGrad.addColorStop(1, '#0c0505');
-        ctx.fillStyle = monoGrad;
+        // Fallback realistic user silhouette with WhatsApp green accents (NO LETTERS / JANGAN PAKAI HURUF)
+        const bgGrad = ctx.createLinearGradient(avatarCenterX - avatarRadius, avatarCenterY - avatarRadius, avatarCenterX + avatarRadius, avatarCenterY + avatarRadius);
+        bgGrad.addColorStop(0, '#0f382a');
+        bgGrad.addColorStop(0.5, '#128c7e');
+        bgGrad.addColorStop(1, '#075e54');
+        ctx.fillStyle = bgGrad;
         ctx.fillRect(avatarCenterX - avatarRadius, avatarCenterY - avatarRadius, avatarRadius * 2, avatarRadius * 2);
 
-        ctx.fillStyle = '#fde047';
-        ctx.font = 'bold 64px "DejaVu Sans", "Segoe UI", Arial, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.shadowColor = 'rgba(251, 191, 36, 0.9)';
-        ctx.shadowBlur = 12;
-        ctx.fillText(getInitials(data.nama), avatarCenterX, avatarCenterY);
-        ctx.shadowBlur = 0;
+        // Realistic head & shoulders
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(avatarCenterX, avatarCenterY - avatarRadius * 0.15, avatarRadius * 0.42, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(avatarCenterX, avatarCenterY + avatarRadius * 0.95, avatarRadius * 0.8, avatarRadius * 0.55, 0, 0, Math.PI * 2);
+        ctx.fill();
     }
     ctx.restore();
 
@@ -705,14 +715,12 @@ export async function generateRoyalLunasReceipt(data: RoyalStrukData): Promise<B
                 }
 
                 if (!data.waPhotoUrl) {
-                    const candidate = data.target || data.no || data.noHp ? String(data.target || data.no || data.noHp).replace(/[^0-9]/g, '') : '';
+                    // HANYA cek jika ada nomor WhatsApp eksplisit pembeli (JANGAN samakan nomor tujuan GoPay/produk dengan WA agar hemat limit)
+                    const candidate = data.whatsapp || data.customerWa || data.buyerWa ? String(data.whatsapp || data.customerWa || data.buyerWa).replace(/[^0-9]/g, '') : '';
                     if (candidate && photos[candidate]) {
                         data.waPhotoUrl = photos[candidate];
-                    } else {
-                        const keys = Object.keys(photos);
-                        if (keys.length > 0) {
-                            data.waPhotoUrl = photos[keys[keys.length - 1]];
-                        }
+                    } else if (photos['default']) {
+                        data.waPhotoUrl = photos['default'];
                     }
                 }
             }
@@ -738,6 +746,15 @@ export async function generateRoyalLunasReceipt(data: RoyalStrukData): Promise<B
         }
     }
 
+    if (!userAvatarImg) {
+        try {
+            const defPath = path.join(process.cwd(), 'public', 'default_wa_photo.png');
+            if (fs.existsSync(defPath)) {
+                userAvatarImg = await loadImage(defPath);
+            }
+        } catch (e) {}
+    }
+
     // Base background under the hole
     ctx.fillStyle = '#1e0c0c';
     ctx.fillRect(0, 0, width, height);
@@ -756,21 +773,22 @@ export async function generateRoyalLunasReceipt(data: RoyalStrukData): Promise<B
         const sy = (sh - minDim) / 2;
         ctx.drawImage(userAvatarImg, sx, sy, minDim, minDim, avatarCenterX - avatarRadius, avatarCenterY - avatarRadius, avatarRadius * 2, avatarRadius * 2);
     } else {
-        const monoGrad = ctx.createLinearGradient(avatarCenterX - avatarRadius, avatarCenterY - avatarRadius, avatarCenterX + avatarRadius, avatarCenterY + avatarRadius);
-        monoGrad.addColorStop(0, '#2d1806');
-        monoGrad.addColorStop(0.5, '#190e03');
-        monoGrad.addColorStop(1, '#0c0701');
-        ctx.fillStyle = monoGrad;
+        // Fallback realistic user silhouette with WhatsApp green accents (NO LETTERS / JANGAN PAKAI HURUF)
+        const bgGrad = ctx.createLinearGradient(avatarCenterX - avatarRadius, avatarCenterY - avatarRadius, avatarCenterX + avatarRadius, avatarCenterY + avatarRadius);
+        bgGrad.addColorStop(0, '#0f382a');
+        bgGrad.addColorStop(0.5, '#128c7e');
+        bgGrad.addColorStop(1, '#075e54');
+        ctx.fillStyle = bgGrad;
         ctx.fillRect(avatarCenterX - avatarRadius, avatarCenterY - avatarRadius, avatarRadius * 2, avatarRadius * 2);
 
-        ctx.fillStyle = '#fde047';
-        ctx.font = 'bold 110px "DejaVu Sans", "Segoe UI", Arial, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.shadowColor = 'rgba(251, 191, 36, 0.9)';
-        ctx.shadowBlur = 18;
-        ctx.fillText(getInitials(data.nama), avatarCenterX, avatarCenterY);
-        ctx.shadowBlur = 0;
+        // Realistic head & shoulders
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(avatarCenterX, avatarCenterY - avatarRadius * 0.15, avatarRadius * 0.42, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(avatarCenterX, avatarCenterY + avatarRadius * 0.95, avatarRadius * 0.8, avatarRadius * 0.55, 0, 0, Math.PI * 2);
+        ctx.fill();
     }
     ctx.restore();
 

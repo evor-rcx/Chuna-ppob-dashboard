@@ -319,6 +319,15 @@ export async function generatePascabayarTagihanReceipt(data: PascabayarTagihanDa
         }
     }
 
+    if (!userAvatarImg) {
+        try {
+            const defPath = path.join(process.cwd(), 'public', 'default_wa_photo.png');
+            if (fs.existsSync(defPath)) {
+                userAvatarImg = await loadImage(defPath);
+            }
+        } catch (e) {}
+    }
+
     // Latar belakang dasar putih di bawah lingkaran
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, width, height);
@@ -345,31 +354,21 @@ export async function generatePascabayarTagihanReceipt(data: PascabayarTagihanDa
             avatarRadius * 2
         );
     } else {
-        const grad = ctx.createLinearGradient(
-            avatarCx - avatarRadius,
-            avatarCy - avatarRadius,
-            avatarCx + avatarRadius,
-            avatarCy + avatarRadius
-        );
-        grad.addColorStop(0, '#0284c7');
-        grad.addColorStop(0.5, '#0369a1');
-        grad.addColorStop(1, '#075985');
-        ctx.fillStyle = grad;
-        ctx.fillRect(
-            avatarCx - avatarRadius,
-            avatarCy - avatarRadius,
-            avatarRadius * 2,
-            avatarRadius * 2
-        );
+        // Fallback realistic user silhouette with WhatsApp green accents (NO LETTERS / JANGAN PAKAI HURUF)
+        const bgGrad = ctx.createLinearGradient(avatarCx - avatarRadius, avatarCy - avatarRadius, avatarCx + avatarRadius, avatarCy + avatarRadius);
+        bgGrad.addColorStop(0, '#0f382a');
+        bgGrad.addColorStop(0.5, '#128c7e');
+        bgGrad.addColorStop(1, '#075e54');
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(avatarCx - avatarRadius, avatarCy - avatarRadius, avatarRadius * 2, avatarRadius * 2);
 
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 54px "Liberation Sans", "DejaVu Sans", Arial, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
-        ctx.shadowBlur = 8;
-        ctx.fillText(getInitials(data.nama || data.customer_name || 'E4'), avatarCx, avatarCy);
-        ctx.shadowBlur = 0;
+        ctx.beginPath();
+        ctx.arc(avatarCx, avatarCy - avatarRadius * 0.15, avatarRadius * 0.42, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(avatarCx, avatarCy + avatarRadius * 0.95, avatarRadius * 0.8, avatarRadius * 0.55, 0, 0, Math.PI * 2);
+        ctx.fill();
     }
     ctx.restore();
 

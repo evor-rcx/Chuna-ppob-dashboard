@@ -114,14 +114,15 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
               </div>
             </div>
 
-            <div className="mt-4">
+            <div className="mt-4 flex flex-col gap-2">
               <button
+                type="button"
                 onClick={() => {
                   fetch(`/api/members/${selectedMember.id}/sync-photo`, { method: 'POST' })
                     .then(res => res.json())
                     .then(data => {
                       if (data.success && data.photoUrl) {
-                        alert("Foto profil WhatsApp berhasil diambil!");
+                        alert("Foto profil WhatsApp berhasil disinkron!");
                         setSelectedMember({ ...selectedMember, photoUrl: data.photoUrl });
                         setMembers(members.map(m => m.id === selectedMember.id ? { ...m, photoUrl: data.photoUrl } : m));
                       } else {
@@ -132,8 +133,42 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
                 }}
                 className="w-full py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 font-medium hover:bg-emerald-500/25 transition-colors flex items-center justify-center gap-2 text-sm"
               >
-                🔄 Ambil / Sinkron Foto dari WhatsApp
+                🔄 Ambil Otomatis dari WhatsApp Live
               </button>
+
+              <label className="w-full py-2.5 rounded-xl bg-sky-500/15 border border-sky-500/30 text-sky-400 font-medium hover:bg-sky-500/25 transition-colors flex items-center justify-center gap-2 text-sm cursor-pointer">
+                📁 Upload Foto Profil dari Galeri / File
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  className="hidden" 
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      const imageBase64 = reader.result as string;
+                      fetch(`/api/members/${selectedMember.id}/custom-photo`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ imageBase64 })
+                      })
+                      .then(res => res.json())
+                      .then(data => {
+                        if (data.success && data.photoUrl) {
+                          alert("Foto profil berhasil diunggah dan disimpan ke WhatsApp profile!");
+                          setSelectedMember({ ...selectedMember, photoUrl: data.photoUrl });
+                          setMembers(members.map(m => m.id === selectedMember.id ? { ...m, photoUrl: data.photoUrl } : m));
+                        } else {
+                          alert(data.error || "Gagal menyimpan foto");
+                        }
+                      })
+                      .catch(() => alert("Gagal mengirim file foto"));
+                    };
+                    reader.readAsDataURL(file);
+                  }}
+                />
+              </label>
             </div>
             
             <div className="mt-6 flex gap-3">
