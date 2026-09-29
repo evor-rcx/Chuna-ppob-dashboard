@@ -129,7 +129,7 @@ export function formatPascabayarTagihanMessage(data: PascabayarTagihanData): str
         hour: '2-digit',
         minute: '2-digit',
         hour12: false
-    });
+    }).replace(/\./g, ':');
     const formattedDate = `${dateStr} ${timeStr} WITA`;
 
     const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
@@ -263,18 +263,59 @@ export async function generatePascabayarTagihanReceipt(data: PascabayarTagihanDa
             console.error("Gagal load avatarBuffer pascabayar:", e);
         }
     }
-    if (!userAvatarImg && data.waPhotoUrl && data.waPhotoUrl.startsWith('http')) {
+
+    if (!userAvatarImg && !data.waPhotoUrl) {
+        // Auto-detect dari cache db.json jika nomor tersedia atau ambil foto WA terbaru
         try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 4000);
-            const res = await fetch(data.waPhotoUrl, { signal: controller.signal });
-            clearTimeout(timer);
-            if (res.ok) {
-                const buf = Buffer.from(await res.arrayBuffer());
-                userAvatarImg = await loadImage(buf);
+            const dbPath = path.join(process.cwd(), 'db.json');
+            if (fs.existsSync(dbPath)) {
+                const dbContent = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+                const photos = dbContent.waProfilePhotos || {};
+
+                // Cek dari nama member di daftar member offline
+                if (!data.waPhotoUrl && data.nama) {
+                    const cLower = String(data.nama).trim().toLowerCase();
+                    const matchedMember = (dbContent.members || []).find((m: any) => m.name && m.name.trim().toLowerCase() === cLower);
+                    if (matchedMember && matchedMember.whatsapp) {
+                        const mClean = String(matchedMember.whatsapp).replace(/[^0-9]/g, '');
+                        if (mClean && photos[mClean]) {
+                            data.waPhotoUrl = photos[mClean];
+                        }
+                    }
+                }
+
+                if (!data.waPhotoUrl) {
+                    const candidatePhone = data.target || data.no || data.nomor;
+                    const cleanNum = candidatePhone ? String(candidatePhone).replace(/[^0-9]/g, '') : '';
+                    if (cleanNum && photos[cleanNum]) {
+                        data.waPhotoUrl = photos[cleanNum];
+                    } else {
+                        const keys = Object.keys(photos);
+                        if (keys.length > 0) {
+                            data.waPhotoUrl = photos[keys[keys.length - 1]];
+                        }
+                    }
+                }
+            }
+        } catch (e) {}
+    }
+
+    if (!userAvatarImg && data.waPhotoUrl) {
+        try {
+            if (data.waPhotoUrl.startsWith('http://') || data.waPhotoUrl.startsWith('https://')) {
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), 4000);
+                const res = await fetch(data.waPhotoUrl, { signal: controller.signal });
+                clearTimeout(timer);
+                if (res.ok) {
+                    const buf = Buffer.from(await res.arrayBuffer());
+                    userAvatarImg = await loadImage(buf);
+                }
+            } else if (fs.existsSync(data.waPhotoUrl)) {
+                userAvatarImg = await loadImage(data.waPhotoUrl);
             }
         } catch (e) {
-            console.error("Gagal fetch waPhotoUrl pascabayar:", e);
+            console.error("Gagal load waPhotoUrl pascabayar:", e);
         }
     }
 
@@ -537,7 +578,7 @@ export async function generatePascabayarTagihanReceipt(data: PascabayarTagihanDa
         hour: '2-digit',
         minute: '2-digit',
         hour12: false
-    });
+    }).replace(/\./g, ':');
     const formattedDate = `${dateStr} ${timeStr} WITA`;
 
     const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];

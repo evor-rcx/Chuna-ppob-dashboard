@@ -176,343 +176,98 @@ function drawGoldCornerFiligree(ctx: any, x: number, y: number, scaleX: number, 
 
 export async function generateTagihanCanvas(data: any, txDate: Date, formattedDate: string, calText: string): Promise<Buffer | null> {
     try {
-        const width = 1000;
-        const height = 1000;
-        const canvas = createCanvas(width, height);
-        const ctx = canvas.getContext('2d');
-
-        // Extract Customer and Service Details
-        let nama = data.nama || data.customer_name || data.namaPlg || '-';
-        let no = data.no || data.customer_no || data.target || '-';
-        let layanan = data.layanan || data.product || 'Pln Pascabayar';
-
-        if (typeof layanan === 'object' && layanan) layanan = layanan.product_name || 'Pln Pascabayar';
-        if (typeof layanan === 'string' && layanan.includes(' - ')) {
-            layanan = layanan.split(' - ')[0].trim();
-        }
-
-        let total = Number(data.total || data.price || data.tagihan || data.selling_price || 115252);
-
-        // Extract Tarif, Daya, Lembar, Bulan/Periode, Meter
-        let tarif = data.tarif || data.desc?.tarif || '';
-        let daya = data.daya || data.desc?.daya || '';
-        let lembar = data.lembar || data.lembar_tagihan || data.desc?.lembar_tagihan || '';
-        let bulan = data.bulan || data.periode || '';
-        let meter = data.meter || '';
-
-        if (!bulan && data.desc?.detail && Array.isArray(data.desc.detail) && data.desc.detail.length > 0) {
-            const first = data.desc.detail[0];
-            bulan = first.periode || '';
-            if (first.meter_awal && first.meter_akhir) {
-                meter = `${first.meter_awal} - ${first.meter_akhir}`;
-            }
-        }
-
-        if (typeof data.detail === 'string') {
-            if (!tarif) {
-                const m = data.detail.match(/Tarif[:\s]+([^\n\r]+)/i);
-                if (m) tarif = m[1].replace(/^[⚡\s]+/, '').trim();
-            }
-            if (!daya) {
-                const m = data.detail.match(/Daya[:\s]+([^\n\r]+)/i);
-                if (m) daya = m[1].replace(/^[📊\s]+/, '').trim();
-            }
-            if (!lembar) {
-                const m = data.detail.match(/Lembar[:\s]+([^\n\r]+)/i);
-                if (m) lembar = m[1].replace(/^[📄\s]+/, '').trim();
-            }
-            if (!bulan) {
-                const m = data.detail.match(/Bulan\s*(\d*[:\s]+)?([^\n\r]+)/i);
-                if (m) bulan = (m[2] || m[1] || '').replace(/^[📆\s]+/, '').trim();
-            }
-            if (!meter) {
-                const m = data.detail.match(/Meter[:\s]+([^\n\r]+)/i);
-                if (m) meter = m[1].replace(/^[🔢\s]+/, '').trim();
-            }
-        }
-
-        // Sensible defaults matching PLN check
-        if (!tarif) tarif = 'R1M';
-        if (!daya) daya = '900';
-        if (!lembar) lembar = '1';
-        if (!bulan) bulan = '202609';
-        if (!meter) meter = '00007944 - 00008015';
-
-        // Extract or fetch WhatsApp profile photo
-        let waPhotoUrl: string | null = data.waPhotoUrl || null;
-        let waAvatarImg: any = null;
-        try {
-            const currentDb = (typeof db !== 'undefined' && db) ? db : readDB();
-            if (!waPhotoUrl && (data.target || data.no || data.customer_no)) {
-                const cleanT = String(data.target || data.no || data.customer_no).replace(/\D/g, '');
-                let clean = cleanT;
-                if (clean.startsWith('0')) clean = '62' + clean.substring(1);
-                if (currentDb.waProfilePhotos && currentDb.waProfilePhotos[clean]) {
-                    waPhotoUrl = currentDb.waProfilePhotos[clean];
+        // 2. Nota / Struk Pembayaran Resmi E4 Store:
+        // - Lunas: Template Picsart_26-09-28_17-56-42-115.png (Royal Mahkota Emas)
+        // - Belum Lunas / Utang: Template Picsart_26-09-28_17-53-27-094.png (Gothic Steampunk)
+        let waPhoto = data.waPhotoUrl || null;
+        if (!waPhoto) {
+            const candidatePhone = data.targetPhone || data.customerPhone || data.phone || data.whatsapp || data.target || data.no;
+            if (candidatePhone) {
+                const cleanPhone = cleanWaPhone(String(candidatePhone));
+                if (cleanPhone && db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) {
+                    waPhoto = db.waProfilePhotos[cleanPhone];
+                } else if (cleanPhone && typeof waSocket !== "undefined" && waSocket) {
+                    try {
+                        const jid = `${cleanPhone}@s.whatsapp.net`;
+                        const fetched = await waSocket.profilePictureUrl(jid, "image").catch(() => null);
+                        if (fetched) {
+                            waPhoto = fetched;
+                            if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                            db.waProfilePhotos[cleanPhone] = fetched;
+                            writeDB(db);
+                        }
+                    } catch (e) {}
                 }
             }
-        } catch (e) {}
-
-        if (data.avatarBuffer) {
-            try {
-                waAvatarImg = await loadImage(data.avatarBuffer).catch(() => null);
-            } catch (e) {}
-        } else if (waPhotoUrl) {
-            try {
-                waAvatarImg = await loadImage(waPhotoUrl).catch(() => null);
-            } catch (e) {}
         }
 
-        // 1. Deep Midnight Royal Navy Background
-        const bgGrad = ctx.createLinearGradient(0, 0, width, height);
-        bgGrad.addColorStop(0, '#061332');
-        bgGrad.addColorStop(0.5, '#0a1a44');
-        bgGrad.addColorStop(1, '#05122e');
-        ctx.fillStyle = bgGrad;
-        ctx.fillRect(0, 0, width, height);
-
-        // 2. Rounded Gold Outer Frame (matching Picsart reference image)
-        const frameX = 38;
-        const frameY = 38;
-        const frameW = 924;
-        const frameH = 924;
-        const frameR = 34;
-
-        const goldFrameGrad = ctx.createLinearGradient(frameX, frameY, frameX + frameW, frameY + frameH);
-        goldFrameGrad.addColorStop(0, '#eac975');
-        goldFrameGrad.addColorStop(0.25, '#fae69e');
-        goldFrameGrad.addColorStop(0.5, '#dfb752');
-        goldFrameGrad.addColorStop(0.75, '#fae8a5');
-        goldFrameGrad.addColorStop(1, '#c19232');
-
-        ctx.save();
-        ctx.strokeStyle = goldFrameGrad;
-        ctx.lineWidth = 4.2;
-        roundRectPath(ctx, frameX, frameY, frameW, frameH, frameR);
-        ctx.stroke();
-
-        // Subtle inner gold rim
-        ctx.strokeStyle = 'rgba(235, 206, 126, 0.22)';
-        ctx.lineWidth = 1.0;
-        roundRectPath(ctx, frameX + 6, frameY + 6, frameW - 12, frameH - 12, frameR - 4);
-        ctx.stroke();
-        ctx.restore();
-
-        // Helper for consistent divider lines
-        const drawDividerLine = (y: number, dashed = false) => {
-            ctx.save();
-            ctx.lineWidth = 1.4;
-            if (dashed) {
-                ctx.setLineDash([9, 6]);
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
-            } else {
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.38)';
+        if (!waPhoto && (data.userId || data.telegramId || data.tgChatId)) {
+            const tgId = data.userId || data.telegramId || data.tgChatId;
+            const m = db.members?.find((x: any) => isTelegramMatch(x.telegram, tgId, undefined));
+            if (m) {
+                const waDetails = await getCustomerWaDetails(m, tgId, data.no || data.target);
+                if (waDetails?.waPhotoUrl) waPhoto = waDetails.waPhotoUrl;
             }
-            ctx.beginPath();
-            ctx.moveTo(92, y);
-            ctx.lineTo(908, y);
-            ctx.stroke();
-            ctx.restore();
-        };
-
-        // 3. Header Texts
-        // "E4 STORE" - Large bold warm gold
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.font = 'bold 54px system-ui, -apple-system, sans-serif';
-        ctx.fillStyle = '#f6cb4a'; // Vibrant Gold
-        ctx.fillText('E4 STORE', 500, 138);
-
-        // "Cek Tagihan" - White
-        ctx.font = '600 27px system-ui, -apple-system, sans-serif';
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText('Cek Tagihan', 500, 202);
-
-        // "Tagihan Ditemukan!" - White
-        ctx.font = '600 25px system-ui, -apple-system, sans-serif';
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText('Tagihan Ditemukan!', 500, 252);
-
-        // Top-Right WhatsApp Profile Photo Medallion (Enlarged)
-        const tagihanAvatarR = 54;
-        const tagihanAvatarX = frameX + frameW - 88;
-        const tagihanAvatarY = frameY + 98;
-
-        if (waAvatarImg || nama || true) {
-            ctx.save();
-            ctx.shadowColor = 'rgba(0,0,0,0.35)';
-            ctx.shadowBlur = 14;
-            ctx.shadowOffsetY = 4;
-            ctx.beginPath();
-            ctx.arc(tagihanAvatarX, tagihanAvatarY, tagihanAvatarR, 0, Math.PI * 2);
-            ctx.fillStyle = '#0a1a44';
-            ctx.fill();
-            ctx.restore();
-
-            ctx.save();
-            ctx.beginPath();
-            ctx.arc(tagihanAvatarX, tagihanAvatarY, tagihanAvatarR - 2, 0, Math.PI * 2);
-            ctx.clip();
-            if (waAvatarImg) {
-                ctx.drawImage(waAvatarImg, tagihanAvatarX - tagihanAvatarR, tagihanAvatarY - tagihanAvatarR, tagihanAvatarR * 2, tagihanAvatarR * 2);
-            } else {
-                // WhatsApp privat / foto tidak tersedia: lingkaran huruf E4 mewah
-                const fallbackGradNavy = ctx.createLinearGradient(tagihanAvatarX - tagihanAvatarR, tagihanAvatarY - tagihanAvatarR, tagihanAvatarX + tagihanAvatarR, tagihanAvatarY + tagihanAvatarR);
-                fallbackGradNavy.addColorStop(0, '#0a1a44');
-                fallbackGradNavy.addColorStop(0.5, '#132b6e');
-                fallbackGradNavy.addColorStop(1, '#050f28');
-                ctx.fillStyle = fallbackGradNavy;
-                ctx.fillRect(tagihanAvatarX - tagihanAvatarR, tagihanAvatarY - tagihanAvatarR, tagihanAvatarR * 2, tagihanAvatarR * 2);
-
-                // Inner subtle ring
-                ctx.strokeStyle = 'rgba(234, 201, 117, 0.4)';
-                ctx.lineWidth = 1.5;
-                ctx.beginPath();
-                ctx.arc(tagihanAvatarX, tagihanAvatarY, tagihanAvatarR - 8, 0, Math.PI * 2);
-                ctx.stroke();
-
-                // Huruf E4 Emas Mewah
-                ctx.font = '900 34px system-ui, -apple-system, sans-serif';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                const textGradGold = ctx.createLinearGradient(tagihanAvatarX - 22, tagihanAvatarY - 18, tagihanAvatarX + 22, tagihanAvatarY + 18);
-                textGradGold.addColorStop(0, '#fff4cc');
-                textGradGold.addColorStop(0.5, '#eac975');
-                textGradGold.addColorStop(1, '#ab7c12');
-                ctx.fillStyle = textGradGold;
-                ctx.fillText('E4', tagihanAvatarX, tagihanAvatarY + 1.5);
-            }
-            ctx.restore();
-
-            // Gold Outer Ring
-            ctx.save();
-            ctx.strokeStyle = goldFrameGrad;
-            ctx.lineWidth = 3.6;
-            ctx.beginPath();
-            ctx.arc(tagihanAvatarX, tagihanAvatarY, tagihanAvatarR, 0, Math.PI * 2);
-            ctx.stroke();
-
-            // WhatsApp Badge
-            const tagihanBadgeR = 16;
-            const tagihanBadgeX = tagihanAvatarX + Math.round(tagihanAvatarR * 0.70);
-            const tagihanBadgeY = tagihanAvatarY + Math.round(tagihanAvatarR * 0.70);
-            ctx.beginPath();
-            ctx.arc(tagihanBadgeX, tagihanBadgeY, tagihanBadgeR, 0, Math.PI * 2);
-            ctx.fillStyle = '#25D366';
-            ctx.fill();
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 2.8;
-            ctx.stroke();
-
-            ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 15px system-ui, sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('✆', tagihanBadgeX, tagihanBadgeY);
-            ctx.restore();
         }
 
-        // Divider 1 (above Upper Section)
-        drawDividerLine(296);
+        if (!waPhoto) {
+            const tgId = data.userId || data.telegramId || data.tgChatId;
+            if (db.owners?.includes(tgId) || db.owners?.includes(Number(tgId))) {
+                if (db.ownerWhatsapps && db.ownerWhatsapps.length > 0) {
+                    const ownerClean = cleanWaPhone(db.ownerWhatsapps[0]);
+                    if (db.waProfilePhotos && db.waProfilePhotos[ownerClean]) {
+                        waPhoto = db.waProfilePhotos[ownerClean];
+                    } else if (typeof waSocket !== "undefined" && waSocket) {
+                        try {
+                            const jid = `${ownerClean}@s.whatsapp.net`;
+                            const fetched = await waSocket.profilePictureUrl(jid, "image").catch(() => null);
+                            if (fetched) {
+                                waPhoto = fetched;
+                                if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                                db.waProfilePhotos[ownerClean] = fetched;
+                                writeDB(db);
+                            }
+                        } catch (e) {}
+                    }
+                }
+            }
+        }
 
-        // 4. Upper Section
-        // Row 1: Nama | Nomor
-        const upperRow1Y = 334;
-        ctx.textBaseline = 'middle';
-        ctx.font = 'bold 25px system-ui, -apple-system, sans-serif';
-        ctx.fillStyle = '#ffffff';
+        if (!waPhoto && db.waProfilePhotos) {
+            const keys = Object.keys(db.waProfilePhotos);
+            if (keys.length > 0) {
+                waPhoto = db.waProfilePhotos[keys[keys.length - 1]];
+            }
+        }
 
-        // Left: Nama
-        ctx.textAlign = 'left';
-        ctx.fillText(`Nama ${nama}`, 92, upperRow1Y);
+        const statusLower = (data.status || "").toString().toLowerCase().trim();
+        let methodLower = (data.method || data.metode || "").toString().toLowerCase().trim();
+        const isBelumLunas = statusLower.includes("tidak") || statusLower.includes("belum") || methodLower === "utang" || methodLower === "kasbon";
 
-        // Right: Nomor
-        ctx.textAlign = 'right';
-        ctx.fillText(`Nomor ${no}`, 908, upperRow1Y);
-
-        // Row 2: Layanan | Layanan
-        const upperRow2Y = 384;
-        ctx.textAlign = 'left';
-        ctx.fillText(`Layanan ${layanan}`, 92, upperRow2Y);
-
-        ctx.textAlign = 'right';
-        ctx.fillText(`Layanan ${layanan}`, 908, upperRow2Y);
-
-        // Divider 2 (below Upper Section)
-        drawDividerLine(420);
-
-        // 5. TOTAL BAYAR
-        const totalY = 466;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.font = 'bold 42px system-ui, -apple-system, sans-serif';
-        ctx.fillStyle = '#f6cb4a'; // Vibrant Gold
-        ctx.fillText(`TOTAL BAYAR Rp ${total.toLocaleString('id-ID')}`, 500, totalY);
-
-        // Divider 3 (below TOTAL BAYAR)
-        drawDividerLine(514);
-
-        // 6. Middle Section (3 Columns: Tarif, Daya, Lembar)
-        const midY = 550;
-        ctx.textBaseline = 'middle';
-        ctx.font = 'bold 25px system-ui, -apple-system, sans-serif';
-        ctx.fillStyle = '#ffffff';
-
-        // Left Column (centered at 210)
-        ctx.textAlign = 'center';
-        ctx.fillText(`Tarif ${tarif}`, 210, midY);
-
-        // Center Column (centered at 500)
-        ctx.textAlign = 'center';
-        ctx.fillText(`Daya ${daya}`, 500, midY);
-
-        // Right Column (centered at 790)
-        ctx.textAlign = 'center';
-        ctx.fillText(`Lembar ${lembar}`, 790, midY);
-
-        // Divider 4 (below 3 Columns)
-        drawDividerLine(586);
-
-        // 7. Meter & Periode Section (2 Columns)
-        const meterRowY = 624;
-        ctx.textAlign = 'left';
-        ctx.font = 'bold 25px system-ui, -apple-system, sans-serif';
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText(`Bulan 1: ${bulan}`, 92, meterRowY);
-
-        ctx.textAlign = 'right';
-        ctx.fillText(`Meter: ${meter}`, 908, meterRowY);
-
-        // 8. Silahkan Lanjutkan Pembayaran
-        const ctaY = 684;
-        ctx.textAlign = 'center';
-        ctx.font = 'bold 27px system-ui, -apple-system, sans-serif';
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText('Silahkan Lanjutkan Pembayaran', 500, ctaY);
-
-        // Divider 5 (Dashed Line)
-        drawDividerLine(724, true);
-
-        // 9. Footer
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-
-        // Chuna line
-        ctx.font = '600 21px system-ui, -apple-system, sans-serif';
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText('Chuna - Asisten Imutmu siap bantu 24 jam!', 500, 818);
-
-        // Terimakasih line
-        ctx.font = '600 21px system-ui, -apple-system, sans-serif';
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText('Terimakasih telah berbelanja di E4 Store!', 500, 858);
-
-        // Cetak & Calendar info line
-        ctx.font = 'normal 15px system-ui, -apple-system, sans-serif';
-        ctx.fillStyle = '#cbd5e1';
-        ctx.fillText(`Cetak: ${formattedDate} | ${calText}`, 500, 892);
-
-        return canvas.toBuffer('image/png');
+        return await generateRoyalStrukReceipt({
+            nama: data.nama || data.customerDisplayName || data.namaPlg || "Pelanggan",
+            status: isBelumLunas ? "TIDAK LUNAS" : "Lunas",
+            metode: (data.method || data.metode || (isBelumLunas ? "UTANG" : "CASH")).toString().toUpperCase(),
+            templateVariant: isBelumLunas ? "tidaklunas" : "lunas",
+            product: data.product || data.layanan || data.itemGame || data.pembelian || "",
+            target: data.target || data.no || data.customerNo || data.idTujuanGame || data.idPelanggan || "",
+            type: data.type || "",
+            sku: data.sku || "",
+            namaPlg: data.namaPlg || data.nama_pelanggan || "",
+            tarif: data.tarif || "",
+            daya: data.daya || "",
+            golDaya: data.golDaya || data.gol_daya || "",
+            kwh: data.kwh || "",
+            bulan: data.bulan || data.periode || "",
+            meter: data.meter || "",
+            lembar: data.lembar || data.lembar_tagihan || "",
+            orderId: data.orderId || data.id || data.ref_id || "",
+            tanggal: formattedDate,
+            date: txDate,
+            sn: data.sn || data.token || "",
+            totalBayar: Number(data.totalBayar || data.total || data.price || 0),
+            waPhotoUrl: waPhoto
+        });
     } catch (e: any) {
         console.error("Canvas tagihan error:", e);
         return null;
@@ -537,662 +292,167 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
 
         // If type is tagihan, use the new official E4 Store Cek Tagihan layout (Picsart_26-09-28_23-03-28-209.png)
         if (type === 'tagihan') {
-            return await generatePascabayarTagihanReceipt({ ...data, date: txDate });
-        }
-
-        const width = 1000;
-        const height = 1000;
-        const canvas = createCanvas(width, height);
-        const ctx = canvas.getContext('2d');
-
-        // Parse product, token, and PLN details
-        let token = data.sn ? String(data.sn).trim() : '-';
-        let namaPlg = data.nama_pelanggan || data.namaPlg || '';
-        let golDaya = data.gol_daya || data.golDaya || '';
-        let kwh = data.kwh || '';
-
-        const isPln = (data.product || '').toLowerCase().includes('pln') || 
-                      (data.product || '').toLowerCase().includes('listrik') || 
-                      (data.sku || '').toLowerCase().includes('pln') ||
-                      (data.layanan || '').toLowerCase().includes('pln');
-
-        if (isPln && token && token.includes('/')) {
-            const parts = token.split('/');
-            token = parts[0].trim();
-            if (!namaPlg) namaPlg = (parts[1] || '').trim();
-            if (parts.length > 3) {
-                if (!golDaya) golDaya = `${parts[2]} / ${parts[3]}`.trim();
-                if (!kwh) kwh = (parts[4] || '').trim();
-            } else if (parts.length === 3) {
-                if (!golDaya) golDaya = parts[2].trim();
-            }
-        }
-
-        // Format 20-digit token with hyphens if purely 20 digits
-        if (isPln && token && token.replace(/\D/g, '').length === 20) {
-            const d = token.replace(/\D/g, '');
-            token = `${d.slice(0, 4)}-${d.slice(4, 8)}-${d.slice(8, 12)}-${d.slice(12, 16)}-${d.slice(16, 20)}`;
-        }
-
-        // Determine Lunas vs Belum Lunas
-        const statusLower = (data.status || '').toString().toLowerCase().trim();
-        let methodLower = (data.method || '').toString().toLowerCase().trim();
-        if (!methodLower && data.id) {
-            try {
-                const currentDb = (typeof db !== 'undefined' && db) ? db : readDB();
-                const foundTx = currentDb.transactions?.find((t: any) => t.id === data.id);
-                if (foundTx && foundTx.method) {
-                    methodLower = foundTx.method.toString().toLowerCase().trim();
-                }
-            } catch (e) {}
-        }
-        const isUtang = methodLower === 'utang' || methodLower === 'kasbon' || statusLower.includes('utang') || statusLower.includes('kasbon');
-        const isExplicitlyPaid = data.isPaid === true || data.isLunas === true || statusLower.includes('lunas');
-        const isPending = statusLower.includes('pending') || statusLower.includes('menunggu');
-
-        let isLunas = true;
-        if (isUtang && !isExplicitlyPaid) {
-            isLunas = false;
-        } else if (isPending) {
-            isLunas = false;
-        } else if (statusLower.includes('belum lunas') || statusLower.includes('tidak lunas')) {
-            isLunas = false;
-        }
-
-        // Format short Order Code
-        const orderIdStr = String(data.id || 'PRE-1789646007593');
-        const shortCode = orderIdStr.startsWith('PRE-') ? orderIdStr.slice(0, 7) : `#${orderIdStr.slice(0, 8).toUpperCase()}`;
-
-        // Member and WhatsApp details
-        let memberName = data.customerDisplayName || data.customerName || data.nama || data.member_name || data.memberId || '-';
-        let waPhone = '';
-        let waPhotoUrl: string | null = data.waPhotoUrl || null;
-        let waAvatarImg: any = null;
-
-        try {
-            const currentDb = (typeof db !== 'undefined' && db) ? db : readDB();
-            const members = currentDb.members || [];
-            let m = members.find((x: any) => x.id === data.memberId);
-            if (!m && data.target) {
-                const cleanTarget = String(data.target).replace(/\D/g, '');
-                m = members.find((x: any) => x.whatsapp && x.whatsapp.replace(/\D/g, '') === cleanTarget);
-            }
-            if (!m && data.memberId && String(data.memberId).startsWith('MBR-')) {
-                const tgId = String(data.memberId).replace('MBR-', '');
-                m = members.find((x: any) => isTelegramMatch(x.telegram, tgId, undefined));
-            }
-
-            if (m && m.whatsapp) waPhone = m.whatsapp;
-
-            if (!waPhone && data.target) {
-                const cleanT = String(data.target).replace(/\D/g, '');
-                if (cleanT.length >= 10 && (cleanT.startsWith('08') || cleanT.startsWith('628'))) {
-                    waPhone = cleanT;
-                }
-            }
-            if (!waPhone && data.sender) waPhone = String(data.sender);
-            if (!waPhone && data.chatId) waPhone = String(data.chatId);
-
-            if (waPhone) {
-                let clean = waPhone.replace(/\D/g, '');
-                if (clean.startsWith('0')) clean = '62' + clean.substring(1);
-
-                // Cek nomor owner
-                const isOwnerNum = isOwnerWhatsapp(clean) || (m && Array.isArray(m.telegram) && m.telegram.some((tid: any) => (currentDb.owners || []).includes(parseInt(tid))));
-                if (isOwnerNum || (memberName && memberName.toLowerCase().includes("owner"))) {
-                    memberName = 'Selamat datang Owner';
-                } else {
-                    // Prioritaskan 100% Nama Profil WhatsApp asli (db.waProfiles / waProfileName)
-                    if (clean && currentDb.waProfiles && currentDb.waProfiles[clean] && !isPhoneNumberOrEmpty(currentDb.waProfiles[clean])) {
-                        memberName = currentDb.waProfiles[clean].trim();
-                    } else if (m?.waProfileName && !isPhoneNumberOrEmpty(m.waProfileName)) {
-                        memberName = m.waProfileName.trim();
-                    } else if (data.customerDisplayName && !isPhoneNumberOrEmpty(data.customerDisplayName) && data.customerDisplayName !== 'Pelanggan Setia' && data.customerDisplayName !== 'Kakak') {
-                        memberName = data.customerDisplayName.trim();
-                    } else if (m?.name && !isPhoneNumberOrEmpty(m.name)) {
-                        memberName = m.name.trim();
-                    } else if (clean && clean.length >= 8) {
-                        memberName = `+${clean}`;
-                    } else {
-                        memberName = 'Kakak';
+            let waPhoto = data.waPhotoUrl || null;
+            if (!waPhoto) {
+                const candidatePhone = data.targetPhone || data.customerPhone || data.phone || data.whatsapp || data.target || data.no;
+                if (candidatePhone) {
+                    const cleanPhone = cleanWaPhone(String(candidatePhone));
+                    if (cleanPhone && db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) {
+                        waPhoto = db.waProfilePhotos[cleanPhone];
+                    } else if (cleanPhone && typeof waSocket !== 'undefined' && waSocket) {
+                        try {
+                            const jid = `${cleanPhone}@s.whatsapp.net`;
+                            const fetched = await waSocket.profilePictureUrl(jid, 'image').catch(() => null);
+                            if (fetched) {
+                                waPhoto = fetched;
+                                if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                                db.waProfilePhotos[cleanPhone] = fetched;
+                                writeDB(db);
+                            }
+                        } catch (e) {}
                     }
                 }
+            }
 
-                if (!memberName || memberName === '-' || memberName === 'Pelanggan Setia') {
-                    memberName = (clean && clean.length >= 8) ? `+${clean}` : 'Kakak';
+            if (!waPhoto && (data.userId || data.telegramId)) {
+                const tgId = data.userId || data.telegramId;
+                const m = db.members?.find((x: any) => isTelegramMatch(x.telegram, tgId, undefined));
+                if (m) {
+                    const waDetails = await getCustomerWaDetails(m, tgId, data.no);
+                    if (waDetails?.waPhotoUrl) waPhoto = waDetails.waPhotoUrl;
                 }
+            }
 
-                if (!waPhotoUrl && currentDb.waProfilePhotos && currentDb.waProfilePhotos[clean]) {
-                    waPhotoUrl = currentDb.waProfilePhotos[clean];
+            if (!waPhoto && db.waProfilePhotos) {
+                const keys = Object.keys(db.waProfilePhotos);
+                if (keys.length > 0) {
+                    waPhoto = db.waProfilePhotos[keys[keys.length - 1]];
                 }
+            }
 
-                if (!waPhotoUrl && typeof waSocket !== 'undefined' && waSocket && clean.length >= 10) {
+            return await generatePascabayarTagihanReceipt({ ...data, date: txDate, waPhotoUrl: waPhoto });
+        }
+
+        // 2. Struk Pembayaran Resmi E4 Store (Royal Picsart Templates):
+        // - Lunas: Picsart_26-09-28_17-56-42-115.png (Royal Mahkota Emas)
+        // - Tidak Lunas / Utang: Picsart_26-09-28_17-53-27-094.png (Gothic Steampunk)
+        let waPhoto = data.waPhotoUrl || null;
+
+        // 1. Cek dari nama member di daftar member offline / online (misal nama: aqila)
+        if (!waPhoto && (data.nama || data.customerDisplayName || data.customerName)) {
+            const candidateName = String(data.nama || data.customerDisplayName || data.customerName).trim().toLowerCase();
+            const m = (db.members || []).find((x: any) => x.name && x.name.trim().toLowerCase() === candidateName);
+            if (m && m.whatsapp) {
+                const cleanPhone = cleanWaPhone(m.whatsapp);
+                if (cleanPhone && db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) {
+                    waPhoto = db.waProfilePhotos[cleanPhone];
+                } else if (cleanPhone && typeof waSocket !== "undefined" && waSocket) {
                     try {
-                        const jid = `${clean}@s.whatsapp.net`;
-                        const fetchedPhoto = await waSocket.profilePictureUrl(jid, 'image').catch(() => null);
-                        if (fetchedPhoto) {
-                            waPhotoUrl = fetchedPhoto;
-                            if (!currentDb.waProfilePhotos) currentDb.waProfilePhotos = {};
-                            currentDb.waProfilePhotos[clean] = fetchedPhoto;
-                            if (typeof writeDB === 'function') writeDB(currentDb);
+                        const jid = `${cleanPhone}@s.whatsapp.net`;
+                        const fetched = await waSocket.profilePictureUrl(jid, "image").catch(() => null);
+                        if (fetched) {
+                            waPhoto = fetched;
+                            if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                            db.waProfilePhotos[cleanPhone] = fetched;
+                            writeDB(db);
                         }
                     } catch (e) {}
                 }
             }
-        } catch (e) {}
-
-        if (data.avatarBuffer) {
-            try {
-                waAvatarImg = await loadImage(data.avatarBuffer).catch(() => null);
-            } catch (e) {}
-        } else if (waPhotoUrl) {
-            try {
-                waAvatarImg = await loadImage(waPhotoUrl).catch(() => null);
-            } catch (e) {}
         }
 
-        // 1. Clean white canvas background
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, width, height);
-
-        // 2. Card bounds
-        const cardX = 70;
-        const cardY = 65;
-        const cardW = 860;
-        const cardH = 870;
-        const cardR = 46;
-
-        // Outer subtle card drop shadow
-        ctx.save();
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.12)';
-        ctx.shadowBlur = 30;
-        ctx.shadowOffsetY = 12;
-        ctx.fillStyle = '#ffffff';
-        roundRectPath(ctx, cardX, cardY, cardW, cardH, cardR);
-        ctx.fill();
-        ctx.restore();
-
-        // Card background: Luxurious warm cream parchment gradient
-        const cardBgGrad = ctx.createLinearGradient(cardX, cardY, cardX, cardY + cardH);
-        cardBgGrad.addColorStop(0, '#fefdfb');
-        cardBgGrad.addColorStop(0.5, '#faf6ee');
-        cardBgGrad.addColorStop(1, '#f6f0e2');
-        ctx.fillStyle = cardBgGrad;
-        roundRectPath(ctx, cardX, cardY, cardW, cardH, cardR);
-        ctx.fill();
-
-        // Top Gold Metallic Banner Bar
-        ctx.save();
-        roundRectPath(ctx, cardX, cardY, cardW, cardH, cardR);
-        ctx.clip();
-        const topBarGrad = ctx.createLinearGradient(cardX, cardY, cardX + cardW, cardY);
-        topBarGrad.addColorStop(0, '#be9443');
-        topBarGrad.addColorStop(0.3, '#ebd58d');
-        topBarGrad.addColorStop(0.7, '#dfbf72');
-        topBarGrad.addColorStop(1, '#ab802f');
-        ctx.fillStyle = topBarGrad;
-        ctx.fillRect(cardX, cardY, cardW, 20);
-        ctx.restore();
-
-        // Fine gold border stroke around the card
-        const borderGoldGrad = ctx.createLinearGradient(cardX, cardY, cardX + cardW, cardY + cardH);
-        borderGoldGrad.addColorStop(0, '#c79d46');
-        borderGoldGrad.addColorStop(0.5, '#edd692');
-        borderGoldGrad.addColorStop(1, '#a67b2d');
-        ctx.strokeStyle = borderGoldGrad;
-        ctx.lineWidth = 2.0;
-        roundRectPath(ctx, cardX, cardY, cardW, cardH, cardR);
-        ctx.stroke();
-
-        // Inner fine framing line
-        ctx.strokeStyle = '#e0c688';
-        ctx.lineWidth = 1.0;
-        roundRectPath(ctx, cardX + 16, cardY + 34, cardW - 32, cardH - 50, cardR - 14);
-        ctx.stroke();
-
-        // 3. Ornate Gold Filigree in all 4 corners
-        drawGoldCornerFiligree(ctx, cardX + 18, cardY + 34, 1, 1); // Top-Left
-        drawGoldCornerFiligree(ctx, cardX + cardW - 18, cardY + 34, -1, 1); // Top-Right
-        drawGoldCornerFiligree(ctx, cardX + 18, cardY + cardH - 18, 1, -1); // Bottom-Left
-        drawGoldCornerFiligree(ctx, cardX + cardW - 18, cardY + cardH - 18, -1, -1); // Bottom-Right
-
-        // 4. WhatsApp Profile Photo (Top-Right Medallion - Enlarged & Clearly Visible)
-        const avatarR = 54; // Enlarged from 34 to 54 (108px diameter) so photo details are clearly visible
-        const avatarX = cardX + cardW - 100;
-        const avatarY = cardY + 86;
-
-        ctx.save();
-        ctx.shadowColor = 'rgba(0,0,0,0.22)';
-        ctx.shadowBlur = 14;
-        ctx.shadowOffsetY = 5;
-        ctx.beginPath();
-        ctx.arc(avatarX, avatarY, avatarR, 0, Math.PI * 2);
-        ctx.fillStyle = '#f8f4eb';
-        ctx.fill();
-        ctx.restore();
-
-        // Render Profile Image or Monogram
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(avatarX, avatarY, avatarR - 1.5, 0, Math.PI * 2);
-        ctx.clip();
-        if (waAvatarImg) {
-            ctx.drawImage(waAvatarImg, avatarX - avatarR, avatarY - avatarR, avatarR * 2, avatarR * 2);
-        } else {
-            // WhatsApp privat / foto tidak tersedia: Lingkaran huruf E4 mewah
-            const fallbackGrad = ctx.createLinearGradient(avatarX - avatarR, avatarY - avatarR, avatarX + avatarR, avatarY + avatarR);
-            fallbackGrad.addColorStop(0, '#0c1a3b');
-            fallbackGrad.addColorStop(0.5, '#162e66');
-            fallbackGrad.addColorStop(1, '#081226');
-            ctx.fillStyle = fallbackGrad;
-            ctx.fillRect(avatarX - avatarR, avatarY - avatarR, avatarR * 2, avatarR * 2);
-
-            // Inner gold ring accent
-            ctx.strokeStyle = 'rgba(212, 175, 55, 0.45)';
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.arc(avatarX, avatarY, avatarR - 8, 0, Math.PI * 2);
-            ctx.stroke();
-
-            // Huruf E4 Emas Mewah
-            ctx.font = '900 34px system-ui, -apple-system, sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            const textGradGold = ctx.createLinearGradient(avatarX - 22, avatarY - 18, avatarX + 22, avatarY + 18);
-            textGradGold.addColorStop(0, '#fff4cc');
-            textGradGold.addColorStop(0.5, '#eac975');
-            textGradGold.addColorStop(1, '#ab7c12');
-            ctx.fillStyle = textGradGold;
-            ctx.fillText('E4', avatarX, avatarY + 1.5);
-        }
-        ctx.restore();
-
-        // Gold avatar outer rim
-        ctx.save();
-        ctx.strokeStyle = borderGoldGrad;
-        ctx.lineWidth = 3.6;
-        ctx.beginPath();
-        ctx.arc(avatarX, avatarY, avatarR, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // Delicate inner gold highlight ring
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
-        ctx.lineWidth = 1.2;
-        ctx.beginPath();
-        ctx.arc(avatarX, avatarY, avatarR - 3.5, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.restore();
-
-        // WhatsApp badge on bottom-right of avatar (Enlarged)
-        const badgeR = 16;
-        const badgeX = avatarX + Math.round(avatarR * 0.70);
-        const badgeY = avatarY + Math.round(avatarR * 0.70);
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(badgeX, badgeY, badgeR, 0, Math.PI * 2);
-        ctx.fillStyle = '#25D366';
-        ctx.fill();
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 2.8;
-        ctx.stroke();
-
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 15px system-ui, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('✆', badgeX, badgeY);
-        ctx.restore();
-
-        // 5. Centered Logo: (E4) STORE
-        const logoCenterY = cardY + 70;
-        const circleCenterX = 432;
-        const circleRadius = 28;
-
-        // Circle ring: left gray, right orange
-        ctx.lineWidth = 3.6;
-        ctx.beginPath();
-        ctx.arc(circleCenterX, logoCenterY, circleRadius, Math.PI * 0.5, Math.PI * 1.5);
-        ctx.strokeStyle = '#64748b';
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.arc(circleCenterX, logoCenterY, circleRadius, Math.PI * 1.5, Math.PI * 0.5);
-        ctx.strokeStyle = '#ea8c26';
-        ctx.stroke();
-
-        // "E4" inside circle
-        ctx.font = 'bold 26px system-ui, -apple-system, sans-serif';
-        ctx.fillStyle = '#1e293b';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('E4', circleCenterX, logoCenterY + 1);
-
-        // "STORE" text
-        ctx.textAlign = 'left';
-        ctx.font = 'bold 36px system-ui, -apple-system, sans-serif';
-        ctx.fillStyle = '#0f172a';
-        ctx.fillText('STORE', circleCenterX + circleRadius + 14, logoCenterY);
-
-        // Subtitle: "Struk Pembayaran"
-        ctx.textAlign = 'center';
-        ctx.font = '500 21px system-ui, -apple-system, sans-serif';
-        ctx.fillStyle = '#475569';
-        ctx.fillText(type === 'nota' ? 'Struk Pembayaran' : 'Bukti Tagihan', 500, logoCenterY + 45);
-
-        // 6. Status Pill
-        const pillY = logoCenterY + 98;
-        const pillH = 58;
-        const pillR = pillH / 2;
-
-        ctx.save();
-        if (isLunas) {
-            const pillW = 320;
-            const pillX = 500 - pillW / 2;
-
-            ctx.shadowColor = 'rgba(22, 163, 74, 0.45)';
-            ctx.shadowBlur = 18;
-            ctx.shadowOffsetY = 6;
-
-            const pillGrad = ctx.createLinearGradient(pillX, pillY - pillH / 2, pillX, pillY + pillH / 2);
-            pillGrad.addColorStop(0, '#2ecc71');
-            pillGrad.addColorStop(0.5, '#22a058');
-            pillGrad.addColorStop(1, '#18793f');
-
-            ctx.fillStyle = pillGrad;
-            roundRectPath(ctx, pillX, pillY - pillH / 2, pillW, pillH, pillR);
-            ctx.fill();
-            ctx.restore();
-
-            // White Text
-            ctx.font = 'bold 24px system-ui, -apple-system, sans-serif';
-            ctx.fillStyle = '#ffffff';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('SUKSES (LUNAS)', 484, pillY);
-
-            // Gold Checkmark Badge
-            const checkX = 612;
-            const checkY = pillY;
-            ctx.save();
-            ctx.shadowColor = 'rgba(0,0,0,0.2)';
-            ctx.shadowBlur = 6;
-            ctx.beginPath();
-            ctx.arc(checkX, checkY, 15, 0, Math.PI * 2);
-            ctx.fillStyle = '#d4af37';
-            ctx.fill();
-
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 3.2;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.beginPath();
-            ctx.moveTo(checkX - 6, checkY);
-            ctx.lineTo(checkX - 2, checkY + 4);
-            ctx.lineTo(checkX + 6, checkY - 5);
-            ctx.stroke();
-            ctx.restore();
-        } else {
-            const pillW = 426;
-            const pillX = 500 - pillW / 2;
-
-            ctx.shadowColor = 'rgba(217, 119, 6, 0.45)';
-            ctx.shadowBlur = 18;
-            ctx.shadowOffsetY = 6;
-
-            const pillGrad = ctx.createLinearGradient(pillX, pillY - pillH / 2, pillX, pillY + pillH / 2);
-            pillGrad.addColorStop(0, '#f59e0b');
-            pillGrad.addColorStop(0.5, '#d97706');
-            pillGrad.addColorStop(1, '#b45309');
-
-            ctx.fillStyle = pillGrad;
-            roundRectPath(ctx, pillX, pillY - pillH / 2, pillW, pillH, pillR);
-            ctx.fill();
-            ctx.restore();
-
-            // White Text
-            ctx.font = 'bold 24px system-ui, -apple-system, sans-serif';
-            ctx.fillStyle = '#ffffff';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('SUKSES (BELUM LUNAS)', 476, pillY);
-
-            // Alarm Clock Icon
-            const clockX = 665;
-            const clockY = pillY;
-            ctx.save();
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 2.4;
-            ctx.beginPath();
-            ctx.arc(clockX, clockY, 13, 0, Math.PI * 2);
-            ctx.stroke();
-
-            // Clock bells
-            ctx.beginPath();
-            ctx.arc(clockX - 9, clockY - 10, 4, 0, Math.PI * 2);
-            ctx.arc(clockX + 9, clockY - 10, 4, 0, Math.PI * 2);
-            ctx.stroke();
-
-            // Hands
-            ctx.beginPath();
-            ctx.moveTo(clockX, clockY);
-            ctx.lineTo(clockX, clockY - 6);
-            ctx.moveTo(clockX, clockY);
-            ctx.lineTo(clockX + 5, clockY);
-            ctx.stroke();
-            ctx.restore();
-        }
-
-        // 7. Grid Data Text (Penempatan Tulisannya Harus Sama yg Membedakan Jenis Produknya)
-        const gridStartY = 336;
-        const rowGap = 39;
-        const leftX = 150;
-        const rightX = 850;
-
-        const drawGridRow = (rowIdx: number, leftLabel: string, leftVal: string, rightLabel: string, rightVal: string) => {
-            const y = gridStartY + rowIdx * rowGap;
-
-            // Left side
-            ctx.textAlign = 'left';
-            ctx.textBaseline = 'middle';
-
-            ctx.font = 'normal 22px system-ui, -apple-system, sans-serif';
-            ctx.fillStyle = '#1e293b';
-            ctx.fillText(leftLabel, leftX, y);
-
-            const leftLabelW = ctx.measureText(leftLabel).width;
-            ctx.font = 'bold 22px system-ui, -apple-system, sans-serif';
-            let safeLeftVal = leftVal;
-            if (safeLeftVal.length > 22) safeLeftVal = safeLeftVal.slice(0, 20) + '..';
-            ctx.fillText(safeLeftVal, leftX + leftLabelW, y);
-
-            // Right side (right aligned)
-            if (rightLabel) {
-                ctx.textAlign = 'right';
-                ctx.font = 'bold 22px system-ui, -apple-system, sans-serif';
-                let safeRightVal = rightVal;
-                if (safeRightVal.length > 24) safeRightVal = safeRightVal.slice(0, 22) + '..';
-                ctx.fillText(safeRightVal, rightX, y);
-
-                const rightValW = ctx.measureText(safeRightVal).width;
-                ctx.font = 'normal 22px system-ui, -apple-system, sans-serif';
-                ctx.fillText(rightLabel, rightX - rightValW, y);
-            } else {
-                ctx.textAlign = 'right';
-                ctx.font = 'bold 22px system-ui, -apple-system, sans-serif';
-                let safeRightVal = rightVal;
-                if (safeRightVal.length > 28) safeRightVal = safeRightVal.slice(0, 26) + '..';
-                ctx.fillText(safeRightVal, rightX, y);
+        // 2. Cek dari nomor target / phone jika berupa nomor telepon
+        if (!waPhoto) {
+            const candidatePhone = data.targetPhone || data.customerPhone || data.phone || data.whatsapp || data.target || data.no;
+            if (candidatePhone) {
+                const cleanPhone = cleanWaPhone(String(candidatePhone));
+                if (cleanPhone && db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) {
+                    waPhoto = db.waProfilePhotos[cleanPhone];
+                } else if (cleanPhone && typeof waSocket !== "undefined" && waSocket) {
+                    try {
+                        const jid = `${cleanPhone}@s.whatsapp.net`;
+                        const fetched = await waSocket.profilePictureUrl(jid, "image").catch(() => null);
+                        if (fetched) {
+                            waPhoto = fetched;
+                            if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                            db.waProfilePhotos[cleanPhone] = fetched;
+                            writeDB(db);
+                        }
+                    } catch (e) {}
+                }
             }
-        };
-
-        const targetId = String(data.target || data.no || '-');
-        const prodName = String(data.product || (typeof data.product === 'object' ? data.product?.product_name : '') || 'PLN 20.000');
-        const prodLower = prodName.toLowerCase();
-        const typeLower = String(data.type || '').toLowerCase();
-        const skuLower = String(data.sku || '').toLowerCase();
-
-        // Deteksi Kategori Produk & Penamaan Label Tujuan Khusus
-        const isGame = typeLower.includes('game') || 
-                       prodLower.includes('free fire') || 
-                       prodLower.includes('mobile legends') || 
-                       prodLower.includes('diamond') || 
-                       prodLower.includes('dm ') || 
-                       prodLower.includes('genshin') || 
-                       prodLower.includes('pubg') || 
-                       prodLower.includes('valorant') || 
-                       prodLower.includes('roblox') || 
-                       prodLower.includes('steam') || 
-                       prodLower.includes('point blank') || 
-                       skuLower.includes('game');
-
-        const isEmoney = typeLower.includes('e-money') || 
-                         typeLower.includes('emoney') || 
-                         typeLower.includes('ewallet') || 
-                         prodLower.includes('dana') || 
-                         prodLower.includes('gopay') || 
-                         prodLower.includes('ovo') || 
-                         prodLower.includes('shopeepay') || 
-                         prodLower.includes('linkaja') || 
-                         prodLower.includes('maxim') || 
-                         prodLower.includes('isaku');
-
-        const isPascabayar = typeLower.includes('pasca') || 
-                             prodLower.includes('pascabayar') || 
-                             prodLower.includes('tagihan') || 
-                             prodLower.includes('pdam') || 
-                             prodLower.includes('bpjs');
-
-        // Tentukan Label Target yang Tepat & Rapi
-        let targetLabel = 'No. Tujuan: ';
-        if (isPln) {
-            targetLabel = 'ID Pelanggan: ';
-        } else if (isGame) {
-            targetLabel = 'ID Tujuan Game: ';
-        } else if (isEmoney) {
-            targetLabel = 'No. Tujuan E-Money: ';
-        } else if (isPascabayar) {
-            targetLabel = 'ID Pelanggan: ';
-        } else {
-            targetLabel = 'Nomor Tujuan: ';
         }
 
-        if (isPln) {
-            // Row 1: Nama | ID Pelanggan
-            drawGridRow(0, 'Nama: ', memberName, targetLabel, targetId);
-            // Row 2: Nama Pel. | Order ID
-            drawGridRow(1, 'Nama Pel.: ', namaPlg || 'JAHRAH', 'Order ID: ', orderIdStr);
-            // Row 3: Gol/Daya | Tanggal
-            drawGridRow(2, 'Gol/Daya: ', golDaya || 'R1 / 000001300', 'Tanggal: ', formattedDate);
-            // Row 4: Pembelian | PLN 20.000
-            drawGridRow(3, 'Pembelian: ', '', '', prodName);
-        } else if (isPascabayar) {
-            // Pascabayar (PLN Pasca, PDAM, BPJS, dll)
-            drawGridRow(0, 'Nama: ', memberName, targetLabel, targetId);
-            drawGridRow(1, 'Nama Pel.: ', namaPlg || data.nama || '-', 'Order ID: ', orderIdStr);
-            drawGridRow(2, 'Tagihan: ', `Rp ${(data.tagihan || data.price || 0).toLocaleString('id-ID')}`, 'Tanggal: ', formattedDate);
-            drawGridRow(3, 'Pembelian: ', '', '', prodName);
-        } else if (isGame) {
-            // Produk Game (Free Fire, Mobile Legends, PUBG, dll)
-            drawGridRow(0, 'Nama: ', memberName, targetLabel, targetId);
-            drawGridRow(1, 'Status: ', isLunas ? 'Lunas' : 'Belum Lunas', 'Order ID: ', orderIdStr);
-            drawGridRow(2, 'Metode: ', isUtang ? 'Utang / Kasbon' : (data.method ? String(data.method).toUpperCase() : 'Saldo'), 'Tanggal: ', formattedDate);
-            drawGridRow(3, 'Item Game: ', '', '', prodName);
-        } else {
-            // Pulsa, Kuota Data, E-Money (DANA, Gopay, OVO, dll)
-            drawGridRow(0, 'Nama: ', memberName, targetLabel, targetId);
-            drawGridRow(1, 'Status: ', isLunas ? 'Lunas' : 'Belum Lunas', 'Order ID: ', orderIdStr);
-            drawGridRow(2, 'Metode: ', isUtang ? 'Utang / Kasbon' : (data.method ? String(data.method).toUpperCase() : 'Saldo'), 'Tanggal: ', formattedDate);
-            drawGridRow(3, 'Pembelian: ', '', '', prodName);
+        // 3. Cek dari Telegram ID jika ada member tertaut
+        if (!waPhoto && (data.userId || data.telegramId || data.tgChatId)) {
+            const tgId = data.userId || data.telegramId || data.tgChatId;
+            const m = db.members?.find((x: any) => isTelegramMatch(x.telegram, tgId, undefined));
+            if (m) {
+                const waDetails = await getCustomerWaDetails(m, tgId, data.no || data.target, data.nama);
+                if (waDetails?.waPhotoUrl) waPhoto = waDetails.waPhotoUrl;
+            }
         }
 
-        // 8. Divider: ———— TOKEN / SN ————
-        const dividerY = 494;
-        ctx.strokeStyle = '#c5a052';
-        ctx.lineWidth = 1.0;
-
-        ctx.beginPath();
-        ctx.moveTo(150, dividerY);
-        ctx.lineTo(850, dividerY);
-        ctx.stroke();
-
-        const divText = isPln ? 'TOKEN / SN' : ((data.type || '').includes('pasca') ? 'RINCIAN TAGIHAN' : 'SERIAL NUMBER / SN');
-        ctx.font = '500 15px system-ui, -apple-system, sans-serif';
-        const divTextW = ctx.measureText(divText).width + 30;
-
-        ctx.fillStyle = '#f9f5ed';
-        ctx.fillRect(500 - divTextW / 2, dividerY - 12, divTextW, 24);
-
-        ctx.fillStyle = '#475569';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(divText, 500, dividerY);
-
-        // 9. Token / SN Box
-        const boxX = 150;
-        const boxY = 522;
-        const boxW = 700;
-        const boxH = 120;
-        const boxR = 24;
-
-        ctx.save();
-        ctx.fillStyle = '#fffdfa';
-        roundRectPath(ctx, boxX, boxY, boxW, boxH, boxR);
-        ctx.fill();
-
-        ctx.strokeStyle = '#9c732a';
-        ctx.lineWidth = 3.2;
-        roundRectPath(ctx, boxX, boxY, boxW, boxH, boxR);
-        ctx.stroke();
-
-        ctx.strokeStyle = '#b88d3d';
-        ctx.lineWidth = 1.6;
-        roundRectPath(ctx, boxX + 6, boxY + 6, boxW - 12, boxH - 12, boxR - 6);
-        ctx.stroke();
-        ctx.restore();
-
-        // Token Text
-        let snDisplay = token;
-        if (!snDisplay || snDisplay === '-') snDisplay = data.sn || data.ref_id || 'TRANSAKSI DIPROSES';
-        const fontSize = snDisplay.length > 28 ? 32 : (snDisplay.length > 22 ? 38 : 44);
-        ctx.font = `bold ${fontSize}px system-ui, -apple-system, monospace`;
-        ctx.fillStyle = '#1c1917';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(snDisplay, 500, boxY + boxH / 2);
-
-        // 10. TOTAL BAYAR
-        const totalY = 690;
-        const amountVal = data.price || data.total || data.tagihan || 25000;
-        ctx.font = 'bold 36px system-ui, -apple-system, sans-serif';
-        ctx.fillStyle = '#0f172a';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(`TOTAL BAYAR Rp ${Number(amountVal).toLocaleString('id-ID')}`, 500, totalY);
-
-        if (!isLunas) {
-            ctx.font = 'normal 21px system-ui, -apple-system, sans-serif';
-            ctx.fillStyle = '#334155';
-            ctx.fillText('Segera selesaikan pembayaran', 500, totalY + 34);
+        // 4. Jika transaksi oleh Owner, ambil foto WA Owner
+        if (!waPhoto) {
+            const tgId = data.userId || data.telegramId || data.tgChatId;
+            if (db.owners?.includes(tgId) || db.owners?.includes(Number(tgId))) {
+                if (db.ownerWhatsapps && db.ownerWhatsapps.length > 0) {
+                    const ownerClean = cleanWaPhone(db.ownerWhatsapps[0]);
+                    if (db.waProfilePhotos && db.waProfilePhotos[ownerClean]) {
+                        waPhoto = db.waProfilePhotos[ownerClean];
+                    } else if (typeof waSocket !== "undefined" && waSocket) {
+                        try {
+                            const jid = `${ownerClean}@s.whatsapp.net`;
+                            const fetched = await waSocket.profilePictureUrl(jid, "image").catch(() => null);
+                            if (fetched) {
+                                waPhoto = fetched;
+                                if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                                db.waProfilePhotos[ownerClean] = fetched;
+                                writeDB(db);
+                            }
+                        } catch (e) {}
+                    }
+                }
+            }
         }
 
-        // 11. Footer notes
-        const footerStartY = 772;
-        const footerGap = 26;
+        // 5. Fallback ke foto WA apapun yang pernah tersimpan di cache database
+        if (!waPhoto && db.waProfilePhotos) {
+            const keys = Object.keys(db.waProfilePhotos);
+            if (keys.length > 0) {
+                waPhoto = db.waProfilePhotos[keys[keys.length - 1]];
+            }
+        }
 
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        const statusLower = (data.status || "").toString().toLowerCase().trim();
+        let methodLower = (data.method || data.metode || "").toString().toLowerCase().trim();
+        const isBelumLunas = statusLower.includes("tidak") || statusLower.includes("belum") || methodLower === "utang" || methodLower === "kasbon";
 
-        ctx.font = '500 18px system-ui, -apple-system, sans-serif';
-        ctx.fillStyle = '#1e293b';
-        ctx.fillText('Terima kasih telah berbelanja di E4 Store!', 500, footerStartY);
-
-        ctx.font = 'normal 17px system-ui, -apple-system, sans-serif';
-        ctx.fillStyle = '#334155';
-        ctx.fillText(`Cetak: ${formattedDate} | Kode: #${shortCode}`, 500, footerStartY + footerGap);
-        ctx.fillText(calText, 500, footerStartY + footerGap * 2);
-        ctx.fillText('Chuna - Asisten Imutmu siap bantu 24 jam!', 500, footerStartY + footerGap * 3);
-
-        return canvas.toBuffer('image/png');
+        return await generateRoyalStrukReceipt({
+            nama: data.nama || data.customerDisplayName || data.namaPlg || "Pelanggan",
+            status: isBelumLunas ? "TIDAK LUNAS" : "Lunas",
+            metode: (data.method || data.metode || (isBelumLunas ? "UTANG" : "CASH")).toString().toUpperCase(),
+            templateVariant: isBelumLunas ? "tidaklunas" : "lunas",
+            product: data.product || data.layanan || data.itemGame || data.pembelian || "",
+            target: data.target || data.no || data.customerNo || data.idTujuanGame || data.idPelanggan || "",
+            type: data.type || "",
+            sku: data.sku || "",
+            namaPlg: data.namaPlg || data.nama_pelanggan || "",
+            tarif: data.tarif || "",
+            daya: data.daya || "",
+            golDaya: data.golDaya || data.gol_daya || "",
+            kwh: data.kwh || "",
+            bulan: data.bulan || data.periode || "",
+            meter: data.meter || "",
+            lembar: data.lembar || data.lembar_tagihan || "",
+            orderId: data.orderId || data.id || data.ref_id || "",
+            tanggal: formattedDate,
+            date: txDate,
+            sn: data.sn || data.token || "",
+            totalBayar: Number(data.totalBayar || data.total || data.price || 0),
+            waPhotoUrl: waPhoto
+        });
     } catch (e: any) {
         console.error("Canvas receipt error:", e);
         return null;
@@ -1458,8 +718,22 @@ function saveWaProfile(rawJidOrPhone: string, pushName?: string | null) {
     }
 }
 
-async function getCustomerWaDetails(member: any, telegramUserId?: any, targetPhone?: string) {
+async function getCustomerWaDetails(member: any, telegramUserId?: any, targetPhone?: string, customerName?: string) {
     let rawWa = targetPhone || member?.whatsapp || (telegramUserId ? (registeredUsers[telegramUserId]?.wa || registeredUsers[Number(telegramUserId)]?.wa) : '') || '';
+    
+    // Cek nomor WhatsApp dari nama member offline
+    if (!rawWa && customerName) {
+        const cLower = String(customerName).trim().toLowerCase();
+        const matchedMember = (db.members || []).find((m: any) => m.name && m.name.trim().toLowerCase() === cLower);
+        if (matchedMember && matchedMember.whatsapp) {
+            rawWa = matchedMember.whatsapp;
+            if (!member) member = matchedMember;
+        }
+    }
+
+    if (!rawWa && telegramUserId && (db.owners?.includes(telegramUserId) || db.owners?.includes(Number(telegramUserId)))) {
+        rawWa = (db.ownerWhatsapps && db.ownerWhatsapps[0]) || '';
+    }
     let waPhone = rawWa || '-';
     let waProfile = '-';
     let waPhotoUrl: string | null = null;
@@ -1493,6 +767,22 @@ async function getCustomerWaDetails(member: any, telegramUserId?: any, targetPho
                     writeDB(db);
                 }
             } catch (e) {}
+        }
+    }
+
+    // 3. Fallback: jika belum dapat, gunakan foto WhatsApp yang tersimpan di cache database
+    if (!waPhotoUrl && db.waProfilePhotos) {
+        if (telegramUserId && (db.owners?.includes(telegramUserId) || db.owners?.includes(Number(telegramUserId)))) {
+            const ownerClean = cleanWaPhone((db.ownerWhatsapps && db.ownerWhatsapps[0]) || '');
+            if (ownerClean && db.waProfilePhotos[ownerClean]) {
+                waPhotoUrl = db.waProfilePhotos[ownerClean];
+            }
+        }
+        if (!waPhotoUrl) {
+            const keys = Object.keys(db.waProfilePhotos);
+            if (keys.length > 0) {
+                waPhotoUrl = db.waProfilePhotos[keys[keys.length - 1]];
+            }
         }
     }
 
@@ -4900,7 +4190,44 @@ Chuna – E4 Store`;
   app.get("/api/members/offline", (req, res) => {
     // Return all members, or just those added manually (without telegram ID)
     const offlineMembers = members.filter(m => !m.telegram || !m.telegram.startsWith('ID:'));
-    res.json({ success: true, members: offlineMembers });
+    const enriched = offlineMembers.map(m => {
+      const cleanPhone = cleanWaPhone(m.whatsapp || '');
+      const photoUrl = (cleanPhone && db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) ? db.waProfilePhotos[cleanPhone] : null;
+      return {
+        ...m,
+        photoUrl
+      };
+    });
+    res.json({ success: true, members: enriched });
+  });
+
+  app.post("/api/members/:id/sync-photo", async (req, res) => {
+    const { id } = req.params;
+    const member = members.find(m => m.id === id);
+    if (!member) return res.status(404).json({ success: false, error: 'Member tidak ditemukan' });
+    const cleanPhone = cleanWaPhone(member.whatsapp || '');
+    if (!cleanPhone) return res.status(400).json({ success: false, error: 'Nomor WhatsApp member tidak valid' });
+
+    let fetchedPhoto = null;
+    if (waSocket) {
+      try {
+        const jid = `${cleanPhone}@s.whatsapp.net`;
+        fetchedPhoto = await waSocket.profilePictureUrl(jid, 'image').catch(() => null);
+      } catch (e) {}
+    }
+
+    if (fetchedPhoto) {
+      if (!db.waProfilePhotos) db.waProfilePhotos = {};
+      db.waProfilePhotos[cleanPhone] = fetchedPhoto;
+      writeDB(db);
+      return res.json({ success: true, photoUrl: fetchedPhoto });
+    }
+
+    if (db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) {
+      return res.json({ success: true, photoUrl: db.waProfilePhotos[cleanPhone] });
+    }
+
+    res.json({ success: false, error: 'Foto WhatsApp tidak dapat diambil (WhatsApp bot sedang offline atau privasi profil nomor disembunyikan).' });
   });
 
   app.get("/api/members", (req, res) => {

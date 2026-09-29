@@ -33,7 +33,33 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
                 onClick={() => setSelectedMember(m)}
               >
                 <td className="px-6 py-4 text-sm font-mono text-slate-400">{m.id}</td>
-                <td className="px-6 py-4 text-sm text-slate-200">{m.name}</td>
+                <td className="px-6 py-4 text-sm text-slate-200">
+                  <div className="flex items-center gap-3">
+                    {m.photoUrl ? (
+                      <img 
+                        src={m.photoUrl} 
+                        alt={m.name} 
+                        className="w-8 h-8 rounded-full object-cover ring-2 ring-emerald-500/60" 
+                      />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-semibold text-slate-300">
+                        {(m.name || 'MB').slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
+                    <div>
+                      <span className="font-medium text-white">{m.name}</span>
+                      {m.photoUrl ? (
+                        <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-normal">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-pulse"></span> Foto WA Terhubung
+                        </span>
+                      ) : (
+                        <span className="block text-[10px] text-slate-400 font-normal">
+                          WA: {m.whatsapp}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </td>
                 <td className="px-6 py-4 text-sm text-slate-400">{m.whatsapp}</td>
                 <td className="px-6 py-4 text-sm text-sky-400">{m.type || 'Biasa'}</td>
               </tr>
@@ -50,27 +76,67 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
       {selectedMember && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md p-6">
-            <h3 className="text-lg font-semibold text-white mb-4">Detail Member Offline</h3>
-            <div className="space-y-3 text-sm">
-              <div className="flex justify-between">
-                <span className="text-slate-400">ID Registrasi:</span>
-                <span className="text-slate-200 font-mono">{selectedMember.id}</span>
+            <div className="flex items-center gap-4 mb-6">
+              {selectedMember.photoUrl ? (
+                <img 
+                  src={selectedMember.photoUrl} 
+                  alt={selectedMember.name} 
+                  className="w-16 h-16 rounded-full object-cover ring-4 ring-emerald-500/50" 
+                />
+              ) : (
+                <div className="w-16 h-16 rounded-full bg-slate-800 border-2 border-slate-600 flex items-center justify-center text-xl font-bold text-slate-300">
+                  {(selectedMember.name || 'MB').slice(0, 2).toUpperCase()}
+                </div>
+              )}
+              <div>
+                <h3 className="text-lg font-semibold text-white">{selectedMember.name}</h3>
+                <p className="text-xs text-slate-400 font-mono">{selectedMember.id}</p>
+                {selectedMember.photoUrl ? (
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 mt-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Foto WhatsApp Aktif
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/30 mt-1">
+                    Belum Terhubung Foto WA
+                  </span>
+                )}
               </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Username:</span>
-                <span className="text-slate-200">{selectedMember.name}</span>
-              </div>
+            </div>
+
+            <div className="space-y-3 text-sm bg-slate-800/40 p-4 rounded-xl border border-slate-700/50">
               <div className="flex justify-between">
                 <span className="text-slate-400">Nomor WhatsApp:</span>
-                <span className="text-slate-200">{selectedMember.whatsapp}</span>
+                <span className="text-slate-200 font-medium">{selectedMember.whatsapp}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">Tipe Akun:</span>
                 <span className="text-sky-400 font-medium">{selectedMember.type || 'Biasa'}</span>
               </div>
             </div>
+
+            <div className="mt-4">
+              <button
+                onClick={() => {
+                  fetch(`/api/members/${selectedMember.id}/sync-photo`, { method: 'POST' })
+                    .then(res => res.json())
+                    .then(data => {
+                      if (data.success && data.photoUrl) {
+                        alert("Foto profil WhatsApp berhasil diambil!");
+                        setSelectedMember({ ...selectedMember, photoUrl: data.photoUrl });
+                        setMembers(members.map(m => m.id === selectedMember.id ? { ...m, photoUrl: data.photoUrl } : m));
+                      } else {
+                        alert(data.error || "Gagal mengambil foto");
+                      }
+                    })
+                    .catch(() => alert("Gagal menghubungi server"));
+                }}
+                className="w-full py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 font-medium hover:bg-emerald-500/25 transition-colors flex items-center justify-center gap-2 text-sm"
+              >
+                🔄 Ambil / Sinkron Foto dari WhatsApp
+              </button>
+            </div>
             
-                        <div className="mt-8 flex gap-3">
+            <div className="mt-6 flex gap-3">
               <button 
                 onClick={() => {
                   if (confirm("Apakah Anda yakin ingin menghapus member ini?")) {
