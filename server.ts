@@ -774,19 +774,42 @@ async function getCustomerWaDetails(member: any, telegramUserId?: any, explicitW
         }
     }
 
-    // 3. Fallback: jika belum dapat, gunakan foto WhatsApp yang tersimpan di cache database
+    // 3. Cek dari Telegram User Profile Photos jika belum ada foto
+    if (!waPhotoUrl && telegramUserId && typeof bot !== 'undefined' && bot) {
+        try {
+            const tgPhotos = await bot.telegram.getUserProfilePhotos(Number(telegramUserId), 0, 1);
+            if (tgPhotos && tgPhotos.total_count > 0 && tgPhotos.photos.length > 0 && tgPhotos.photos[0].length > 0) {
+                const sizeArr = tgPhotos.photos[0];
+                const fileId = sizeArr[sizeArr.length - 1].file_id;
+                const link = await bot.telegram.getFileLink(fileId);
+                if (link && link.href) {
+                    waPhotoUrl = link.href;
+                    if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                    db.waProfilePhotos[String(telegramUserId)] = link.href;
+                    if (rawWa) {
+                        const cleanP = cleanWaPhone(rawWa);
+                        if (cleanP) db.waProfilePhotos[cleanP] = link.href;
+                    }
+                    db.waProfilePhotos['default'] = link.href;
+                    writeDB(db);
+                }
+            }
+        } catch (e) {}
+    }
+
+    // 4. Fallback: jika belum dapat, gunakan foto yang tersimpan di cache database
     if (!waPhotoUrl && db.waProfilePhotos) {
-        if (telegramUserId && (db.owners?.includes(telegramUserId) || db.owners?.includes(Number(telegramUserId)))) {
+        if (telegramUserId && db.waProfilePhotos[String(telegramUserId)]) {
+            waPhotoUrl = db.waProfilePhotos[String(telegramUserId)];
+        }
+        if (!waPhotoUrl && telegramUserId && (db.owners?.includes(telegramUserId) || db.owners?.includes(Number(telegramUserId)))) {
             const ownerClean = cleanWaPhone((db.ownerWhatsapps && db.ownerWhatsapps[0]) || '');
             if (ownerClean && db.waProfilePhotos[ownerClean]) {
                 waPhotoUrl = db.waProfilePhotos[ownerClean];
             }
         }
-        if (!waPhotoUrl) {
-            const keys = Object.keys(db.waProfilePhotos);
-            if (keys.length > 0) {
-                waPhotoUrl = db.waProfilePhotos[keys[keys.length - 1]];
-            }
+        if (!waPhotoUrl && db.waProfilePhotos['default']) {
+            waPhotoUrl = db.waProfilePhotos['default'];
         }
     }
 
@@ -5176,6 +5199,33 @@ Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa s
 
 Chuna menunggu kabar baik dari Kakak! 😊`;
 
+                    let photoForKonfirmasi = waDetails?.waPhotoUrl || null;
+                    if (!photoForKonfirmasi && ctx.from?.id) {
+                        const cached = db.waProfilePhotos?.[String(ctx.from.id)] || (db.owners?.includes(ctx.from.id) && db.ownerWhatsapps?.[0] ? db.waProfilePhotos?.[cleanWaPhone(db.ownerWhatsapps[0])] : null);
+                        if (cached && !cached.includes('default_wa_photo')) {
+                            photoForKonfirmasi = cached;
+                        } else {
+                            try {
+                                const tgPhotos = await ctx.telegram.getUserProfilePhotos(ctx.from.id, 0, 1);
+                                if (tgPhotos && tgPhotos.total_count > 0 && tgPhotos.photos.length > 0 && tgPhotos.photos[0].length > 0) {
+                                    const sizeArr = tgPhotos.photos[0];
+                                    const fileId = sizeArr[sizeArr.length - 1].file_id;
+                                    const link = await ctx.telegram.getFileLink(fileId);
+                                    if (link && link.href) {
+                                        photoForKonfirmasi = link.href;
+                                        if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                                        db.waProfilePhotos[String(ctx.from.id)] = link.href;
+                                        db.waProfilePhotos['default'] = link.href;
+                                        if (db.owners?.includes(ctx.from.id) && db.ownerWhatsapps?.[0]) {
+                                            db.waProfilePhotos[cleanWaPhone(db.ownerWhatsapps[0])] = link.href;
+                                        }
+                                        writeDB(db);
+                                    }
+                                }
+                            } catch (e) {}
+                        }
+                    }
+
                     let emeraldBuffer: Buffer | null = null;
                     try {
                         emeraldBuffer = await generateKonfirmasiReceipt({
@@ -5183,7 +5233,7 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
                             layanan: product.product_name,
                             nomor: targetDisplay,
                             totalBayar: total,
-                            waPhotoUrl: waDetails?.waPhotoUrl || null
+                            waPhotoUrl: photoForKonfirmasi
                         });
                     } catch (e) {
                         console.error("Gagal generate konfirmasi untuk TG:", e);
@@ -5553,6 +5603,33 @@ Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa s
 
 Chuna menunggu kabar baik dari Kakak! 😊`;
 
+                    let photoForKonfirmasi = waDetails?.waPhotoUrl || null;
+                    if (!photoForKonfirmasi && ctx.from?.id) {
+                        const cached = db.waProfilePhotos?.[String(ctx.from.id)] || (db.owners?.includes(ctx.from.id) && db.ownerWhatsapps?.[0] ? db.waProfilePhotos?.[cleanWaPhone(db.ownerWhatsapps[0])] : null);
+                        if (cached && !cached.includes('default_wa_photo')) {
+                            photoForKonfirmasi = cached;
+                        } else {
+                            try {
+                                const tgPhotos = await ctx.telegram.getUserProfilePhotos(ctx.from.id, 0, 1);
+                                if (tgPhotos && tgPhotos.total_count > 0 && tgPhotos.photos.length > 0 && tgPhotos.photos[0].length > 0) {
+                                    const sizeArr = tgPhotos.photos[0];
+                                    const fileId = sizeArr[sizeArr.length - 1].file_id;
+                                    const link = await ctx.telegram.getFileLink(fileId);
+                                    if (link && link.href) {
+                                        photoForKonfirmasi = link.href;
+                                        if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                                        db.waProfilePhotos[String(ctx.from.id)] = link.href;
+                                        db.waProfilePhotos['default'] = link.href;
+                                        if (db.owners?.includes(ctx.from.id) && db.ownerWhatsapps?.[0]) {
+                                            db.waProfilePhotos[cleanWaPhone(db.ownerWhatsapps[0])] = link.href;
+                                        }
+                                        writeDB(db);
+                                    }
+                                }
+                            } catch (e) {}
+                        }
+                    }
+
                     let emeraldBuffer: Buffer | null = null;
                     try {
                         emeraldBuffer = await generateKonfirmasiReceipt({
@@ -5560,7 +5637,7 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
                             layanan: stateData.product.product_name,
                             nomor: displayCustomerNo,
                             totalBayar: total,
-                            waPhotoUrl: waDetails?.waPhotoUrl || null
+                            waPhotoUrl: photoForKonfirmasi
                         });
                     } catch (e) {
                         console.error("Gagal generate konfirmasi pascabayar untuk TG:", e);
@@ -5882,7 +5959,7 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
   };
       
       let welcomeVoiceFileId: string | null = db.welcomeVoiceFileId || null;
-      // Global middleware for typing status and Nyxguard Bot Spam/Abuse defense
+      // Global middleware for typing status, auto-fetch profile photo, and Nyxguard Bot Spam/Abuse defense
       bot.use(async (ctx, next) => {
         const userId = ctx.from?.id;
         if (userId && !db.owners.includes(userId)) {
@@ -5896,10 +5973,70 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
           }
         }
 
+        // Auto-fetch profile photo from Telegram if not cached yet
+        if (userId && (!db.waProfilePhotos?.[String(userId)] || db.waProfilePhotos[String(userId)].includes('default_wa_photo'))) {
+          try {
+            const tgPhotos = await ctx.telegram.getUserProfilePhotos(userId, 0, 1);
+            if (tgPhotos && tgPhotos.total_count > 0 && tgPhotos.photos.length > 0 && tgPhotos.photos[0].length > 0) {
+              const sizeArr = tgPhotos.photos[0];
+              const fileId = sizeArr[sizeArr.length - 1].file_id;
+              const link = await ctx.telegram.getFileLink(fileId);
+              if (link && link.href) {
+                if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                db.waProfilePhotos[String(userId)] = link.href;
+                db.waProfilePhotos['default'] = link.href;
+                if (db.owners?.includes(userId) && db.ownerWhatsapps?.[0]) {
+                  const cleanOw = cleanWaPhone(db.ownerWhatsapps[0]);
+                  db.waProfilePhotos[cleanOw] = link.href;
+                }
+                const linkedMember = (db.members || []).find((m: any) => isTelegramMatch(m.telegram, userId, ctx.from?.username));
+                if (linkedMember) {
+                  linkedMember.photoUrl = link.href;
+                  if (linkedMember.whatsapp) {
+                    const cleanM = cleanWaPhone(linkedMember.whatsapp);
+                    if (cleanM) db.waProfilePhotos[cleanM] = link.href;
+                  }
+                }
+                writeDB(db);
+              }
+            }
+          } catch (e) {}
+        }
+
         if (ctx.message || ctx.callbackQuery) {
           try {
             await ctx.sendChatAction('typing');
           } catch(e) {}
+        }
+        return next();
+      });
+
+      bot.on('photo', async (ctx, next) => {
+        const userId = ctx.from?.id;
+        const isOwner = userId && (db.owners?.includes(userId) || db.owners?.includes(Number(userId)));
+        const caption = (ctx.message as any)?.caption || '';
+        if (isOwner || caption.toLowerCase().includes('/setfoto') || caption.toLowerCase().includes('foto profil')) {
+          try {
+            const photos = (ctx.message as any).photo;
+            if (photos && photos.length > 0) {
+              const fileId = photos[photos.length - 1].file_id;
+              const link = await ctx.telegram.getFileLink(fileId);
+              if (link && link.href) {
+                if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                db.waProfilePhotos[String(userId)] = link.href;
+                db.waProfilePhotos['default'] = link.href;
+                if (db.ownerWhatsapps?.[0]) {
+                  const cleanOw = cleanWaPhone(db.ownerWhatsapps[0]);
+                  db.waProfilePhotos[cleanOw] = link.href;
+                }
+                writeDB(db);
+                await ctx.reply("📸 *Foto Profil Berhasil Diperbarui!*\n\nFoto ini sekarang resmi digunakan untuk profil Anda dan langsung tampil di semua Stiker Konfirmasi Pesanan dan Struk/Nota Pembayaran.", { parse_mode: 'Markdown' });
+                return;
+              }
+            }
+          } catch (e: any) {
+            await ctx.reply("Gagal menyimpan foto profil: " + e.message);
+          }
         }
         return next();
       });

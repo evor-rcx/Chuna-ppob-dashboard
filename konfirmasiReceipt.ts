@@ -151,15 +151,6 @@ export async function generateKonfirmasiReceipt(data: KonfirmasiData): Promise<B
         }
     }
 
-    if (!userAvatarImg) {
-        try {
-            const defPath = path.join(process.cwd(), 'public', 'default_wa_photo.png');
-            if (fs.existsSync(defPath)) {
-                userAvatarImg = await loadImage(defPath);
-            }
-        } catch (e) {}
-    }
-
     // Base background di bawah lingkaran
     ctx.fillStyle = '#060c24';
     ctx.fillRect(0, 0, width, height);
@@ -186,21 +177,13 @@ export async function generateKonfirmasiReceipt(data: KonfirmasiData): Promise<B
             avatarRadius * 2
         );
     } else {
-        // Fallback realistic user silhouette with WhatsApp green accents (NO LETTERS / JANGAN PAKAI HURUF)
+        // Latar gelap elegan serasi dengan tema neon cyberpunk
         const bgGrad = ctx.createLinearGradient(avatarCenterX - avatarRadius, avatarCenterY - avatarRadius, avatarCenterX + avatarRadius, avatarCenterY + avatarRadius);
-        bgGrad.addColorStop(0, '#0f382a');
-        bgGrad.addColorStop(0.5, '#128c7e');
-        bgGrad.addColorStop(1, '#075e54');
+        bgGrad.addColorStop(0, '#090f26');
+        bgGrad.addColorStop(0.5, '#040714');
+        bgGrad.addColorStop(1, '#020308');
         ctx.fillStyle = bgGrad;
         ctx.fillRect(avatarCenterX - avatarRadius, avatarCenterY - avatarRadius, avatarRadius * 2, avatarRadius * 2);
-
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.arc(avatarCenterX, avatarCenterY - avatarRadius * 0.15, avatarRadius * 0.42, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.ellipse(avatarCenterX, avatarCenterY + avatarRadius * 0.95, avatarRadius * 0.8, avatarRadius * 0.55, 0, 0, Math.PI * 2);
-        ctx.fill();
     }
     ctx.restore();
 
