@@ -24,10 +24,13 @@ console.error = function(...args) {
 };
 
 import { fetchTiktok } from "./downloader";
-import { generateDebtSettlementReceipt } from "./debtReceipt";
-import { generateVintageTagihanReceipt } from "./debtTagihanReceipt";
+import { generateDebtSettlementReceipt, formatDebtSettlementMessage } from "./debtReceipt";
+import { generateVintageTagihanReceipt, formatTagihanMessage } from "./debtTagihanReceipt";
+import { generateRoyalStrukReceipt, formatRoyalStrukMessage } from "./royalStrukReceipt";
 import { generateOrderConfirmationSticker } from "./stickerConfirmation";
 import { generateEmeraldConfirmationImage } from "./emeraldConfirmationReceipt";
+import { generateKonfirmasiReceipt, formatKonfirmasiMessage } from "./konfirmasiReceipt";
+import { generatePascabayarTagihanReceipt, formatPascabayarTagihanMessage } from "./pascabayarTagihanReceipt";
 
 import path from 'path';
 
@@ -532,9 +535,9 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
         const formattedDate = `${dateStr} WITA`;
         const calText = getCalendarInfo(txDate);
 
-        // If type is tagihan, use the luxury dark royal navy & gold Cek Tagihan layout
+        // If type is tagihan, use the new official E4 Store Cek Tagihan layout (Picsart_26-09-28_23-03-28-209.png)
         if (type === 'tagihan') {
-            return await generateTagihanCanvas(data, txDate, formattedDate, calText);
+            return await generatePascabayarTagihanReceipt({ ...data, date: txDate });
         }
 
         const width = 1000;
@@ -1960,14 +1963,18 @@ let isRequestingPairingCode = false;
 
 export async function generateCanvasDebtReceipt(member: any, utangTxs: any[]): Promise<Buffer | null> {
     try {
-        let memberName = member?.name || 'Kakak';
+        let memberName = member?.name?.trim() || '';
         let waPhone = member?.whatsapp || '';
         let waPhotoUrl: string | null = null;
 
         try {
             const waDetails = await getCustomerWaDetails(member);
-            if (waDetails.waProfile && waDetails.waProfile !== '-' && !isPhoneNumberOrEmpty(waDetails.waProfile)) {
-                memberName = waDetails.waProfile;
+            if (!memberName || isPhoneNumberOrEmpty(memberName)) {
+                if (waDetails.waProfile && waDetails.waProfile !== '-' && !isPhoneNumberOrEmpty(waDetails.waProfile)) {
+                    memberName = waDetails.waProfile;
+                } else {
+                    memberName = 'Kakak';
+                }
             }
             if (waDetails.waPhone && waDetails.waPhone !== '-') waPhone = waDetails.waPhone;
             if (waDetails.waPhotoUrl) waPhotoUrl = waDetails.waPhotoUrl;
@@ -4823,7 +4830,17 @@ Chuna – E4 Store`;
       const today = new Date();
       const tglBayarStr = `${today.getDate()} ${months[today.getMonth()]} ${today.getFullYear()}`;
 
-      const msg = `✅ LUNAS TOTAL! 🎉\nHalo Kak ${nama},\nDengan senang hati kami informasikan bahwa pembayaran utang kakak telah sukses dan lunas! Berikut detailnya ya:`;
+      const msg = formatDebtSettlementMessage({
+        nama: `Kak ${nama}`,
+        isLunasTotal: true,
+        products: [{ name: tx.product, price: tx.price }],
+        totalDebt: tx.price,
+        dibayarkan: tx.price,
+        kembalian: 0,
+        sisaUtang: 0,
+        tglUtang: tglUtangStr,
+        tglBayar: tglBayarStr
+      });
       
       let waPhotoUrl: string | null = null;
       try {
@@ -4870,7 +4887,7 @@ Chuna – E4 Store`;
           await new Promise(r => setTimeout(r, 1200));
           await waSocket.sendPresenceUpdate('paused', jid);
           if (imgBuffer) {
-            await waSocket.sendMessage(jid, { image: imgBuffer, caption: msg });
+            await waSocket.sendMessage(jid, { image: imgBuffer, caption: msg, mimetype: 'image/png' });
           } else {
             await waSocket?.sendMessage(jid, { text: msg });
           }
@@ -5791,22 +5808,29 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
 
                     let emeraldBuffer: Buffer | null = null;
                     try {
-                        emeraldBuffer = await generateEmeraldConfirmationImage({
-                            customerName: customerDisplayName,
-                            serviceName: product.product_name,
-                            targetNo: targetDisplay,
+                        emeraldBuffer = await generateKonfirmasiReceipt({
+                            nama: customerDisplayName || 'E4STORE',
+                            layanan: product.product_name,
+                            nomor: targetDisplay,
                             totalBayar: total,
                             waPhotoUrl: waDetails?.waPhotoUrl || null
                         });
                     } catch (e) {
-                        console.error("Gagal generate emerald confirmation untuk TG:", e);
+                        console.error("Gagal generate konfirmasi untuk TG:", e);
                     }
+
+                    const konfirmasiCaption = formatKonfirmasiMessage({
+                        nama: customerDisplayName || 'E4STORE',
+                        layanan: product.product_name,
+                        nomor: targetDisplay,
+                        totalBayar: total
+                    });
 
                     let tgMsg;
                     if (emeraldBuffer) {
-                        tgMsg = await ctx.replyWithPhoto({ source: emeraldBuffer }, { caption: msg });
+                        tgMsg = await ctx.replyWithPhoto({ source: emeraldBuffer }, { caption: konfirmasiCaption });
                     } else {
-                        tgMsg = await ctx.reply(msg);
+                        tgMsg = await ctx.reply(konfirmasiCaption);
                     }
                     tgMsgId = tgMsg.message_id;
                 } else if (status === 'Sukses') {
@@ -5950,21 +5974,28 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
 
                             let emeraldBuffer: Buffer | null = null;
                             try {
-                                emeraldBuffer = await generateEmeraldConfirmationImage({
-                                    customerName: customerDisplayName,
-                                    serviceName: product.product_name,
-                                    targetNo: targetDisplay,
+                                emeraldBuffer = await generateKonfirmasiReceipt({
+                                    nama: customerDisplayName || 'E4STORE',
+                                    layanan: product.product_name,
+                                    nomor: targetDisplay,
                                     totalBayar: total,
                                     waPhotoUrl: waDetails?.waPhotoUrl || null
                                 });
                             } catch (e) {
-                                console.error("Gagal generate emerald confirmation untuk WA:", e);
+                                console.error("Gagal generate konfirmasi untuk WA:", e);
                             }
 
+                            const konfirmasiCaption = formatKonfirmasiMessage({
+                                nama: customerDisplayName || 'E4STORE',
+                                layanan: product.product_name,
+                                nomor: targetDisplay,
+                                totalBayar: total
+                            });
+
                             if (emeraldBuffer) {
-                                waMsg = await waSocket.sendMessage(jid, { image: emeraldBuffer, caption: waPendingMsg });
+                                waMsg = await waSocket.sendMessage(jid, { image: emeraldBuffer, caption: konfirmasiCaption });
                             } else {
-                                waMsg = await waSocket.sendMessage(jid, { text: waPendingMsg });
+                                waMsg = await waSocket.sendMessage(jid, { text: konfirmasiCaption });
                             }
                         } else if (typeof notaBuffer !== 'undefined' && notaBuffer) {
                             waMsg = await waSocket.sendMessage(jid, { image: notaBuffer, caption: msg });
@@ -6155,22 +6186,29 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
 
                     let emeraldBuffer: Buffer | null = null;
                     try {
-                        emeraldBuffer = await generateEmeraldConfirmationImage({
-                            customerName: customerDisplayName,
-                            serviceName: stateData.product.product_name,
-                            targetNo: displayCustomerNo,
+                        emeraldBuffer = await generateKonfirmasiReceipt({
+                            nama: customerDisplayName || 'E4STORE',
+                            layanan: stateData.product.product_name,
+                            nomor: displayCustomerNo,
                             totalBayar: total,
                             waPhotoUrl: waDetails?.waPhotoUrl || null
                         });
                     } catch (e) {
-                        console.error("Gagal generate emerald confirmation pascabayar untuk TG:", e);
+                        console.error("Gagal generate konfirmasi pascabayar untuk TG:", e);
                     }
+
+                    const konfirmasiCaption = formatKonfirmasiMessage({
+                        nama: customerDisplayName || 'E4STORE',
+                        layanan: stateData.product.product_name,
+                        nomor: displayCustomerNo,
+                        totalBayar: total
+                    });
 
                     let tgMsg;
                     if (emeraldBuffer) {
-                        tgMsg = await ctx.replyWithPhoto({ source: emeraldBuffer }, { caption: msg });
+                        tgMsg = await ctx.replyWithPhoto({ source: emeraldBuffer }, { caption: konfirmasiCaption });
                     } else {
-                        tgMsg = await ctx.reply(msg);
+                        tgMsg = await ctx.reply(konfirmasiCaption);
                     }
                     tgMsgId = tgMsg.message_id;
                 } else if (status === 'Sukses') {
@@ -6314,21 +6352,28 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
 
                             let emeraldBuffer: Buffer | null = null;
                             try {
-                                emeraldBuffer = await generateEmeraldConfirmationImage({
-                                    customerName: customerDisplayName,
-                                    serviceName: stateData.product.product_name,
-                                    targetNo: displayCustomerNo,
+                                emeraldBuffer = await generateKonfirmasiReceipt({
+                                    nama: customerDisplayName || 'E4STORE',
+                                    layanan: stateData.product.product_name,
+                                    nomor: displayCustomerNo,
                                     totalBayar: total,
                                     waPhotoUrl: waDetails?.waPhotoUrl || null
                                 });
                             } catch (e) {
-                                console.error("Gagal generate emerald confirmation pascabayar untuk WA:", e);
+                                console.error("Gagal generate konfirmasi pascabayar untuk WA:", e);
                             }
 
+                            const konfirmasiCaption = formatKonfirmasiMessage({
+                                nama: customerDisplayName || 'E4STORE',
+                                layanan: stateData.product.product_name,
+                                nomor: displayCustomerNo,
+                                totalBayar: total
+                            });
+
                             if (emeraldBuffer) {
-                                waMsg = await waSocket.sendMessage(jid, { image: emeraldBuffer, caption: waPendingMsg });
+                                waMsg = await waSocket.sendMessage(jid, { image: emeraldBuffer, caption: konfirmasiCaption });
                             } else {
-                                waMsg = await waSocket.sendMessage(jid, { text: waPendingMsg });
+                                waMsg = await waSocket.sendMessage(jid, { text: konfirmasiCaption });
                             }
                         } else if (typeof notaBuffer !== 'undefined' && notaBuffer) {
                             waMsg = await waSocket.sendMessage(jid, { image: notaBuffer, caption: msg });
@@ -7536,20 +7581,33 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
         
         const buttons = [];
         for (const memberId in utangByMember) {
-            const member = members.find(m => m.id === memberId);
-            const rawWa = (member?.whatsapp || "").replace(/\D/g, "");
+            let member = members.find(m => m.id === memberId || m.name === memberId);
+            if (!member) {
+                const cleanId = cleanWaPhone(memberId);
+                if (cleanId) {
+                    member = members.find(m => cleanWaPhone(m.whatsapp || '') === cleanId);
+                }
+            }
+            const rawWa = (member?.whatsapp || (cleanWaPhone(memberId) ? memberId : "")).replace(/\D/g, "");
             const cleanWa = rawWa.startsWith("0") ? "62" + rawWa.substring(1) : rawWa;
             const waProfileName = (cleanWa && db.waProfiles && db.waProfiles[cleanWa]) || member?.waProfileName;
             const isOwner = cleanWa && isOwnerWhatsapp(cleanWa);
-            const nama = isOwner ? "Selamat datang Owner" : (waProfileName || (cleanWa ? `+${cleanWa}` : memberId));
-            const wa = member ? (member.whatsapp || "-") : "-";
+            const memberName = member?.name?.trim();
+            const nama = isOwner 
+                ? "Selamat datang Owner" 
+                : (memberName && !isPhoneNumberOrEmpty(memberName)
+                    ? memberName 
+                    : (waProfileName && !isPhoneNumberOrEmpty(waProfileName)
+                        ? waProfileName 
+                        : (cleanWa ? `+${cleanWa}` : memberId)));
+            const wa = member?.whatsapp || (cleanWa ? `0${cleanWa.replace(/^62/, '')}` : "-");
             buttons.push([{
                 text: `👤 ${nama} (${wa})`,
                 callback_data: `cek_utang_${memberId}`
             }]);
         }
         
-        await ctx.reply("📒 *DAFTAR MEMBER BERHUTANG*Silakan pilih member untuk melihat detail utang:", {
+        await ctx.reply("📒 *DAFTAR MEMBER BERHUTANG*\nSilakan pilih member untuk melihat detail utang:", {
             parse_mode: 'Markdown',
             reply_markup: {
                 inline_keyboard: buttons
@@ -7560,13 +7618,26 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
       bot.action(/^cek_utang_(.+)$/, async (ctx) => {
           if (!db.owners.includes(ctx.from?.id)) return;
           const memberId = ctx.match[1];
-          const member = members.find(m => m.id === memberId);
-          const rawWa = (member?.whatsapp || "").replace(/\D/g, "");
+          let member = members.find(m => m.id === memberId || m.name === memberId);
+          if (!member) {
+              const cleanId = cleanWaPhone(memberId);
+              if (cleanId) {
+                  member = members.find(m => cleanWaPhone(m.whatsapp || '') === cleanId);
+              }
+          }
+          const rawWa = (member?.whatsapp || (cleanWaPhone(memberId) ? memberId : "")).replace(/\D/g, "");
           const cleanWa = rawWa.startsWith("0") ? "62" + rawWa.substring(1) : rawWa;
           const waProfileName = (cleanWa && db.waProfiles && db.waProfiles[cleanWa]) || member?.waProfileName;
           const isOwner = cleanWa && isOwnerWhatsapp(cleanWa);
-          const nama = isOwner ? "Selamat datang Owner" : (waProfileName || (cleanWa ? `+${cleanWa}` : memberId));
-          const wa = member ? (member.whatsapp || "-") : "-";
+          const memberName = member?.name?.trim();
+          const nama = isOwner 
+              ? "Selamat datang Owner" 
+              : (memberName && !isPhoneNumberOrEmpty(memberName)
+                  ? memberName 
+                  : (waProfileName && !isPhoneNumberOrEmpty(waProfileName)
+                      ? waProfileName 
+                      : (cleanWa ? `+${cleanWa}` : memberId)));
+          const wa = member?.whatsapp || (cleanWa ? `0${cleanWa.replace(/^62/, '')}` : "-");
           
           const utangTx = transactions.filter((t: any) => t.method === 'utang' && t.status === 'Sukses' && t.memberId === memberId);
           
@@ -7603,8 +7674,14 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
       bot.action(/^ingatkan_utang_(.+)$/, async (ctx) => {
           if (!db.owners.includes(ctx.from?.id)) return;
           const memberId = ctx.match[1];
-          const member = members.find(m => m.id === memberId);
-          const nama = member ? (member.name || "-") : memberId;
+          let member = members.find(m => m.id === memberId || m.name === memberId);
+          if (!member) {
+              const cleanId = cleanWaPhone(memberId);
+              if (cleanId) {
+                  member = members.find(m => cleanWaPhone(m.whatsapp || '') === cleanId);
+              }
+          }
+          const nama = member?.name?.trim() || memberId;
 
           const utangTx = transactions.filter((t: any) => t.method === 'utang' && t.status === 'Sukses' && t.memberId === memberId);
           if (utangTx.length === 0) {
@@ -8506,7 +8583,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          const appUrl = process.env.APP_URL || "http://localhost:3000";
                          const notaUrl = `${appUrl}/api/tagihan-nota?data=${encodeURIComponent(base64Data)}`;
 
-                         const replyText = `✅ *Tagihan Ditemukan!*\n\nHaiii! Aku Chuna, asisten imut dari E4 Store 🐾✨\nTagihan kamu udah muncul nih, jangan sampai kelewat ya~\n\n💬 "Jangan lupa bayar tepat waktu ya, sayang! Biar listrik tetap menyala dan kamu tetap semangat seharian~ Chuna doain yang terbaik buat kamu! 🌸💖"`;
+                         const replyText = formatPascabayarTagihanMessage(billData);
 
                          const isOwner = db.owners.includes(ctx.from?.id);
                          const keyboard = [];
@@ -8643,7 +8720,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          const appUrl = process.env.APP_URL || "http://localhost:3000";
                          const notaUrl = `${appUrl}/api/tagihan-nota?data=${encodeURIComponent(base64Data)}`;
 
-                         const replyText = `✅ *Tagihan Ditemukan!*\n\nHaiii! Aku Chuna, asisten imut dari E4 Store 🐾✨\nTagihan kamu udah muncul nih, jangan sampai kelewat ya~\n\n💬 "Jangan lupa bayar tepat waktu ya, sayang! Biar listrik tetap menyala dan kamu tetap semangat seharian~ Chuna doain yang terbaik buat kamu! 🌸💖"`;
+                         const replyText = formatPascabayarTagihanMessage(billData);
 
                          const isOwner = db.owners.includes(ctx.from?.id);
                          const keyboard = [];
@@ -8895,13 +8972,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          const appUrl = "http://localhost:3000";
                          const notaUrl = `${appUrl}/api/tagihan-nota?data=${encodeURIComponent(base64Data)}`;
 
-                         const replyText = `✅ *Tagihan Ditemukan!*
-
-Haiii! Aku Chuna, asisten imut dari E4 Store 🐾✨
-Tagihan kamu udah muncul nih, jangan sampai kelewat ya~
-
-
-💬 "Jangan lupa bayar tepat waktu ya, sayang! Biar listrik tetap menyala dan kamu tetap semangat seharian~ Chuna doain yang terbaik buat kamu! 🌸💖"`;
+                         const replyText = formatPascabayarTagihanMessage(billData);
 
                          const isOwner = db.owners.includes(ctx.from?.id);
                          const keyboard = [];
@@ -9058,9 +9129,15 @@ Tagihan kamu udah muncul nih, jangan sampai kelewat ya~
                   
                   delete userStates[userId];
                   
-                  const member = members.find((m:any) => m.id === memberId);
-                  const nama = member ? (member.name || "-") : "-";
-                  const wa = member ? (member.whatsapp || "-") : "-";
+                  let member = members.find((m:any) => m.id === memberId || m.name === memberId);
+                  if (!member) {
+                      const cleanId = cleanWaPhone(memberId);
+                      if (cleanId) {
+                          member = members.find((m:any) => cleanWaPhone(m.whatsapp || '') === cleanId);
+                      }
+                  }
+                  const nama = member?.name?.trim() || "-";
+                  const wa = member?.whatsapp || "-";
                   
                   let rincianProduk = "";
                   utangTx.forEach((t: any) => {
@@ -9075,7 +9152,6 @@ Tagihan kamu udah muncul nih, jangan sampai kelewat ya~
                   const today = new Date();
                   const tglLunas = `${today.getDate()} ${['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'][today.getMonth()]} ${today.getFullYear()}`;
                   
-                  let lunasText = "";
                   let isLunasTotal = nominal >= totalDebt;
                   let kembalian = isLunasTotal ? nominal - totalDebt : 0;
                   let sisa = isLunasTotal ? 0 : totalDebt - nominal;
@@ -9085,15 +9161,17 @@ Tagihan kamu udah muncul nih, jangan sampai kelewat ya~
                       price: t.price || 0
                   }));
 
-                  if (isLunasTotal) {
-                      lunasText = `✅ LUNAS TOTAL! 🎉
-Halo Kak ${nama},
-Dengan senang hati kami informasikan bahwa pembayaran utang kakak telah sukses dan lunas! Berikut detailnya ya:`;
-                  } else {
-                      lunasText = `⚠️ PEMBAYARAN SEBAGIAN
-Halo Kak ${nama},
-Dengan senang hati kami informasikan bahwa pembayaran utang kakak telah kami terima sebagian! Berikut detailnya ya:`;
-                  }
+                  const lunasText = formatDebtSettlementMessage({
+                      nama: `Kak ${nama}`,
+                      isLunasTotal: isLunasTotal,
+                      products: receiptProducts,
+                      totalDebt: totalDebt,
+                      dibayarkan: nominal,
+                      kembalian: kembalian,
+                      sisaUtang: sisa,
+                      tglUtang: datesUtang,
+                      tglBayar: tglLunas
+                  });
 
                   let waPhotoUrl: string | null = null;
                   try {
@@ -9132,7 +9210,7 @@ Dengan senang hati kami informasikan bahwa pembayaran utang kakak telah kami ter
                       const jid = cleanWa + "@s.whatsapp.net";
                       try {
                           if (lunasImageBuffer) {
-                              await waSocket.sendMessage(jid, { image: lunasImageBuffer, caption: lunasText });
+                              await waSocket.sendMessage(jid, { image: lunasImageBuffer, caption: lunasText, mimetype: 'image/png' });
                           } else {
                               await waSocket.sendMessage(jid, { text: lunasText });
                           }
@@ -10136,23 +10214,37 @@ E4 Store`,
     }
   });
 
-  // Route demo gambar nota Cek Tagihan (PLN Pascabayar) sesuai Gambar & Teks User
-  app.get("/api/demo-nota/cek-tagihan", async (req, res) => {
+  // Route demo gambar nota Cek Tagihan (PLN Pascabayar) sesuai Gambar Mentahan & Teks User
+  app.get(["/api/demo-nota/cek-tagihan", "/api/demo-nota-cek-tagihan"], async (req, res) => {
     try {
+        let waPhotoUrl: string | null = null;
+        if (req.query.photo && typeof req.query.photo === 'string') {
+            waPhotoUrl = req.query.photo;
+        } else if (db.waProfilePhotos) {
+            const keys = Object.keys(db.waProfilePhotos);
+            if (keys.length > 0) {
+                waPhotoUrl = db.waProfilePhotos[keys[0]];
+            }
+        }
+        if (!waPhotoUrl) {
+            waPhotoUrl = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&h=200&fit=crop&crop=faces';
+        }
+
         const sampleTagihan = {
-            nama: "A*D* *A*A*U*D*N",
-            no: "234000182643",
-            layanan: "Pln Pascabayar",
-            total: 115252,
-            tarif: "R1M",
-            daya: "900",
-            lembar: "1",
-            bulan: "202609",
-            meter: "00007944 - 00008015",
-            waPhotoUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&h=200&fit=crop&crop=faces',
-            date: new Date('2026-09-17T19:53:00+08:00')
+            nama: (req.query.nama as string) || (req.query.name as string) || "A*D* *A*A*U*D*N",
+            nomor: (req.query.no as string) || (req.query.nomor as string) || "234000182643",
+            layanan: (req.query.layanan as string) || "Pln Pascabayar",
+            total: req.query.total ? Number(req.query.total) : 119283,
+            tarif: (req.query.tarif as string) || "R1M",
+            daya: (req.query.daya as string) || "900",
+            lembar: (req.query.lembar as string) || "1",
+            bulan: (req.query.bulan as string) || "202607",
+            meter: (req.query.meter as string) || "00007792 - 00007870",
+            kode: '#E4',
+            waPhotoUrl: waPhotoUrl,
+            date: new Date('2026-07-19T16:59:00+08:00')
         };
-        const buffer = await generateCanvasReceipt("tagihan", sampleTagihan);
+        const buffer = await generatePascabayarTagihanReceipt(sampleTagihan);
         if (buffer) {
             res.setHeader('Content-Type', 'image/png');
             res.send(buffer);
@@ -10249,6 +10341,203 @@ E4 Store`,
     }
   });
 
+  // Route demo langsung untuk Struk Pembayaran Royal E4 Store (Template Picsart Merah Mahkota Emas)
+  app.get("/api/demo-nota-royal", async (req, res) => {
+    try {
+        let waPhotoUrl: string | null = null;
+        if (req.query.photo && typeof req.query.photo === 'string') {
+            waPhotoUrl = req.query.photo;
+        } else if (db.waProfilePhotos) {
+            const keys = Object.keys(db.waProfilePhotos);
+            if (keys.length > 0) {
+                waPhotoUrl = db.waProfilePhotos[keys[0]];
+            }
+        }
+
+        const cat = (req.query.category as string) || 'game';
+        let nama = (req.query.name as string) || 'Lio';
+        let status = (req.query.status as string) || 'Lunas';
+        let metode = (req.query.metode as string) || 'CASH';
+        let orderId = (req.query.orderId as string) || 'PRE-1790198576914';
+        let tanggal = (req.query.date as string) || '24/09/2026 05:23 WITA';
+        let product = (req.query.item as string) || '';
+        let target = (req.query.target as string) || '';
+        let sn = (req.query.sn as string) || '';
+        let total = Number(req.query.total || 0);
+
+        let namaPlg = (req.query.namaPlg as string) || '';
+        let type = (req.query.type as string) || '';
+        let tarif = (req.query.tarif as string) || '';
+        let daya = (req.query.daya as string) || '';
+        let golDaya = (req.query.golDaya as string) || '';
+        let kwh = (req.query.kwh as string) || '';
+        let bulan = (req.query.bulan as string) || '';
+        let meter = (req.query.meter as string) || '';
+        let lembar = (req.query.lembar as string) || '';
+
+        if (!product) {
+            if (cat === 'tidaklunas' || cat === 'belumlunas' || status.toLowerCase().includes('tidak') || status.toLowerCase().includes('belum')) {
+                product = 'PLN 20.000';
+                target = target || '32185604272';
+                nama = 'Lio';
+                namaPlg = 'YOHANIS-AF';
+                golDaya = 'R1 / 000000900';
+                sn = sn || '0585-9340-6917-6385-5660';
+                orderId = 'PRE-1788868200773';
+                tanggal = '08/09/2026 19:50 WITA';
+                status = 'TIDAK LUNAS';
+                total = total || 25000;
+            } else if (cat === 'pln-pasca' || cat === 'pasca') {
+                product = 'PLN Pascabayar';
+                type = 'pasca';
+                target = target || '537311234567';
+                nama = 'Samsul';
+                namaPlg = 'SAMSUL SIFA';
+                golDaya = 'R1M / 900 VA';
+                bulan = 'SEP 2026';
+                meter = '00007944 - 00008015';
+                lembar = '1';
+                sn = sn || 'RefId: PLN-260924XD2H4IF01V';
+                total = total || 115252;
+            } else if (cat === 'pln' || cat === 'pln-token') {
+                product = 'PLN 20.000';
+                target = target || '14123456789';
+                nama = 'Samsul';
+                namaPlg = 'SAMSUL SIFA';
+                golDaya = 'R1 / 1300 VA';
+                kwh = '13.2 kWh';
+                sn = sn || '45218930109482651739/SAMSUL SIFA/R1/1300/13.2';
+                total = total || 21500;
+            } else if (cat === 'pulsa') {
+                product = 'Telkomsel 50.000';
+                target = target || '085822094851';
+                sn = sn || '@41 . RefId: TSEL-260924XD2H4IF01V';
+                total = total || 51500;
+            } else if (cat === 'ewallet') {
+                product = 'DANA 100.000';
+                target = target || '085822094851';
+                sn = sn || '@41 . RefId: DANA-260924XD2H4IF01V';
+                total = total || 101500;
+            } else {
+                product = 'Magic Chess Go Go 5 Diamonds';
+                target = target || '836351001';
+                sn = sn || '@41 . RefId: GTX-260924XD2H4IF01V';
+                total = total || 3000;
+            }
+        }
+
+        const buffer = await generateRoyalStrukReceipt({
+            nama: nama,
+            status: status,
+            metode: metode,
+            product: product,
+            target: target,
+            type: type,
+            namaPlg: namaPlg,
+            tarif: tarif,
+            daya: daya,
+            golDaya: golDaya,
+            kwh: kwh,
+            bulan: bulan,
+            meter: meter,
+            lembar: lembar,
+            orderId: orderId,
+            tanggal: tanggal,
+            sn: sn,
+            totalBayar: total,
+            waPhotoUrl: waPhotoUrl
+        });
+        res.setHeader('Content-Type', 'image/png');
+        res.send(buffer);
+    } catch (e: any) {
+        res.status(500).send("Error: " + e.message);
+    }
+  });
+
+  // Route demo langsung untuk Struk Royal Status TIDAK LUNAS (Picsart_26-09-28_17-53-27-094.png)
+  app.get("/api/demo-nota-royal-tidaklunas", async (req, res) => {
+    try {
+        const cat = (req.query.category as string || '').toLowerCase();
+        let waPhotoUrl: string | null = null;
+        if (req.query.photo && typeof req.query.photo === 'string') {
+            waPhotoUrl = req.query.photo;
+        } else if (db.waProfilePhotos) {
+            const keys = Object.keys(db.waProfilePhotos);
+            if (keys.length > 0) {
+                waPhotoUrl = db.waProfilePhotos[keys[0]];
+            }
+        }
+
+        let nama = (req.query.name as string) || 'Lio';
+        let product = (req.query.item as string) || '';
+        let target = (req.query.target as string) || '';
+        let sn = (req.query.sn as string) || '';
+        let namaPlg = (req.query.namaPlg as string) || '';
+        let golDaya = (req.query.golDaya as string) || '';
+        let orderId = (req.query.orderId as string) || 'PRE-1788868200773';
+        let tanggal = (req.query.date as string) || '08/09/2026 19:50 WITA';
+        let total = Number(req.query.total || 0);
+        let type = (req.query.type as string) || '';
+
+        if (!product) {
+            if (cat === 'game') {
+                product = 'Free Fire 140 Diamond';
+                target = target || '836351001';
+                sn = sn || '@41 . RefId: FF-260928XD2H4IF01V';
+                total = total || 20000;
+            } else if (cat === 'pulsa') {
+                product = 'Telkomsel 50.000';
+                target = target || '085822094851';
+                sn = sn || '@41 . RefId: TSEL-260928XD2H4IF01V';
+                total = total || 52000;
+            } else if (cat === 'ewallet') {
+                product = 'DANA 100.000';
+                target = target || '085822094851';
+                sn = sn || '@41 . RefId: DANA-260928XD2H4IF01V';
+                total = total || 102000;
+            } else if (cat === 'pln-pasca' || cat === 'pasca') {
+                product = 'PLN Pascabayar';
+                type = 'pasca';
+                target = target || '537311234567';
+                namaPlg = 'YOHANIS-AF';
+                golDaya = 'R1M / 900 VA';
+                sn = sn || 'RefId: PLN-260928XD2H4IF01V';
+                total = total || 115250;
+            } else {
+                // Default: PLN Token (sesuai contoh asli dari user)
+                product = 'PLN 20.000';
+                target = target || '32185604272';
+                namaPlg = 'YOHANIS-AF';
+                golDaya = 'R1 / 000000900';
+                sn = sn || '0585-9340-6917-6385-5660';
+                total = total || 25000;
+            }
+        }
+
+        const buffer = await generateRoyalStrukReceipt({
+            nama: nama,
+            status: 'TIDAK LUNAS',
+            metode: (req.query.metode as string) || 'CASH',
+            product: product,
+            target: target,
+            type: type,
+            namaPlg: namaPlg,
+            golDaya: golDaya,
+            orderId: orderId,
+            tanggal: tanggal,
+            sn: sn,
+            totalBayar: total,
+            holidayNotice: (req.query.holiday as string) || 'Selasa, Hari Raya Natal (108 hari lagi)',
+            waPhotoUrl: waPhotoUrl,
+            templateVariant: 'tidaklunas'
+        });
+        res.setHeader('Content-Type', 'image/png');
+        res.send(buffer);
+    } catch (e: any) {
+        res.status(500).send("Error: " + e.message);
+    }
+  });
+
   // Route demo langsung untuk uji coba gambar nota pelunasan utang (sesuai template user: Kak Reza + Foto Profil WA)
   app.get("/api/demo-nota-pelunasan", async (req, res) => {
     try {
@@ -10261,15 +10550,17 @@ E4 Store`,
                 waPhotoUrl = db.waProfilePhotos[keys[0]];
             }
         }
+        const total = req.query.total ? Number(req.query.total) : 103000;
+        const bayar = req.query.bayar ? Number(req.query.bayar) : 105000;
         const buffer = await generateDebtSettlementReceipt({
-            nama: 'Kak Reza',
+            nama: (req.query.nama as string) || 'Kak Reza',
             isLunasTotal: true,
-            products: [{ name: 'Telkomsel 100.000', price: 103000 }],
-            totalDebt: 103000,
-            dibayarkan: 105000,
-            kembalian: 2000,
-            tglUtang: '17 September 2026',
-            tglBayar: '19 September 2026',
+            products: [{ name: (req.query.item as string) || 'Telkomsel 100.000', price: total }],
+            totalDebt: total,
+            dibayarkan: bayar,
+            kembalian: Math.max(0, bayar - total),
+            tglUtang: (req.query.tglUtang as string) || '17 September 2026',
+            tglBayar: (req.query.tglBayar as string) || '19 September 2026',
             waPhotoUrl: waPhotoUrl
         });
         res.setHeader('Content-Type', 'image/png');
@@ -10279,7 +10570,7 @@ E4 Store`,
     }
   });
 
-  // Route demo uji coba nota pembayaran angsuran (sebagian utang)
+  // Route demo uji coba nota pembayaran angsuran (sebagian utang: misal utang 10.000 bayar 5.000 sisa 5.000 belum lunas)
   app.get("/api/demo-nota-angsuran", async (req, res) => {
     try {
         let waPhotoUrl: string | null = null;
@@ -10291,15 +10582,18 @@ E4 Store`,
                 waPhotoUrl = db.waProfilePhotos[keys[0]];
             }
         }
+        const total = req.query.total ? Number(req.query.total) : 10000;
+        const bayar = req.query.bayar ? Number(req.query.bayar) : 5000;
+        const sisa = Math.max(0, total - bayar);
         const buffer = await generateDebtSettlementReceipt({
-            nama: 'Kak Reza',
+            nama: (req.query.nama as string) || 'Kak Reza',
             isLunasTotal: false,
-            products: [{ name: 'Telkomsel 100.000', price: 103000 }],
-            totalDebt: 103000,
-            dibayarkan: 50000,
-            sisaUtang: 53000,
-            tglUtang: '17 September 2026',
-            tglBayar: '19 September 2026',
+            products: [{ name: (req.query.item as string) || 'Telkomsel 10.000', price: total }],
+            totalDebt: total,
+            dibayarkan: bayar,
+            sisaUtang: sisa,
+            tglUtang: (req.query.tglUtang as string) || '17 September 2026',
+            tglBayar: (req.query.tglBayar as string) || '19 September 2026',
             waPhotoUrl: waPhotoUrl
         });
         res.setHeader('Content-Type', 'image/png');
@@ -10328,12 +10622,45 @@ E4 Store`,
             status: (req.query.status as string) || 'BELUM LUNAS',
             items: [
                 { name: 'Free Fire 70 Diamond', price: 11000 },
-                { name: 'Free Fire Level Up Pass', price: 1000 }
+                { name: 'Free Fire Level Up Pass Level 15', price: 1000 }
             ],
             totalDebt: 12000,
             barcodeCode: (req.query.code as string) || 'REC-20260827-PADIL',
             waPhotoUrl: waPhotoUrl
         });
+        res.setHeader('Content-Type', 'image/png');
+        res.send(buffer);
+    } catch (e: any) {
+        res.status(500).send("Error: " + e.message);
+    }
+  });
+
+  // Route demo langsung untuk gambar Konfirmasi Pembelian Customer (Picsart_26-09-28_21-18-20-870.png)
+  app.get("/api/demo-nota-konfirmasi", async (req, res) => {
+    try {
+        let waPhotoUrl: string | null = null;
+        if (req.query.photo && typeof req.query.photo === 'string') {
+            waPhotoUrl = req.query.photo;
+        } else if (db.waProfilePhotos) {
+            const keys = Object.keys(db.waProfilePhotos);
+            if (keys.length > 0) {
+                waPhotoUrl = db.waProfilePhotos[keys[0]];
+            }
+        }
+
+        const nama = (req.query.name as string) || (req.query.nama as string) || 'E4STORE';
+        const layanan = (req.query.layanan as string) || (req.query.item as string) || 'Go Pay 8.000';
+        const nomor = (req.query.nomor as string) || (req.query.target as string) || '08134621611';
+        const total = req.query.total ? Number(req.query.total) : 13000;
+
+        const buffer = await generateKonfirmasiReceipt({
+            nama: nama,
+            layanan: layanan,
+            nomor: nomor,
+            totalBayar: total,
+            waPhotoUrl: waPhotoUrl
+        });
+
         res.setHeader('Content-Type', 'image/png');
         res.send(buffer);
     } catch (e: any) {
