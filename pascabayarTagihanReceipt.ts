@@ -272,27 +272,51 @@ export async function generatePascabayarTagihanReceipt(data: PascabayarTagihanDa
                 const dbContent = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
                 const photos = dbContent.waProfilePhotos || {};
 
-                // Cek dari nama member di daftar member offline
-                if (!data.waPhotoUrl && data.nama) {
-                    const cLower = String(data.nama).trim().toLowerCase();
+                // 1. Cek dari nama member di daftar member offline / online
+                if (!data.waPhotoUrl && (data.nama || data.customerDisplayName)) {
+                    const cLower = String(data.customerDisplayName || data.nama).trim().toLowerCase().replace(/^kak\s+/i, '');
                     const matchedMember = (dbContent.members || []).find((m: any) => m.name && m.name.trim().toLowerCase() === cLower);
                     if (matchedMember && matchedMember.whatsapp) {
-                        const mClean = String(matchedMember.whatsapp).replace(/[^0-9]/g, '');
-                        if (mClean && photos[mClean]) {
+                        const mClean = String(matchedMember.whatsapp).replace(/[^0-9]/g, '').replace(/^0/, '62');
+                        if (mClean && photos[mClean] && !photos[mClean].includes('default_wa_photo')) {
                             data.waPhotoUrl = photos[mClean];
                         }
                     }
                 }
 
+                // 2. Cek nomor WhatsApp kandidat
                 if (!data.waPhotoUrl) {
-                    const candidatePhone = data.target || data.no || data.nomor;
-                    const cleanNum = candidatePhone ? String(candidatePhone).replace(/[^0-9]/g, '') : '';
-                    if (cleanNum && photos[cleanNum]) {
-                        data.waPhotoUrl = photos[cleanNum];
+                    const rawCand = data.targetPhone || data.customerPhone || data.whatsapp || data.customerWa || data.target || data.no || data.nomor;
+                    if (rawCand) {
+                        const candidate = String(rawCand).replace(/[^0-9]/g, '');
+                        const candClean = candidate.replace(/^0/, '62');
+                        if (photos[candClean] && !photos[candClean].includes('default_wa_photo')) {
+                            data.waPhotoUrl = photos[candClean];
+                        } else if (photos[candidate] && !photos[candidate].includes('default_wa_photo')) {
+                            data.waPhotoUrl = photos[candidate];
+                        }
+                    }
+                }
+
+                // 3. Cek nomor WhatsApp Owner
+                if (!data.waPhotoUrl && Array.isArray(dbContent.ownerWhatsapps)) {
+                    for (const ow of dbContent.ownerWhatsapps) {
+                        const owClean = String(ow).replace(/[^0-9]/g, '').replace(/^0/, '62');
+                        if (photos[owClean] && !photos[owClean].includes('default_wa_photo')) {
+                            data.waPhotoUrl = photos[owClean];
+                            break;
+                        }
+                    }
+                }
+
+                // 4. Fallback foto di cache database
+                if (!data.waPhotoUrl) {
+                    if (photos['default'] && !photos['default'].includes('default_wa_photo')) {
+                        data.waPhotoUrl = photos['default'];
                     } else {
-                        const keys = Object.keys(photos);
+                        const keys = Object.keys(photos).filter(k => !k.includes('default_wa_photo') && !k.startsWith('file_'));
                         if (keys.length > 0) {
-                            data.waPhotoUrl = photos[keys[keys.length - 1]];
+                            data.waPhotoUrl = photos[keys[0]];
                         }
                     }
                 }
