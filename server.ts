@@ -8062,45 +8062,72 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                     parse_mode: "Markdown",
                     reply_markup: { keyboard, resize_keyboard: true }
                 });
-                // Automatically send sticker to WhatsApp (Alur persis seperti Gambar 2)
-                const memberIdForPrepaid = state.data.memberId || `MBR-${ctx.from?.id}`;
-                const memberForPrepaid = members.find(m => m.id === memberIdForPrepaid || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
+                // Automatically send sticker to WhatsApp (Alur Gambar 2: Member Offline & Pelanggan Telegram)
+                const lockedMemberId = state.data?.memberId;
+                let memberForPrepaid: any = null;
+                if (lockedMemberId) {
+                    memberForPrepaid = members.find((m: any) => m.id === lockedMemberId);
+                }
+                if (!memberForPrepaid && ctx.from?.id) {
+                    memberForPrepaid = members.find((m: any) => m.id === `MBR-${ctx.from.id}` || isTelegramMatch(m.telegram, ctx.from.id, ctx.from.username));
+                }
+
                 const waDetails = await getCustomerWaDetails(memberForPrepaid, ctx.from?.id);
-                const customerDisplayName = getCustomerDisplayName(memberForPrepaid, waDetails, ctx, undefined, waDetails.waPhone !== '-' ? waDetails.waPhone : undefined);
-                
-                // Tentukan nomor WhatsApp tujuan: prioritaskan nomor WhatsApp pelanggan/member asli
-                let targetWaCandidate = (waDetails?.waPhone && waDetails.waPhone !== '-') 
-                    ? waDetails.waPhone 
-                    : (memberForPrepaid?.whatsapp 
-                        || (ctx.from?.id ? (registeredUsers[ctx.from.id]?.wa || registeredUsers[Number(ctx.from.id)]?.wa) : "")
-                        || ((db.owners?.includes(ctx.from?.id) || db.owners?.includes(Number(ctx.from?.id))) ? db.ownerWhatsapps?.[0] : null));
+
+                // Tentukan nomor WhatsApp pelanggan yang asli:
+                let customerWa = "";
+                if (memberForPrepaid?.whatsapp) {
+                    customerWa = memberForPrepaid.whatsapp;
+                } else if (ctx.from?.id && (registeredUsers[ctx.from.id]?.wa || registeredUsers[Number(ctx.from.id)]?.wa)) {
+                    customerWa = registeredUsers[ctx.from.id]?.wa || registeredUsers[Number(ctx.from.id)]?.wa;
+                } else if (state.data?.whatsapp || state.data?.wa) {
+                    customerWa = state.data?.whatsapp || state.data?.wa;
+                } else if (waDetails?.waPhone && waDetails.waPhone !== '-') {
+                    customerWa = waDetails.waPhone;
+                }
+
+                // Tentukan nomor WhatsApp tujuan pengiriman stiker
+                let targetWaCandidate = customerWa || ((db.owners?.includes(ctx.from?.id) || db.owners?.includes(Number(ctx.from?.id))) ? db.ownerWhatsapps?.[0] : null);
 
                 if (waSocket && targetWaCandidate) {
-                    let cleanWa = targetWaCandidate.replace(/\D/g, "");
-                    if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
+                    let cleanWa = cleanWaPhone(targetWaCandidate);
+                    let localWa = "0" + cleanWa.replace(/^62/, '');
                     const jid = cleanWa + "@s.whatsapp.net";
                     try {
                         await waSocket.presenceSubscribe(jid);
                         await waSocket.sendPresenceUpdate('composing', jid);
                         
-                        // Foto profil WhatsApp: persis seperti alur Gambar 2 (menggunakan foto nomor WhatsApp pelanggan)
-                        let photoForSticker = waDetails?.waPhotoUrl || null;
-                        if (!photoForSticker && memberForPrepaid?.whatsapp) {
-                            photoForSticker = await fetchWaProfilePhoto(memberForPrepaid.whatsapp);
+                        // Nama Profil WhatsApp asli jika pernah chat / tersimpan
+                        let waProfileName: string | null = null;
+                        if (db.waProfiles && db.waProfiles[cleanWa] && !isPhoneNumberOrEmpty(db.waProfiles[cleanWa])) {
+                            waProfileName = db.waProfiles[cleanWa];
+                        } else if (db.waProfiles && db.waProfiles[localWa] && !isPhoneNumberOrEmpty(db.waProfiles[localWa])) {
+                            waProfileName = db.waProfiles[localWa];
+                        } else if (memberForPrepaid?.waProfileName && !isPhoneNumberOrEmpty(memberForPrepaid.waProfileName)) {
+                            waProfileName = memberForPrepaid.waProfileName;
                         }
-                        if (!photoForSticker && ctx.from?.id && (registeredUsers[ctx.from.id]?.wa || registeredUsers[Number(ctx.from.id)]?.wa)) {
-                            photoForSticker = await fetchWaProfilePhoto(registeredUsers[ctx.from.id]?.wa || registeredUsers[Number(ctx.from.id)]?.wa);
+
+                        // Foto profil WhatsApp: persis seperti alur Gambar 2
+                        let photoForSticker = waDetails?.waPhotoUrl || null;
+                        if (!photoForSticker && customerWa) {
+                            photoForSticker = await fetchWaProfilePhoto(customerWa);
                         }
                         if (!photoForSticker && cleanWa) {
                             photoForSticker = await fetchWaProfilePhoto(cleanWa);
                         }
 
-                        // Generate Sticker Konfirmasi Pembelian with photo profile
+                        // Nama Tampilan untuk Stiker: Nama Profil WA -> Nama Member -> Username Pendaftaran
+                        const displayNickname = waProfileName 
+                            || memberForPrepaid?.name 
+                            || (ctx.from?.id ? registeredUsers[ctx.from.id]?.username : null)
+                            || undefined;
+
+                        // Generate Sticker Konfirmasi Pembelian with photo profile & nickname
                         const stickerBuffer = await generateOrderConfirmationSticker({
                             serviceName: product.product_name,
                             targetNo: targetNo,
                             totalBayar: total,
-                            nickname: (customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak') ? customerDisplayName : undefined,
+                            nickname: (displayNickname && displayNickname !== 'Pelanggan Setia' && displayNickname !== 'Kakak') ? displayNickname : undefined,
                             note: 'pembelianmu akan di proses ya kk\nmohon di tunggu',
                             waPhotoUrl: photoForSticker,
                             whatsapp: targetWaCandidate
