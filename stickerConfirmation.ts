@@ -1,6 +1,8 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 // @ts-ignore
 import webpmux from 'node-webpmux';
+import fs from 'fs';
+import path from 'path';
 
 export interface ConfirmationStickerData {
     serviceName: string;         // e.g. "PLN 20.000"
@@ -11,6 +13,45 @@ export interface ConfirmationStickerData {
     waPhotoUrl?: string | null;
     avatarBuffer?: Buffer | null;
     format?: 'webp' | 'png';
+}
+
+/**
+ * Safely loads image from Buffer, HTTP/HTTPS URL, or local file path
+ */
+async function loadAvatarImage(input?: string | Buffer | null): Promise<any> {
+    if (!input) return null;
+    if (Buffer.isBuffer(input)) {
+        try {
+            return await loadImage(input);
+        } catch (e) {
+            return null;
+        }
+    }
+    if (typeof input === 'string') {
+        const str = input.trim();
+        if (str.startsWith('http://') || str.startsWith('https://')) {
+            try {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 6000);
+                const res = await fetch(str, {
+                    signal: controller.signal,
+                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+                });
+                clearTimeout(timeout);
+                if (res.ok) {
+                    const buf = Buffer.from(await res.arrayBuffer());
+                    return await loadImage(buf);
+                }
+            } catch (e) {
+                console.error("Gagal fetch avatar URL di stickerConfirmation:", e);
+            }
+        } else if (fs.existsSync(str)) {
+            try {
+                return await loadImage(str);
+            } catch (e) {}
+        }
+    }
+    return null;
 }
 
 /**
@@ -155,12 +196,65 @@ export async function generateOrderConfirmationSticker(data: ConfirmationSticker
     // Load WhatsApp profile avatar if available
     let avatarImg: any = null;
     if (data.avatarBuffer) {
+        avatarImg = await loadAvatarImage(data.avatarBuffer);
+    }
+    if (!avatarImg && data.waPhotoUrl) {
+        avatarImg = await loadAvatarImage(data.waPhotoUrl);
+    }
+
+    // Auto-lookup dari database jika avatarImg belum didapat
+    if (!avatarImg) {
         try {
-            avatarImg = await loadImage(data.avatarBuffer).catch(() => null);
-        } catch (e) {}
-    } else if (data.waPhotoUrl) {
-        try {
-            avatarImg = await loadImage(data.waPhotoUrl).catch(() => null);
+            const dbPath = path.join(process.cwd(), 'db.json');
+            if (fs.existsSync(dbPath)) {
+                const dbContent = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+                const photos = dbContent.waProfilePhotos || {};
+
+                // 1. Cek dari nama pelanggan / nickname di daftar member
+                if (data.nickname) {
+                    const nickLower = String(data.nickname).trim().toLowerCase().replace(/^kak\s+/i, '');
+                    const matchedMember = (dbContent.members || []).find((m: any) => m.name && m.name.trim().toLowerCase() === nickLower);
+                    if (matchedMember && matchedMember.whatsapp) {
+                        const mClean = String(matchedMember.whatsapp).replace(/\D/g, '').replace(/^0/, '62');
+                        if (photos[mClean]) {
+                            avatarImg = await loadAvatarImage(photos[mClean]);
+                        }
+                    }
+                }
+
+                // 2. Cek nomor tujuan targetNo jika format nomor HP
+                if (!avatarImg && data.targetNo) {
+                    const candClean = String(data.targetNo).replace(/\D/g, '').replace(/^0/, '62');
+                    if (photos[candClean]) {
+                        avatarImg = await loadAvatarImage(photos[candClean]);
+                    }
+                }
+
+                // 3. Cek nomor WhatsApp Owner
+                if (!avatarImg && Array.isArray(dbContent.ownerWhatsapps)) {
+                    for (const ow of dbContent.ownerWhatsapps) {
+                        const owClean = String(ow).replace(/\D/g, '').replace(/^0/, '62');
+                        if (photos[owClean]) {
+                            avatarImg = await loadAvatarImage(photos[owClean]);
+                            if (avatarImg) break;
+                        }
+                    }
+                }
+
+                // 4. Fallback foto profil WhatsApp default di database
+                if (!avatarImg) {
+                    if (photos['default']) {
+                        avatarImg = await loadAvatarImage(photos['default']);
+                    }
+                    if (!avatarImg) {
+                        const keys = Object.keys(photos);
+                        for (const k of keys) {
+                            avatarImg = await loadAvatarImage(photos[k]);
+                            if (avatarImg) break;
+                        }
+                    }
+                }
+            }
         } catch (e) {}
     }
 
@@ -325,23 +419,20 @@ export async function generateOrderConfirmationSticker(data: ConfirmationSticker
         ctx.fill();
         ctx.restore();
 
-        // Customer initials or E4 monogram in crisp white
-        ctx.font = '900 36px Arial, "Segoe UI", "Liberation Sans", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#ffffff';
-        let fallbackText = 'E4';
-        if (data.nickname) {
-            if (/selamat\s*datang\s*owner/i.test(data.nickname)) {
-                fallbackText = 'OW';
-            } else {
-                const words = data.nickname.trim().split(/\s+/).filter(Boolean);
-                fallbackText = words.length >= 2 
-                    ? (words[0][0] + words[1][0]).toUpperCase()
-                    : data.nickname.slice(0, 2).toUpperCase();
-            }
-        }
-        ctx.fillText(fallbackText, circleX, circleY + 4);
+        // Elegant User Silhouette Icon in crisp white (NEVER print initials like "Ko")
+        ctx.save();
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.beginPath();
+        ctx.arc(circleX, circleY - 14, 20, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(circleX, circleY + 38, 38, Math.PI * 1.15, Math.PI * 1.85);
+        ctx.lineTo(circleX + 34, circleY + 50);
+        ctx.lineTo(circleX - 34, circleY + 50);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
     }
     ctx.restore(); // Restore clip
 

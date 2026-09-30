@@ -738,6 +738,12 @@ export async function fetchWaProfilePhoto(rawPhoneOrJid: string): Promise<string
     if (!clean) return null;
     const local = "0" + clean.replace(/^62/, '');
 
+    // 0. Cek file avatar lokal di disk
+    const localDiskPath = path.join(process.cwd(), 'public', 'avatars', `${clean}.jpg`);
+    if (fs.existsSync(localDiskPath)) {
+        return localDiskPath;
+    }
+
     // 1. Cek memory/db cache terlebih dahulu
     if (db.waProfilePhotos) {
         if (db.waProfilePhotos[clean] && typeof db.waProfilePhotos[clean] === 'string' && !db.waProfilePhotos[clean].includes('default_wa_photo')) {
@@ -776,11 +782,21 @@ export async function fetchWaProfilePhoto(rawPhoneOrJid: string): Promise<string
             }
 
             if (photoUrl) {
+                try {
+                    const avatarDir = path.join(process.cwd(), 'public', 'avatars');
+                    if (!fs.existsSync(avatarDir)) fs.mkdirSync(avatarDir, { recursive: true });
+                    const fetchRes = await fetch(photoUrl, { signal: AbortSignal.timeout(6000) }).catch(() => null);
+                    if (fetchRes && fetchRes.ok) {
+                        const avatarBuf = Buffer.from(await fetchRes.arrayBuffer());
+                        fs.writeFileSync(localDiskPath, avatarBuf);
+                    }
+                } catch (saveErr) {}
+
                 if (!db.waProfilePhotos) db.waProfilePhotos = {};
                 db.waProfilePhotos[clean] = photoUrl;
                 db.waProfilePhotos[local] = photoUrl;
                 writeDB(db);
-                return photoUrl;
+                return localDiskPath && fs.existsSync(localDiskPath) ? localDiskPath : photoUrl;
             }
         } catch (err) {}
     }
@@ -8093,8 +8109,12 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                 // Automatically send sticker to WhatsApp
                 const memberIdForPrepaid = state.data.memberId || `MBR-${ctx.from?.id}`;
                 const memberForPrepaid = members.find(m => m.id === memberIdForPrepaid || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
-                if (waSocket && memberForPrepaid && memberForPrepaid.whatsapp) {
-                    let cleanWa = memberForPrepaid.whatsapp.replace(/\D/g, "");
+                const targetWaCandidate = (memberForPrepaid && memberForPrepaid.whatsapp) 
+                    ? memberForPrepaid.whatsapp 
+                    : (ctx.from?.id && (db.owners?.includes(ctx.from.id) || db.owners?.includes(Number(ctx.from.id))) ? db.ownerWhatsapps?.[0] : null);
+
+                if (waSocket && targetWaCandidate) {
+                    let cleanWa = targetWaCandidate.replace(/\D/g, "");
                     if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
                     const jid = cleanWa + "@s.whatsapp.net";
                     try {
@@ -8106,14 +8126,44 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                         const waDetails = await getCustomerWaDetails(memberForPrepaid, ctx.from?.id, memberRawWa.length >= 8 ? memberRawWa : undefined);
                         const customerDisplayName = getCustomerDisplayName(memberForPrepaid, waDetails, ctx, undefined, memberRawWa.length >= 8 ? memberRawWa : undefined);
                         
-                        // Generate Sticker Konfirmasi Pembelian with photo profile or monogram
+                        let photoForSticker = waDetails?.waPhotoUrl || null;
+                        if (!photoForSticker && cleanWa) {
+                            photoForSticker = await fetchWaProfilePhoto(cleanWa);
+                        }
+                        if (!photoForSticker && memberForPrepaid?.whatsapp) {
+                            photoForSticker = await fetchWaProfilePhoto(memberForPrepaid.whatsapp);
+                        }
+                        if (!photoForSticker && ctx.from?.id && (db.owners?.includes(ctx.from.id) || db.owners?.includes(Number(ctx.from.id)))) {
+                            for (const ow of (db.ownerWhatsapps || [])) {
+                                photoForSticker = await fetchWaProfilePhoto(ow);
+                                if (photoForSticker) break;
+                            }
+                        }
+                        if (!photoForSticker && db.waProfilePhotos) {
+                            for (const ow of (db.ownerWhatsapps || [])) {
+                                const cOw = cleanWaPhone(ow);
+                                if (cOw && db.waProfilePhotos[cOw] && !db.waProfilePhotos[cOw].includes('default_wa_photo')) {
+                                    photoForSticker = db.waProfilePhotos[cOw];
+                                    break;
+                                }
+                            }
+                            if (!photoForSticker && db.waProfilePhotos['default'] && !db.waProfilePhotos['default'].includes('default_wa_photo')) {
+                                photoForSticker = db.waProfilePhotos['default'];
+                            }
+                            if (!photoForSticker) {
+                                const keys = Object.keys(db.waProfilePhotos).filter(k => !k.includes('default_wa_photo') && !k.startsWith('file_'));
+                                if (keys.length > 0) photoForSticker = db.waProfilePhotos[keys[0]];
+                            }
+                        }
+
+                        // Generate Sticker Konfirmasi Pembelian with photo profile
                         const stickerBuffer = await generateOrderConfirmationSticker({
                             serviceName: product.product_name,
                             targetNo: targetNo,
                             totalBayar: total,
                             nickname: (customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak') ? customerDisplayName : undefined,
                             note: 'pembelianmu akan di proses ya kk\nmohon di tunggu',
-                            waPhotoUrl: waDetails?.waPhotoUrl || null
+                            waPhotoUrl: photoForSticker
                         });
 
                         await new Promise(r => setTimeout(r, 1000));
