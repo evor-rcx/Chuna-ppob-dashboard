@@ -27,7 +27,7 @@ import { fetchTiktok } from "./downloader";
 import { generateDebtSettlementReceipt, formatDebtSettlementMessage } from "./debtReceipt";
 import { generateVintageTagihanReceipt, formatTagihanMessage } from "./debtTagihanReceipt";
 import { generateRoyalStrukReceipt, formatRoyalStrukMessage } from "./royalStrukReceipt";
-import { generateOrderConfirmationSticker } from "./stickerConfirmation";
+import { generateOrderConfirmationSticker, downloadImageBuffer } from "./stickerConfirmation";
 import { generateEmeraldConfirmationImage } from "./emeraldConfirmationReceipt";
 import { generateKonfirmasiReceipt, formatKonfirmasiMessage } from "./konfirmasiReceipt";
 import { generatePascabayarTagihanReceipt, formatPascabayarTagihanMessage } from "./pascabayarTagihanReceipt";
@@ -785,9 +785,8 @@ export async function fetchWaProfilePhoto(rawPhoneOrJid: string): Promise<string
                 try {
                     const avatarDir = path.join(process.cwd(), 'public', 'avatars');
                     if (!fs.existsSync(avatarDir)) fs.mkdirSync(avatarDir, { recursive: true });
-                    const fetchRes = await fetch(photoUrl, { signal: AbortSignal.timeout(6000) }).catch(() => null);
-                    if (fetchRes && fetchRes.ok) {
-                        const avatarBuf = Buffer.from(await fetchRes.arrayBuffer());
+                    const avatarBuf = await downloadImageBuffer(photoUrl);
+                    if (avatarBuf && avatarBuf.length > 0) {
                         fs.writeFileSync(localDiskPath, avatarBuf);
                     }
                 } catch (saveErr) {}
@@ -4325,15 +4324,51 @@ Chuna – E4 Store`;
     res.json({ success: true });
   });
 
+  app.get("/api/avatar/:phone", (req, res) => {
+    const clean = cleanWaPhone(req.params.phone || '');
+    if (!clean) return res.status(400).send("Invalid phone");
+    const localDiskPath = path.join(process.cwd(), 'public', 'avatars', `${clean}.jpg`);
+    if (fs.existsSync(localDiskPath)) {
+      res.setHeader('Content-Type', 'image/jpeg');
+      return fs.createReadStream(localDiskPath).pipe(res);
+    }
+    const local = "0" + clean.replace(/^62/, '');
+    const photoUrl = db.waProfilePhotos?.[clean] || db.waProfilePhotos?.[local];
+    if (photoUrl) {
+      if (photoUrl.startsWith('http://') || photoUrl.startsWith('https://')) {
+        return res.redirect(photoUrl);
+      } else if (fs.existsSync(photoUrl)) {
+        res.setHeader('Content-Type', 'image/jpeg');
+        return fs.createReadStream(photoUrl).pipe(res);
+      }
+    }
+    res.status(404).send("Not found");
+  });
+
   app.get("/api/members/offline", (req, res) => {
     // Return all members, or just those added manually (without telegram ID)
     const offlineMembers = members.filter(m => !m.telegram || !m.telegram.startsWith('ID:'));
     const enriched = offlineMembers.map(m => {
       const cleanPhone = cleanWaPhone(m.whatsapp || '');
-      const photoUrl = (cleanPhone && db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) ? db.waProfilePhotos[cleanPhone] : null;
+      const localPhone = "0" + cleanPhone.replace(/^62/, '');
+      
+      const localDiskPath = cleanPhone ? path.join(process.cwd(), 'public', 'avatars', `${cleanPhone}.jpg`) : null;
+      let photoUrl = m.photoUrl || null;
+      if (!photoUrl && localDiskPath && fs.existsSync(localDiskPath)) {
+        photoUrl = `/api/avatar/${cleanPhone}`;
+      } else if (!photoUrl && cleanPhone && db.waProfilePhotos) {
+        photoUrl = db.waProfilePhotos[cleanPhone] || db.waProfilePhotos[localPhone] || null;
+      }
+
+      let waProfileName = m.waProfileName || null;
+      if (!waProfileName && cleanPhone && db.waProfiles) {
+        waProfileName = db.waProfiles[cleanPhone] || db.waProfiles[localPhone] || null;
+      }
+
       return {
         ...m,
-        photoUrl
+        photoUrl,
+        waProfileName: waProfileName || '-'
       };
     });
     res.json({ success: true, members: enriched });
@@ -4347,25 +4382,69 @@ Chuna – E4 Store`;
     if (!cleanPhone) return res.status(400).json({ success: false, error: 'Nomor WhatsApp member tidak valid' });
 
     let fetchedPhoto = null;
+    let fetchedName = null;
+
     if (waSocket) {
       try {
         const jid = `${cleanPhone}@s.whatsapp.net`;
         fetchedPhoto = await waSocket.profilePictureUrl(jid, 'image').catch(() => null);
+        if (!fetchedPhoto) {
+          fetchedPhoto = await waSocket.profilePictureUrl(jid, 'preview').catch(() => null);
+        }
       } catch (e) {}
     }
 
     if (fetchedPhoto) {
+      const localDiskPath = path.join(process.cwd(), 'public', 'avatars', `${cleanPhone}.jpg`);
+      try {
+        const avatarDir = path.join(process.cwd(), 'public', 'avatars');
+        if (!fs.existsSync(avatarDir)) fs.mkdirSync(avatarDir, { recursive: true });
+        const buf = await downloadImageBuffer(fetchedPhoto);
+        if (buf && buf.length > 0) {
+          fs.writeFileSync(localDiskPath, buf);
+        }
+      } catch (e) {}
+
       if (!db.waProfilePhotos) db.waProfilePhotos = {};
       db.waProfilePhotos[cleanPhone] = fetchedPhoto;
-      writeDB(db);
-      return res.json({ success: true, photoUrl: fetchedPhoto });
+      db.waProfilePhotos["0" + cleanPhone.replace(/^62/, '')] = fetchedPhoto;
+      member.photoUrl = `/api/avatar/${cleanPhone}`;
     }
 
-    if (db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) {
-      return res.json({ success: true, photoUrl: db.waProfilePhotos[cleanPhone] });
+    fetchedName = member.waProfileName || (db.waProfiles && (db.waProfiles[cleanPhone] || db.waProfiles["0" + cleanPhone.replace(/^62/, '')])) || null;
+
+    db.members = members;
+    writeDB(db);
+
+    return res.json({ 
+      success: true, 
+      photoUrl: member.photoUrl || (fetchedPhoto ? `/api/avatar/${cleanPhone}` : null),
+      waProfileName: fetchedName || '-'
+    });
+  });
+
+  app.post("/api/members/:id/update-profile", express.json(), (req, res) => {
+    const { id } = req.params;
+    const { name, waProfileName, whatsapp, type } = req.body;
+    const member = members.find(m => m.id === id);
+    if (!member) return res.status(404).json({ success: false, error: 'Member tidak ditemukan' });
+
+    if (name) member.name = name.trim();
+    if (whatsapp) member.whatsapp = whatsapp.trim();
+    if (type) member.type = type;
+    if (waProfileName !== undefined) {
+      member.waProfileName = waProfileName.trim();
+      const cleanPhone = cleanWaPhone(member.whatsapp || '');
+      if (cleanPhone) {
+        if (!db.waProfiles) db.waProfiles = {};
+        db.waProfiles[cleanPhone] = member.waProfileName;
+        db.waProfiles["0" + cleanPhone.replace(/^62/, '')] = member.waProfileName;
+      }
     }
 
-    res.json({ success: false, error: 'Foto WhatsApp tidak dapat diambil (WhatsApp bot sedang offline atau privasi profil nomor disembunyikan).' });
+    db.members = members;
+    writeDB(db);
+    res.json({ success: true, member });
   });
 
   app.post("/api/members/:id/custom-photo", express.json({ limit: '10mb' }), async (req, res) => {
@@ -5293,7 +5372,22 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca") {
 
                 const memberRawWa = (member?.whatsapp || (ctx.from?.id ? (registeredUsers[ctx.from.id]?.wa || "") : "")).replace(/\D/g, "");
                 const waDetails = await getCustomerWaDetails(member, ctx.from?.id, memberRawWa.length >= 8 ? memberRawWa : undefined);
+                const waInfo = waDetails;
+                let photoForKonfirmasi = waInfo?.waPhotoUrl || null;
+                if (!photoForKonfirmasi && member?.whatsapp) {
+                    photoForKonfirmasi = await fetchWaProfilePhoto(member.whatsapp);
+                }
+                if (!photoForKonfirmasi && ctx.from?.id && (registeredUsers[ctx.from.id]?.wa || registeredUsers[Number(ctx.from.id)]?.wa)) {
+                    photoForKonfirmasi = await fetchWaProfilePhoto(registeredUsers[ctx.from.id]?.wa || registeredUsers[Number(ctx.from.id)]?.wa);
+                }
                 const customerDisplayName = getCustomerDisplayName(member, waDetails, ctx, undefined, memberRawWa.length >= 8 ? memberRawWa : undefined);
+                if (!photoForKonfirmasi && (customerDisplayName || member?.name)) {
+                    const candidateName = String(customerDisplayName || member?.name).trim().toLowerCase().replace(/^kak\s+/i, '');
+                    const m = (db.members || []).find((x: any) => x.name && x.name.trim().toLowerCase() === candidateName);
+                    if (m && m.whatsapp) {
+                        photoForKonfirmasi = await fetchWaProfilePhoto(m.whatsapp);
+                    }
+                }
                 const isOwner = (customerDisplayName && customerDisplayName.toLowerCase().includes("owner")) || isOwnerSelf;
                 const greetingWaName = (customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak')
                     ? (isOwner ? " Owner" : ` ${customerDisplayName}`)
@@ -5309,23 +5403,6 @@ Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa s
 🎯 Tujuan   : ${targetDisplay}${(customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak') ? ` (${customerDisplayName})` : ''}
 
 Chuna menunggu kabar baik dari Kakak! 😊`;
-
-                    // Persis seperti alur Gambar 2:
-                    const waInfo = await getCustomerWaDetails(member, ctx.from?.id);
-                    let photoForKonfirmasi = waInfo?.waPhotoUrl || null;
-                    if (!photoForKonfirmasi && member?.whatsapp) {
-                        photoForKonfirmasi = await fetchWaProfilePhoto(member.whatsapp);
-                    }
-                    if (!photoForKonfirmasi && ctx.from?.id && (registeredUsers[ctx.from.id]?.wa || registeredUsers[Number(ctx.from.id)]?.wa)) {
-                        photoForKonfirmasi = await fetchWaProfilePhoto(registeredUsers[ctx.from.id]?.wa || registeredUsers[Number(ctx.from.id)]?.wa);
-                    }
-                    if (!photoForKonfirmasi && (customerDisplayName || member?.name)) {
-                        const candidateName = String(customerDisplayName || member?.name).trim().toLowerCase().replace(/^kak\s+/i, '');
-                        const m = (db.members || []).find((x: any) => x.name && x.name.trim().toLowerCase() === candidateName);
-                        if (m && m.whatsapp) {
-                            photoForKonfirmasi = await fetchWaProfilePhoto(m.whatsapp);
-                        }
-                    }
 
                     let emeraldBuffer: Buffer | null = null;
                     try {
@@ -5689,7 +5766,22 @@ async function processPascaPayment(ctx: any, ref_id: string, method: string, sta
 
                 const memberRawWa = (member?.whatsapp || (ctx.from?.id ? (registeredUsers[ctx.from.id]?.wa || "") : "")).replace(/\D/g, "");
                 const waDetails = await getCustomerWaDetails(member, ctx.from?.id, memberRawWa.length >= 8 ? memberRawWa : undefined);
+                const waInfo = waDetails;
+                let photoForKonfirmasi = waInfo?.waPhotoUrl || null;
+                if (!photoForKonfirmasi && member?.whatsapp) {
+                    photoForKonfirmasi = await fetchWaProfilePhoto(member.whatsapp);
+                }
+                if (!photoForKonfirmasi && ctx.from?.id && (registeredUsers[ctx.from.id]?.wa || registeredUsers[Number(ctx.from.id)]?.wa)) {
+                    photoForKonfirmasi = await fetchWaProfilePhoto(registeredUsers[ctx.from.id]?.wa || registeredUsers[Number(ctx.from.id)]?.wa);
+                }
                 const customerDisplayName = getCustomerDisplayName(member, waDetails, ctx, payJson.data?.customer_name || checkResult?.customer_name, memberRawWa.length >= 8 ? memberRawWa : undefined);
+                if (!photoForKonfirmasi && (customerDisplayName || member?.name)) {
+                    const candidateName = String(customerDisplayName || member?.name).trim().toLowerCase().replace(/^kak\s+/i, '');
+                    const m = (db.members || []).find((x: any) => x.name && x.name.trim().toLowerCase() === candidateName);
+                    if (m && m.whatsapp) {
+                        photoForKonfirmasi = await fetchWaProfilePhoto(m.whatsapp);
+                    }
+                }
                 const isOwner = (customerDisplayName && customerDisplayName.toLowerCase().includes("owner")) || isOwnerSelf;
                 const greetingWaName = (customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak')
                     ? (isOwner ? " Owner" : ` ${customerDisplayName}`)
@@ -5705,23 +5797,6 @@ Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa s
 🎯 Tujuan   : ${displayCustomerNo}${(customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak') ? ` (${customerDisplayName})` : (payJson.data?.customer_name || checkResult?.customer_name ? ` (${payJson.data?.customer_name || checkResult?.customer_name})` : '')}
 
 Chuna menunggu kabar baik dari Kakak! 😊`;
-
-                    // Persis seperti alur Gambar 2:
-                    const waInfo = await getCustomerWaDetails(member, ctx.from?.id);
-                    let photoForKonfirmasi = waInfo?.waPhotoUrl || null;
-                    if (!photoForKonfirmasi && member?.whatsapp) {
-                        photoForKonfirmasi = await fetchWaProfilePhoto(member.whatsapp);
-                    }
-                    if (!photoForKonfirmasi && ctx.from?.id && (registeredUsers[ctx.from.id]?.wa || registeredUsers[Number(ctx.from.id)]?.wa)) {
-                        photoForKonfirmasi = await fetchWaProfilePhoto(registeredUsers[ctx.from.id]?.wa || registeredUsers[Number(ctx.from.id)]?.wa);
-                    }
-                    if (!photoForKonfirmasi && (customerDisplayName || member?.name)) {
-                        const candidateName = String(customerDisplayName || member?.name).trim().toLowerCase().replace(/^kak\s+/i, '');
-                        const m = (db.members || []).find((x: any) => x.name && x.name.trim().toLowerCase() === candidateName);
-                        if (m && m.whatsapp) {
-                            photoForKonfirmasi = await fetchWaProfilePhoto(m.whatsapp);
-                        }
-                    }
 
                     let emeraldBuffer: Buffer | null = null;
                     try {

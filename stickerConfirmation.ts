@@ -3,6 +3,8 @@ import { createCanvas, loadImage } from '@napi-rs/canvas';
 import webpmux from 'node-webpmux';
 import fs from 'fs';
 import path from 'path';
+import https from 'https';
+import http from 'http';
 
 export interface ConfirmationStickerData {
     serviceName: string;         // e.g. "PLN 20.000"
@@ -14,6 +16,45 @@ export interface ConfirmationStickerData {
     whatsapp?: string;
     avatarBuffer?: Buffer | null;
     format?: 'webp' | 'png';
+}
+
+/**
+ * Downloads image buffer using node https/http with IPv4 forced (Anti fetch failed di Armbian STB)
+ */
+export function downloadImageBuffer(urlStr: string): Promise<Buffer | null> {
+    return new Promise((resolve) => {
+        try {
+            const parsed = new URL(urlStr);
+            const client = parsed.protocol === 'http:' ? http : https;
+            const req = client.get(parsed, {
+                family: 4, // Force IPv4 on Armbian/Linux
+                timeout: 15000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+                }
+            }, (res) => {
+                if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                    return resolve(downloadImageBuffer(res.headers.location));
+                }
+                if (res.statusCode !== 200) {
+                    return resolve(null);
+                }
+                const chunks: Buffer[] = [];
+                res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+                res.on('end', () => resolve(Buffer.concat(chunks)));
+                res.on('error', () => resolve(null));
+            });
+            req.on('timeout', () => {
+                req.destroy();
+                resolve(null);
+            });
+            req.on('error', (err) => {
+                resolve(null);
+            });
+        } catch (e) {
+            resolve(null);
+        }
+    });
 }
 
 /**
@@ -41,11 +82,21 @@ async function loadAvatarImage(input?: string | Buffer | null): Promise<any> {
             }
         }
 
-        // Tipe 1: Remote URL (http/https) -> pakai fetch() dengan timeout 15 detik
+        // Tipe 1: Remote URL (http/https)
         if (str.startsWith('http://') || str.startsWith('https://')) {
+            // Metode Utama: https.get dengan IPv4 (Anti 'fetch failed' di Armbian Linux)
+            try {
+                const buf = await downloadImageBuffer(str);
+                if (buf && buf.length > 0) {
+                    const img = await loadImage(buf);
+                    if (img) return img;
+                }
+            } catch (e: any) {}
+
+            // Cadangan: fetch() bawaan Node.js
             try {
                 const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 15000); // 15 detik timeout
+                const timeout = setTimeout(() => controller.abort(), 10000);
                 const res = await fetch(str, {
                     signal: controller.signal,
                     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }

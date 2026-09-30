@@ -1,6 +1,7 @@
 import { createCanvas, loadImage, Image } from '@napi-rs/canvas';
 import path from 'path';
 import fs from 'fs';
+import { downloadImageBuffer } from './stickerConfirmation';
 
 export interface KonfirmasiData {
     nama?: string;
@@ -31,9 +32,18 @@ async function loadAvatarImage(input?: string | Buffer | null): Promise<any> {
     if (typeof input === 'string') {
         const str = input.trim();
         if (str.startsWith('http://') || str.startsWith('https://')) {
+            // Metode Utama: https.get dengan IPv4 (Anti fetch failed di Armbian STB)
+            try {
+                const buf = await downloadImageBuffer(str);
+                if (buf && buf.length > 0) {
+                    const img = await loadImage(buf);
+                    if (img) return img;
+                }
+            } catch (e) {}
+
             try {
                 const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 6000);
+                const timeout = setTimeout(() => controller.abort(), 10000);
                 const res = await fetch(str, {
                     signal: controller.signal,
                     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
@@ -43,13 +53,17 @@ async function loadAvatarImage(input?: string | Buffer | null): Promise<any> {
                     const buf = Buffer.from(await res.arrayBuffer());
                     return await loadImage(buf);
                 }
-            } catch (e) {
-                console.error("Gagal fetch avatar URL di konfirmasiReceipt:", e);
+            } catch (e: any) {
+                console.error("Gagal fetch avatar URL di konfirmasiReceipt:", e?.message || e?.toString() || JSON.stringify(e));
             }
-        } else if (fs.existsSync(str)) {
-            try {
-                return await loadImage(str);
-            } catch (e) {}
+        } else {
+            const resolved = path.isAbsolute(str) ? str : path.resolve(process.cwd(), str);
+            if (fs.existsSync(resolved)) {
+                try {
+                    const fileBuf = fs.readFileSync(resolved);
+                    return await loadImage(fileBuf);
+                } catch (e) {}
+            }
         }
     }
     return null;
