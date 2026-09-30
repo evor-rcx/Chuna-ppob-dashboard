@@ -1,10 +1,6 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 // @ts-ignore
 import webpmux from 'node-webpmux';
-import fs from 'fs';
-import path from 'path';
-import https from 'https';
-import http from 'http';
 
 export interface ConfirmationStickerData {
     serviceName: string;         // e.g. "PLN 20.000"
@@ -13,122 +9,8 @@ export interface ConfirmationStickerData {
     nickname?: string;           // e.g. "Budi" (optional)
     note?: string;               // e.g. "pembelianmu akan di proses ya kk\nmohon di tunggu"
     waPhotoUrl?: string | null;
-    whatsapp?: string;
     avatarBuffer?: Buffer | null;
     format?: 'webp' | 'png';
-}
-
-/**
- * Downloads image buffer using node https/http with IPv4 forced (Anti fetch failed di Armbian STB)
- */
-export function downloadImageBuffer(urlStr: string): Promise<Buffer | null> {
-    return new Promise((resolve) => {
-        try {
-            const parsed = new URL(urlStr);
-            const client = parsed.protocol === 'http:' ? http : https;
-            const req = client.get(parsed, {
-                family: 4, // Force IPv4 on Armbian/Linux
-                timeout: 15000,
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-                }
-            }, (res) => {
-                if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-                    return resolve(downloadImageBuffer(res.headers.location));
-                }
-                if (res.statusCode !== 200) {
-                    return resolve(null);
-                }
-                const chunks: Buffer[] = [];
-                res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-                res.on('end', () => resolve(Buffer.concat(chunks)));
-                res.on('error', () => resolve(null));
-            });
-            req.on('timeout', () => {
-                req.destroy();
-                resolve(null);
-            });
-            req.on('error', (err) => {
-                resolve(null);
-            });
-        } catch (e) {
-            resolve(null);
-        }
-    });
-}
-
-/**
- * Safely loads image from Buffer, HTTP/HTTPS URL, or local file path
- */
-async function loadAvatarImage(input?: string | Buffer | null): Promise<any> {
-    if (!input) return null;
-    if (Buffer.isBuffer(input)) {
-        try {
-            return await loadImage(input);
-        } catch (e) {
-            return null;
-        }
-    }
-    if (typeof input === 'string') {
-        const str = input.trim();
-        if (!str) return null;
-
-        if (str.startsWith('data:image/')) {
-            try {
-                const base64 = str.split(',')[1];
-                if (base64) return await loadImage(Buffer.from(base64, 'base64'));
-            } catch (e) {
-                return null;
-            }
-        }
-
-        // Tipe 1: Remote URL (http/https)
-        if (str.startsWith('http://') || str.startsWith('https://')) {
-            // Metode Utama: https.get dengan IPv4 (Anti 'fetch failed' di Armbian Linux)
-            try {
-                const buf = await downloadImageBuffer(str);
-                if (buf && buf.length > 0) {
-                    const img = await loadImage(buf);
-                    if (img) return img;
-                }
-            } catch (e: any) {}
-
-            // Cadangan: fetch() bawaan Node.js
-            try {
-                const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 10000);
-                const res = await fetch(str, {
-                    signal: controller.signal,
-                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-                });
-                clearTimeout(timeout);
-                if (res.ok) {
-                    const buf = Buffer.from(await res.arrayBuffer());
-                    return await loadImage(buf);
-                }
-            } catch (e: any) {
-                console.error("Gagal fetch avatar URL di stickerConfirmation:", e?.message || e?.toString() || JSON.stringify(e));
-            }
-            try {
-                return await loadImage(str);
-            } catch (e) {
-                return null;
-            }
-        } else {
-            // Tipe 2: Path lokal (/media/, /wa_photos/, ./public/, dll) -> pakai fs.readFileSync()
-            try {
-                const resolved = path.isAbsolute(str) ? str : path.resolve(process.cwd(), str);
-                if (fs.existsSync(resolved)) {
-                    const fileBuf = fs.readFileSync(resolved);
-                    return await loadImage(fileBuf);
-                }
-            } catch (e: any) {
-                console.error("Gagal membaca file avatar lokal di stickerConfirmation:", e?.message || e?.toString() || JSON.stringify(e));
-                return null;
-            }
-        }
-    }
-    return null;
 }
 
 /**
@@ -273,21 +155,13 @@ export async function generateOrderConfirmationSticker(data: ConfirmationSticker
     // Load WhatsApp profile avatar if available
     let avatarImg: any = null;
     if (data.avatarBuffer) {
-        avatarImg = await loadAvatarImage(data.avatarBuffer);
-    }
-    if (!avatarImg && data.waPhotoUrl) {
-        avatarImg = await loadAvatarImage(data.waPhotoUrl);
-    }
-    if (!avatarImg && data.whatsapp) {
-        const clean = data.whatsapp.replace(/\D/g, '').replace(/^0/, '62');
-        if (clean) {
-            const diskAvatar = path.join(process.cwd(), 'public', 'avatars', `${clean}.jpg`);
-            if (fs.existsSync(diskAvatar)) {
-                try {
-                    avatarImg = await loadImage(diskAvatar);
-                } catch (e) {}
-            }
-        }
+        try {
+            avatarImg = await loadImage(data.avatarBuffer).catch(() => null);
+        } catch (e) {}
+    } else if (data.waPhotoUrl) {
+        try {
+            avatarImg = await loadImage(data.waPhotoUrl).catch(() => null);
+        } catch (e) {}
     }
 
     // Card coordinates on 1024x1024 grid
@@ -451,20 +325,23 @@ export async function generateOrderConfirmationSticker(data: ConfirmationSticker
         ctx.fill();
         ctx.restore();
 
-        // Elegant User Silhouette in crisp white (never print random initials or E4)
-        ctx.save();
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-        ctx.beginPath();
-        ctx.arc(circleX, circleY - 14, 20, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.beginPath();
-        ctx.arc(circleX, circleY + 38, 38, Math.PI * 1.15, Math.PI * 1.85);
-        ctx.lineTo(circleX + 34, circleY + 50);
-        ctx.lineTo(circleX - 34, circleY + 50);
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
+        // Customer initials or E4 monogram in crisp white
+        ctx.font = '900 36px Arial, "Segoe UI", "Liberation Sans", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#ffffff';
+        let fallbackText = 'E4';
+        if (data.nickname) {
+            if (/selamat\s*datang\s*owner/i.test(data.nickname)) {
+                fallbackText = 'OW';
+            } else {
+                const words = data.nickname.trim().split(/\s+/).filter(Boolean);
+                fallbackText = words.length >= 2 
+                    ? (words[0][0] + words[1][0]).toUpperCase()
+                    : data.nickname.slice(0, 2).toUpperCase();
+            }
+        }
+        ctx.fillText(fallbackText, circleX, circleY + 4);
     }
     ctx.restore(); // Restore clip
 
