@@ -8083,8 +8083,14 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                         await waSocket.presenceSubscribe(jid);
                         await waSocket.sendPresenceUpdate('composing', jid);
                         
-                        // Foto profil WhatsApp: persis seperti alur Gambar 2 (menggunakan foto nomor pelanggan tersebut)
+                        // Foto profil WhatsApp: persis seperti alur Gambar 2 (menggunakan foto nomor WhatsApp pelanggan)
                         let photoForSticker = waDetails?.waPhotoUrl || null;
+                        if (!photoForSticker && memberForPrepaid?.whatsapp) {
+                            photoForSticker = await fetchWaProfilePhoto(memberForPrepaid.whatsapp);
+                        }
+                        if (!photoForSticker && ctx.from?.id && (registeredUsers[ctx.from.id]?.wa || registeredUsers[Number(ctx.from.id)]?.wa)) {
+                            photoForSticker = await fetchWaProfilePhoto(registeredUsers[ctx.from.id]?.wa || registeredUsers[Number(ctx.from.id)]?.wa);
+                        }
                         if (!photoForSticker && cleanWa) {
                             photoForSticker = await fetchWaProfilePhoto(cleanWa);
                         }
@@ -8096,7 +8102,8 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                             totalBayar: total,
                             nickname: (customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak') ? customerDisplayName : undefined,
                             note: 'pembelianmu akan di proses ya kk\nmohon di tunggu',
-                            waPhotoUrl: photoForSticker
+                            waPhotoUrl: photoForSticker,
+                            whatsapp: targetWaCandidate
                         });
 
                         await new Promise(r => setTimeout(r, 1000));

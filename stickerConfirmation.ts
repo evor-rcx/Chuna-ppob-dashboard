@@ -11,6 +11,7 @@ export interface ConfirmationStickerData {
     nickname?: string;           // e.g. "Budi" (optional)
     note?: string;               // e.g. "pembelianmu akan di proses ya kk\nmohon di tunggu"
     waPhotoUrl?: string | null;
+    whatsapp?: string;
     avatarBuffer?: Buffer | null;
     format?: 'webp' | 'png';
 }
@@ -29,6 +30,12 @@ async function loadAvatarImage(input?: string | Buffer | null): Promise<any> {
     }
     if (typeof input === 'string') {
         const str = input.trim();
+        if (str.startsWith('data:image/')) {
+            try {
+                const base64 = str.split(',')[1];
+                if (base64) return await loadImage(Buffer.from(base64, 'base64'));
+            } catch (e) {}
+        }
         if (str.startsWith('http://') || str.startsWith('https://')) {
             try {
                 const controller = new AbortController();
@@ -45,10 +52,16 @@ async function loadAvatarImage(input?: string | Buffer | null): Promise<any> {
             } catch (e) {
                 console.error("Gagal fetch avatar URL di stickerConfirmation:", e);
             }
-        } else if (fs.existsSync(str)) {
             try {
                 return await loadImage(str);
             } catch (e) {}
+        } else {
+            const resolved = path.isAbsolute(str) ? str : path.resolve(process.cwd(), str);
+            if (fs.existsSync(resolved)) {
+                try {
+                    return await loadImage(resolved);
+                } catch (e) {}
+            }
         }
     }
     return null;
@@ -200,6 +213,17 @@ export async function generateOrderConfirmationSticker(data: ConfirmationSticker
     }
     if (!avatarImg && data.waPhotoUrl) {
         avatarImg = await loadAvatarImage(data.waPhotoUrl);
+    }
+    if (!avatarImg && data.whatsapp) {
+        const clean = data.whatsapp.replace(/\D/g, '').replace(/^0/, '62');
+        if (clean) {
+            const diskAvatar = path.join(process.cwd(), 'public', 'avatars', `${clean}.jpg`);
+            if (fs.existsSync(diskAvatar)) {
+                try {
+                    avatarImg = await loadImage(diskAvatar);
+                } catch (e) {}
+            }
+        }
     }
 
     // Card coordinates on 1024x1024 grid
