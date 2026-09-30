@@ -294,55 +294,40 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
         // If type is tagihan, use the new official E4 Store Cek Tagihan layout (Picsart_26-09-28_23-03-28-209.png)
         if (type === 'tagihan') {
             let waPhoto = data.waPhotoUrl || null;
-
-            // 1. Cek dari nama member di daftar member offline / online (misal nama: aqila / lio / lili)
-            if (!waPhoto && (data.nama || data.customerDisplayName || data.customerName)) {
-                const candidateName = String(data.customerDisplayName || data.nama || data.customerName).trim().toLowerCase().replace(/^kak\s+/i, '');
-                const m = (db.members || []).find((x: any) => x.name && x.name.trim().toLowerCase() === candidateName);
-                if (m && m.whatsapp) {
-                    waPhoto = await fetchWaProfilePhoto(m.whatsapp);
-                }
-            }
-
-            // 2. Cek jika ada nomor WhatsApp eksplisit
             if (!waPhoto) {
-                const candidatePhone = data.targetPhone || data.customerPhone || data.phone || data.whatsapp || data.target || data.no || data.customerWa;
+                const candidatePhone = data.targetPhone || data.customerPhone || data.phone || data.whatsapp || data.target || data.no;
                 if (candidatePhone) {
-                    waPhoto = await fetchWaProfilePhoto(String(candidatePhone));
+                    const cleanPhone = cleanWaPhone(String(candidatePhone));
+                    if (cleanPhone && db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) {
+                        waPhoto = db.waProfilePhotos[cleanPhone];
+                    } else if (cleanPhone && typeof waSocket !== 'undefined' && waSocket) {
+                        try {
+                            const jid = `${cleanPhone}@s.whatsapp.net`;
+                            const fetched = await waSocket.profilePictureUrl(jid, 'image').catch(() => null);
+                            if (fetched) {
+                                waPhoto = fetched;
+                                if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                                db.waProfilePhotos[cleanPhone] = fetched;
+                                writeDB(db);
+                            }
+                        } catch (e) {}
+                    }
                 }
             }
 
-            // 3. Cek dari Telegram ID jika ada member tertaut
-            if (!waPhoto && (data.userId || data.telegramId || data.tgChatId)) {
-                const tgId = data.userId || data.telegramId || data.tgChatId;
+            if (!waPhoto && (data.userId || data.telegramId)) {
+                const tgId = data.userId || data.telegramId;
                 const m = db.members?.find((x: any) => isTelegramMatch(x.telegram, tgId, undefined));
-                if (m && m.whatsapp) {
-                    waPhoto = await fetchWaProfilePhoto(m.whatsapp);
-                } else if (db.owners?.includes(tgId) || db.owners?.includes(Number(tgId))) {
-                    for (const ow of (db.ownerWhatsapps || [])) {
-                        waPhoto = await fetchWaProfilePhoto(ow);
-                        if (waPhoto) break;
-                    }
+                if (m) {
+                    const waDetails = await getCustomerWaDetails(m, tgId, data.no);
+                    if (waDetails?.waPhotoUrl) waPhoto = waDetails.waPhotoUrl;
                 }
             }
 
-            // 4. Fallback ke foto WA Owner / cache default di database
             if (!waPhoto && db.waProfilePhotos) {
-                for (const ow of (db.ownerWhatsapps || [])) {
-                    const cOw = cleanWaPhone(ow);
-                    if (cOw && db.waProfilePhotos[cOw] && !db.waProfilePhotos[cOw].includes('default_wa_photo')) {
-                        waPhoto = db.waProfilePhotos[cOw];
-                        break;
-                    }
-                }
-                if (!waPhoto && db.waProfilePhotos['default'] && !db.waProfilePhotos['default'].includes('default_wa_photo')) {
-                    waPhoto = db.waProfilePhotos['default'];
-                }
-                if (!waPhoto) {
-                    const keys = Object.keys(db.waProfilePhotos).filter(k => !k.includes('default_wa_photo') && !k.startsWith('file_'));
-                    if (keys.length > 0) {
-                        waPhoto = db.waProfilePhotos[keys[0]];
-                    }
+                const keys = Object.keys(db.waProfilePhotos);
+                if (keys.length > 0) {
+                    waPhoto = db.waProfilePhotos[keys[keys.length - 1]];
                 }
             }
 
@@ -731,77 +716,6 @@ function saveWaProfile(rawJidOrPhone: string, pushName?: string | null) {
     }
 }
 
-// Helper terpusat untuk mengambil foto profil WhatsApp asli dari server WhatsApp (Baileys) atau cache database
-export async function fetchWaProfilePhoto(rawPhoneOrJid: string): Promise<string | null> {
-    if (!rawPhoneOrJid) return null;
-    const clean = cleanWaPhone(rawPhoneOrJid);
-    if (!clean) return null;
-    const local = "0" + clean.replace(/^62/, '');
-
-    // 1. Cek memory/db cache terlebih dahulu
-    if (db.waProfilePhotos) {
-        if (db.waProfilePhotos[clean] && typeof db.waProfilePhotos[clean] === 'string' && !db.waProfilePhotos[clean].includes('default_wa_photo')) {
-            return db.waProfilePhotos[clean];
-        }
-        if (db.waProfilePhotos[local] && typeof db.waProfilePhotos[local] === 'string' && !db.waProfilePhotos[local].includes('default_wa_photo')) {
-            return db.waProfilePhotos[local];
-        }
-    }
-
-    // 2. Jika waSocket aktif (terkoneksi di server), tarik foto profil langsung dari server WhatsApp
-    if (typeof waSocket !== 'undefined' && waSocket) {
-        try {
-            const jid = `${clean}@s.whatsapp.net`;
-            // Coba resolusi tinggi ('image') -> pratinjau ('preview') -> default
-            let photoUrl = await waSocket.profilePictureUrl(jid, 'image').catch(() => null);
-            if (!photoUrl) {
-                photoUrl = await waSocket.profilePictureUrl(jid, 'preview').catch(() => null);
-            }
-            if (!photoUrl) {
-                photoUrl = await waSocket.profilePictureUrl(jid).catch(() => null);
-            }
-
-            // Jika masih null, periksa format JID terverifikasi via onWhatsApp
-            if (!photoUrl && typeof waSocket.onWhatsApp === 'function') {
-                try {
-                    const waList = await waSocket.onWhatsApp(clean);
-                    if (waList && waList.length > 0 && waList[0]?.jid) {
-                        const verifiedJid = waList[0].jid;
-                        photoUrl = await waSocket.profilePictureUrl(verifiedJid, 'image').catch(() => null);
-                        if (!photoUrl) {
-                            photoUrl = await waSocket.profilePictureUrl(verifiedJid, 'preview').catch(() => null);
-                        }
-                    }
-                } catch (e) {}
-            }
-
-            if (photoUrl) {
-                if (!db.waProfilePhotos) db.waProfilePhotos = {};
-                db.waProfilePhotos[clean] = photoUrl;
-                db.waProfilePhotos[local] = photoUrl;
-                writeDB(db);
-                return photoUrl;
-            }
-        } catch (err) {}
-    }
-
-    // 3. Fallback: jika nomor ini adalah salah satu nomor Owner, cek apakah ada cache di salah satu nomor owner atau default
-    const isOwner = (db.ownerWhatsapps || []).some((ow: string) => cleanWaPhone(ow) === clean);
-    if (isOwner && db.waProfilePhotos) {
-        for (const ow of (db.ownerWhatsapps || [])) {
-            const cOw = cleanWaPhone(ow);
-            if (cOw && db.waProfilePhotos[cOw] && !db.waProfilePhotos[cOw].includes('default_wa_photo')) {
-                return db.waProfilePhotos[cOw];
-            }
-        }
-        if (db.waProfilePhotos['default'] && !db.waProfilePhotos['default'].includes('default_wa_photo')) {
-            return db.waProfilePhotos['default'];
-        }
-    }
-
-    return null;
-}
-
 async function getCustomerWaDetails(member: any, telegramUserId?: any, explicitWaPhone?: string, customerName?: string) {
     // 1. WhatsApp ASLI dari Member terdaftar (JANGAN samakan dengan nomor target GoPay/produk agar tidak buang limit)
     let rawWa = member?.whatsapp || (telegramUserId ? (registeredUsers[telegramUserId]?.wa || registeredUsers[Number(telegramUserId)]?.wa) : '') || '';
@@ -824,16 +738,6 @@ async function getCustomerWaDetails(member: any, telegramUserId?: any, explicitW
     if (!rawWa && telegramUserId && (db.owners?.includes(telegramUserId) || db.owners?.includes(Number(telegramUserId)))) {
         rawWa = (db.ownerWhatsapps && db.ownerWhatsapps[0]) || '';
     }
-
-    // 4. Jika masih belum ada, cek apakah telegramUserId cocok dengan member manapun
-    if (!rawWa && telegramUserId && Array.isArray(db.members)) {
-        const m = db.members.find((x: any) => isTelegramMatch(x.telegram, telegramUserId, undefined));
-        if (m && m.whatsapp) {
-            rawWa = m.whatsapp;
-            if (!member) member = m;
-        }
-    }
-
     let waPhone = rawWa || '-';
     let waProfile = '-';
     let waPhotoUrl: string | null = null;
@@ -851,29 +755,63 @@ async function getCustomerWaDetails(member: any, telegramUserId?: any, explicitW
             waProfile = member.waProfileName;
         }
 
-        // 2. Ambil Foto Profil WhatsApp (dari cache atau server WhatsApp Baileys)
-        waPhotoUrl = await fetchWaProfilePhoto(clean);
+        // 2. Ambil Foto Profil HANYA dari WhatsApp (Berdasarkan instruksi: FOKUS WHATSAPP SAJA, JANGAN AMBIL FOTO TELEGRAM)
+        if (db.waProfilePhotos && db.waProfilePhotos[clean]) {
+            waPhotoUrl = db.waProfilePhotos[clean];
+        }
+
+        if (!waPhotoUrl && waSocket && clean) {
+            try {
+                const jid = `${clean}@s.whatsapp.net`;
+                let freshPhoto = await waSocket.profilePictureUrl(jid, 'image').catch(() => null);
+                if (!freshPhoto) freshPhoto = await waSocket.profilePictureUrl(jid, 'preview').catch(() => null);
+                if (!freshPhoto) freshPhoto = await waSocket.profilePictureUrl(jid).catch(() => null);
+                if (freshPhoto) {
+                    waPhotoUrl = freshPhoto;
+                    if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                    db.waProfilePhotos[clean] = freshPhoto;
+                    writeDB(db);
+                }
+            } catch (e) {}
+        }
     }
 
-    // 3. Fallback: jika belum dapat, gunakan foto owner atau foto default di cache database
-    if (!waPhotoUrl && db.waProfilePhotos) {
-        if (telegramUserId && (db.owners?.includes(telegramUserId) || db.owners?.includes(Number(telegramUserId)))) {
-            for (const ow of (db.ownerWhatsapps || [])) {
-                const ownerClean = cleanWaPhone(ow);
-                if (ownerClean && db.waProfilePhotos[ownerClean] && !db.waProfilePhotos[ownerClean].includes('default_wa_photo')) {
-                    waPhotoUrl = db.waProfilePhotos[ownerClean];
-                    break;
+    // 3. Cek dari Telegram User Profile Photos jika belum ada foto
+    if (!waPhotoUrl && telegramUserId && typeof bot !== 'undefined' && bot) {
+        try {
+            const tgPhotos = await bot.telegram.getUserProfilePhotos(Number(telegramUserId), 0, 1);
+            if (tgPhotos && tgPhotos.total_count > 0 && tgPhotos.photos.length > 0 && tgPhotos.photos[0].length > 0) {
+                const sizeArr = tgPhotos.photos[0];
+                const fileId = sizeArr[sizeArr.length - 1].file_id;
+                const link = await bot.telegram.getFileLink(fileId);
+                if (link && link.href) {
+                    waPhotoUrl = link.href;
+                    if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                    db.waProfilePhotos[String(telegramUserId)] = link.href;
+                    if (rawWa) {
+                        const cleanP = cleanWaPhone(rawWa);
+                        if (cleanP) db.waProfilePhotos[cleanP] = link.href;
+                    }
+                    db.waProfilePhotos['default'] = link.href;
+                    writeDB(db);
                 }
             }
+        } catch (e) {}
+    }
+
+    // 4. Fallback: jika belum dapat, gunakan foto yang tersimpan di cache database
+    if (!waPhotoUrl && db.waProfilePhotos) {
+        if (telegramUserId && db.waProfilePhotos[String(telegramUserId)]) {
+            waPhotoUrl = db.waProfilePhotos[String(telegramUserId)];
         }
-        if (!waPhotoUrl && db.waProfilePhotos['default'] && !db.waProfilePhotos['default'].includes('default_wa_photo')) {
-            waPhotoUrl = db.waProfilePhotos['default'];
-        }
-        if (!waPhotoUrl) {
-            const keys = Object.keys(db.waProfilePhotos).filter(k => !k.includes('default_wa_photo') && !k.startsWith('file_'));
-            if (keys.length > 0) {
-                waPhotoUrl = db.waProfilePhotos[keys[0]];
+        if (!waPhotoUrl && telegramUserId && (db.owners?.includes(telegramUserId) || db.owners?.includes(Number(telegramUserId)))) {
+            const ownerClean = cleanWaPhone((db.ownerWhatsapps && db.ownerWhatsapps[0]) || '');
+            if (ownerClean && db.waProfilePhotos[ownerClean]) {
+                waPhotoUrl = db.waProfilePhotos[ownerClean];
             }
+        }
+        if (!waPhotoUrl && db.waProfilePhotos['default']) {
+            waPhotoUrl = db.waProfilePhotos['default'];
         }
     }
 
@@ -2880,8 +2818,123 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
 
 
   // --- WA Bot API Routes ---
+  app.get("/api/wa/profile", (req, res) => {
+    try {
+      const dbNow = readDB();
+      const customProfile = dbNow.waCustomProfile || {};
+      const ownerWa = (dbNow.ownerWhatsapps && dbNow.ownerWhatsapps.length > 0) ? dbNow.ownerWhatsapps[0] : "6285169949218";
+      const ownerClean = cleanWaPhone(ownerWa);
+
+      let botPhone = "";
+      let pushName = "";
+      if (waSocket?.user) {
+        botPhone = waSocket.user.id ? waSocket.user.id.split(':')[0] : "";
+        pushName = waSocket.user.name || "";
+      }
+
+      const activePhone = botPhone || ownerWa;
+      const cleanPhone = cleanWaPhone(activePhone);
+
+      // Determine photo
+      let photoUrl = customProfile.photoUrl || "";
+      if (!photoUrl && cleanPhone && dbNow.waProfilePhotos && dbNow.waProfilePhotos[cleanPhone]) {
+        photoUrl = dbNow.waProfilePhotos[cleanPhone];
+      }
+      if (!photoUrl && ownerClean && dbNow.waProfilePhotos && dbNow.waProfilePhotos[ownerClean]) {
+        photoUrl = dbNow.waProfilePhotos[ownerClean];
+      }
+      if (!photoUrl && dbNow.waProfilePhotos && dbNow.waProfilePhotos['default']) {
+        photoUrl = dbNow.waProfilePhotos['default'];
+      }
+      if (!photoUrl) {
+        photoUrl = "/default_wa_photo.png";
+      }
+
+      // Determine username / display name
+      let username = customProfile.username || customProfile.name || "";
+      if (!username && pushName) {
+        username = pushName;
+      }
+      if (!username && dbNow.waProfiles && dbNow.waProfiles[activePhone]) {
+        username = dbNow.waProfiles[activePhone];
+      }
+      if (!username) {
+        username = "E4 STORE Official";
+      }
+
+      res.json({
+        success: true,
+        profile: {
+          username,
+          name: username,
+          phoneNumber: activePhone,
+          photoUrl,
+          status: waStatus,
+          isConnected: waStatus?.startsWith("Connected")
+        }
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post("/api/wa/profile", (req, res) => {
+    try {
+      const { username, name, photoUrl, phoneNumber } = req.body;
+      const dbNow = readDB();
+      if (!dbNow.waCustomProfile) dbNow.waCustomProfile = {};
+      
+      if (username !== undefined) dbNow.waCustomProfile.username = String(username).trim();
+      if (name !== undefined) dbNow.waCustomProfile.name = String(name).trim();
+      if (photoUrl !== undefined) {
+        dbNow.waCustomProfile.photoUrl = String(photoUrl).trim();
+        if (!dbNow.waProfilePhotos) dbNow.waProfilePhotos = {};
+        dbNow.waProfilePhotos['default'] = String(photoUrl).trim();
+        if (phoneNumber) {
+          const clean = cleanWaPhone(phoneNumber);
+          if (clean) dbNow.waProfilePhotos[clean] = String(photoUrl).trim();
+        }
+      }
+      if (phoneNumber !== undefined) dbNow.waCustomProfile.phoneNumber = String(phoneNumber).trim();
+      
+      writeDB(dbNow);
+      db = dbNow;
+
+      res.json({
+        success: true,
+        message: "Profil WhatsApp berhasil diperbarui",
+        profile: {
+          username: dbNow.waCustomProfile.username || dbNow.waCustomProfile.name || "E4 STORE Official",
+          name: dbNow.waCustomProfile.name || dbNow.waCustomProfile.username || "E4 STORE Official",
+          phoneNumber: dbNow.waCustomProfile.phoneNumber || (dbNow.ownerWhatsapps?.[0] || "6285169949218"),
+          photoUrl: dbNow.waCustomProfile.photoUrl || "/default_wa_photo.png",
+          status: waStatus,
+          isConnected: waStatus?.startsWith("Connected")
+        }
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   app.get("/api/wa/status", (req, res) => {
-    res.json({ status: waStatus, pairingCode: waPairingCode });
+    const dbNow = readDB();
+    const customProfile = dbNow.waCustomProfile || {};
+    const ownerWa = (dbNow.ownerWhatsapps && dbNow.ownerWhatsapps.length > 0) ? dbNow.ownerWhatsapps[0] : "6285169949218";
+    const cleanPhone = cleanWaPhone(waSocket?.user?.id ? waSocket.user.id.split(':')[0] : ownerWa);
+    let photoUrl = customProfile.photoUrl || dbNow.waProfilePhotos?.[cleanPhone] || dbNow.waProfilePhotos?.['default'] || "/default_wa_photo.png";
+    let username = customProfile.username || waSocket?.user?.name || "E4 STORE Official";
+
+    res.json({ 
+      status: waStatus, 
+      pairingCode: waPairingCode,
+      profile: {
+        username,
+        phoneNumber: waSocket?.user?.id ? waSocket.user.id.split(':')[0] : ownerWa,
+        photoUrl,
+        isConnected: waStatus?.startsWith("Connected")
+      }
+    });
   });
 
   app.post("/api/wa/reset", async (req, res) => {
@@ -5188,10 +5241,138 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca") {
     });
   });
 
-  app.get("/api/bot/owner-wa", (req, res) => {
-    res.json({
-      ownerWhatsapps: db.ownerWhatsapps || ["6285169949218"]
-    });
+  app.get("/api/bot/owner-wa", async (req, res) => {
+    try {
+      const dbNow = readDB();
+      const numbers: string[] = dbNow.ownerWhatsapps || ["6285169949218"];
+      if (!numbers.includes("6285169949218")) numbers.unshift("6285169949218");
+      
+      const customProfiles = dbNow.waCustomProfiles || {};
+      
+      const profiles = await Promise.all(numbers.map(async (rawNum: string, index: number) => {
+        const clean = cleanWaPhone(rawNum);
+        const custom = customProfiles[clean] || {};
+        
+        let photoUrl = custom.photoUrl || (dbNow.waProfilePhotos && dbNow.waProfilePhotos[clean]) || "";
+        
+        if (!photoUrl && waSocket && clean) {
+          try {
+            const jid = `${clean}@s.whatsapp.net`;
+            const fetched = await waSocket.profilePictureUrl(jid, "image").catch(() => null);
+            if (fetched) {
+              photoUrl = fetched;
+              if (!dbNow.waProfilePhotos) dbNow.waProfilePhotos = {};
+              dbNow.waProfilePhotos[clean] = fetched;
+              writeDB(dbNow);
+            }
+          } catch(e) {}
+        }
+        
+        if (!photoUrl) {
+          photoUrl = dbNow.waProfilePhotos?.['default'] || "/default_wa_photo.png";
+        }
+
+        let username = custom.username || custom.name || "";
+        if (!username && dbNow.waProfiles && dbNow.waProfiles[clean]) {
+          username = dbNow.waProfiles[clean];
+        }
+        if (!username && dbNow.waProfiles && dbNow.waProfiles[`${clean}@s.whatsapp.net`]) {
+          username = dbNow.waProfiles[`${clean}@s.whatsapp.net`];
+        }
+        if (!username) {
+          if (clean === "6285169949218") {
+            username = "Owner E4 Store (Eko)";
+          } else {
+            username = `Owner WhatsApp (${clean.slice(-4)})`;
+          }
+        }
+
+        return {
+          phone: rawNum,
+          cleanPhone: clean,
+          username,
+          photoUrl,
+          isPrimary: index === 0 || clean === "6285169949218",
+          role: clean === "6285169949218" ? "Owner Utama" : "Co-Owner Terdaftar",
+          status: "Aktif & Terdaftar"
+        };
+      }));
+
+      res.json({
+        success: true,
+        ownerWhatsapps: numbers,
+        profiles
+      });
+    } catch(err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post("/api/bot/owner-wa/profile", async (req, res) => {
+    try {
+      const { phone, username, photoUrl } = req.body;
+      if (!phone) return res.status(400).json({ success: false, error: "Nomor WhatsApp diperlukan" });
+      
+      const dbNow = readDB();
+      if (!dbNow.waCustomProfiles) dbNow.waCustomProfiles = {};
+      const clean = cleanWaPhone(phone);
+      
+      if (!dbNow.waCustomProfiles[clean]) dbNow.waCustomProfiles[clean] = {};
+      if (username !== undefined) dbNow.waCustomProfiles[clean].username = String(username).trim();
+      if (photoUrl !== undefined) {
+        dbNow.waCustomProfiles[clean].photoUrl = String(photoUrl).trim();
+        if (!dbNow.waProfilePhotos) dbNow.waProfilePhotos = {};
+        dbNow.waProfilePhotos[clean] = String(photoUrl).trim();
+      }
+      
+      writeDB(dbNow);
+      db = dbNow;
+      
+      res.json({
+        success: true,
+        message: "Profil WhatsApp Owner berhasil diperbarui",
+        profile: {
+          phone,
+          cleanPhone: clean,
+          username: dbNow.waCustomProfiles[clean].username,
+          photoUrl: dbNow.waCustomProfiles[clean].photoUrl
+        }
+      });
+    } catch(err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post("/api/bot/owner-wa/sync-photo", async (req, res) => {
+    try {
+      const { phone } = req.body;
+      if (!phone) return res.status(400).json({ success: false, error: "Nomor WhatsApp diperlukan" });
+      const clean = cleanWaPhone(phone);
+      
+      if (!waSocket) {
+        return res.status(400).json({ success: false, error: "Bot WhatsApp sedang tidak terhubung" });
+      }
+      
+      const jid = `${clean}@s.whatsapp.net`;
+      let photo = await waSocket.profilePictureUrl(jid, "image").catch(() => null);
+      if (!photo) photo = await waSocket.profilePictureUrl(jid, "preview").catch(() => null);
+      
+      if (photo) {
+        const dbNow = readDB();
+        if (!dbNow.waProfilePhotos) dbNow.waProfilePhotos = {};
+        dbNow.waProfilePhotos[clean] = photo;
+        if (!dbNow.waCustomProfiles) dbNow.waCustomProfiles = {};
+        if (!dbNow.waCustomProfiles[clean]) dbNow.waCustomProfiles[clean] = {};
+        dbNow.waCustomProfiles[clean].photoUrl = photo;
+        writeDB(dbNow);
+        db = dbNow;
+        return res.json({ success: true, photoUrl: photo, message: "Foto profil berhasil disinkron langsung dari WhatsApp!" });
+      } else {
+        return res.status(404).json({ success: false, error: "Foto profil WhatsApp tidak ditemukan atau akun di-private" });
+      }
+    } catch(err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
   });
 
   app.post("/api/bot/owner-wa", (req, res) => {
@@ -5303,39 +5484,29 @@ Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa s
 Chuna menunggu kabar baik dari Kakak! 😊`;
 
                     let photoForKonfirmasi = waDetails?.waPhotoUrl || null;
-                    if (!photoForKonfirmasi && member?.whatsapp) {
-                        photoForKonfirmasi = await fetchWaProfilePhoto(member.whatsapp);
-                    }
-                    if (!photoForKonfirmasi && memberRawWa) {
-                        photoForKonfirmasi = await fetchWaProfilePhoto(memberRawWa);
-                    }
-                    if (!photoForKonfirmasi && (customerDisplayName || member?.name)) {
-                        const candidateName = String(customerDisplayName || member?.name).trim().toLowerCase().replace(/^kak\s+/i, '');
-                        const m = (db.members || []).find((x: any) => x.name && x.name.trim().toLowerCase() === candidateName);
-                        if (m && m.whatsapp) {
-                            photoForKonfirmasi = await fetchWaProfilePhoto(m.whatsapp);
-                        }
-                    }
-                    if (!photoForKonfirmasi && ctx.from?.id && (db.owners?.includes(ctx.from.id) || db.owners?.includes(Number(ctx.from.id)))) {
-                        for (const ow of (db.ownerWhatsapps || [])) {
-                            photoForKonfirmasi = await fetchWaProfilePhoto(ow);
-                            if (photoForKonfirmasi) break;
-                        }
-                    }
-                    if (!photoForKonfirmasi && db.waProfilePhotos) {
-                        for (const ow of (db.ownerWhatsapps || [])) {
-                            const cOw = cleanWaPhone(ow);
-                            if (cOw && db.waProfilePhotos[cOw] && !db.waProfilePhotos[cOw].includes('default_wa_photo')) {
-                                photoForKonfirmasi = db.waProfilePhotos[cOw];
-                                break;
-                            }
-                        }
-                        if (!photoForKonfirmasi && db.waProfilePhotos['default'] && !db.waProfilePhotos['default'].includes('default_wa_photo')) {
-                            photoForKonfirmasi = db.waProfilePhotos['default'];
-                        }
-                        if (!photoForKonfirmasi) {
-                            const keys = Object.keys(db.waProfilePhotos).filter(k => !k.includes('default_wa_photo') && !k.startsWith('file_'));
-                            if (keys.length > 0) photoForKonfirmasi = db.waProfilePhotos[keys[0]];
+                    if (!photoForKonfirmasi && ctx.from?.id) {
+                        const cached = db.waProfilePhotos?.[String(ctx.from.id)] || (db.owners?.includes(ctx.from.id) && db.ownerWhatsapps?.[0] ? db.waProfilePhotos?.[cleanWaPhone(db.ownerWhatsapps[0])] : null);
+                        if (cached && !cached.includes('default_wa_photo')) {
+                            photoForKonfirmasi = cached;
+                        } else {
+                            try {
+                                const tgPhotos = await ctx.telegram.getUserProfilePhotos(ctx.from.id, 0, 1);
+                                if (tgPhotos && tgPhotos.total_count > 0 && tgPhotos.photos.length > 0 && tgPhotos.photos[0].length > 0) {
+                                    const sizeArr = tgPhotos.photos[0];
+                                    const fileId = sizeArr[sizeArr.length - 1].file_id;
+                                    const link = await ctx.telegram.getFileLink(fileId);
+                                    if (link && link.href) {
+                                        photoForKonfirmasi = link.href;
+                                        if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                                        db.waProfilePhotos[String(ctx.from.id)] = link.href;
+                                        db.waProfilePhotos['default'] = link.href;
+                                        if (db.owners?.includes(ctx.from.id) && db.ownerWhatsapps?.[0]) {
+                                            db.waProfilePhotos[cleanWaPhone(db.ownerWhatsapps[0])] = link.href;
+                                        }
+                                        writeDB(db);
+                                    }
+                                }
+                            } catch (e) {}
                         }
                     }
 
@@ -5717,39 +5888,29 @@ Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa s
 Chuna menunggu kabar baik dari Kakak! 😊`;
 
                     let photoForKonfirmasi = waDetails?.waPhotoUrl || null;
-                    if (!photoForKonfirmasi && member?.whatsapp) {
-                        photoForKonfirmasi = await fetchWaProfilePhoto(member.whatsapp);
-                    }
-                    if (!photoForKonfirmasi && memberRawWa) {
-                        photoForKonfirmasi = await fetchWaProfilePhoto(memberRawWa);
-                    }
-                    if (!photoForKonfirmasi && (customerDisplayName || member?.name)) {
-                        const candidateName = String(customerDisplayName || member?.name).trim().toLowerCase().replace(/^kak\s+/i, '');
-                        const m = (db.members || []).find((x: any) => x.name && x.name.trim().toLowerCase() === candidateName);
-                        if (m && m.whatsapp) {
-                            photoForKonfirmasi = await fetchWaProfilePhoto(m.whatsapp);
-                        }
-                    }
-                    if (!photoForKonfirmasi && ctx.from?.id && (db.owners?.includes(ctx.from.id) || db.owners?.includes(Number(ctx.from.id)))) {
-                        for (const ow of (db.ownerWhatsapps || [])) {
-                            photoForKonfirmasi = await fetchWaProfilePhoto(ow);
-                            if (photoForKonfirmasi) break;
-                        }
-                    }
-                    if (!photoForKonfirmasi && db.waProfilePhotos) {
-                        for (const ow of (db.ownerWhatsapps || [])) {
-                            const cOw = cleanWaPhone(ow);
-                            if (cOw && db.waProfilePhotos[cOw] && !db.waProfilePhotos[cOw].includes('default_wa_photo')) {
-                                photoForKonfirmasi = db.waProfilePhotos[cOw];
-                                break;
-                            }
-                        }
-                        if (!photoForKonfirmasi && db.waProfilePhotos['default'] && !db.waProfilePhotos['default'].includes('default_wa_photo')) {
-                            photoForKonfirmasi = db.waProfilePhotos['default'];
-                        }
-                        if (!photoForKonfirmasi) {
-                            const keys = Object.keys(db.waProfilePhotos).filter(k => !k.includes('default_wa_photo') && !k.startsWith('file_'));
-                            if (keys.length > 0) photoForKonfirmasi = db.waProfilePhotos[keys[0]];
+                    if (!photoForKonfirmasi && ctx.from?.id) {
+                        const cached = db.waProfilePhotos?.[String(ctx.from.id)] || (db.owners?.includes(ctx.from.id) && db.ownerWhatsapps?.[0] ? db.waProfilePhotos?.[cleanWaPhone(db.ownerWhatsapps[0])] : null);
+                        if (cached && !cached.includes('default_wa_photo')) {
+                            photoForKonfirmasi = cached;
+                        } else {
+                            try {
+                                const tgPhotos = await ctx.telegram.getUserProfilePhotos(ctx.from.id, 0, 1);
+                                if (tgPhotos && tgPhotos.total_count > 0 && tgPhotos.photos.length > 0 && tgPhotos.photos[0].length > 0) {
+                                    const sizeArr = tgPhotos.photos[0];
+                                    const fileId = sizeArr[sizeArr.length - 1].file_id;
+                                    const link = await ctx.telegram.getFileLink(fileId);
+                                    if (link && link.href) {
+                                        photoForKonfirmasi = link.href;
+                                        if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                                        db.waProfilePhotos[String(ctx.from.id)] = link.href;
+                                        db.waProfilePhotos['default'] = link.href;
+                                        if (db.owners?.includes(ctx.from.id) && db.ownerWhatsapps?.[0]) {
+                                            db.waProfilePhotos[cleanWaPhone(db.ownerWhatsapps[0])] = link.href;
+                                        }
+                                        writeDB(db);
+                                    }
+                                }
+                            } catch (e) {}
                         }
                     }
 
@@ -8205,11 +8366,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                              no: state.data.customerNo, // The phone number instead of the giant base64 code
                              layanan: state.data.product.product_name + " - Omni",
                              total: total,
-                             detail: detail,
-                             userId: ctx.from?.id,
-                             telegramId: ctx.from?.id,
-                             customerDisplayName: member?.name || ctx.from?.first_name,
-                             whatsapp: member?.whatsapp
+                             detail: detail
                          };
                          const base64Data = Buffer.from(JSON.stringify(billData)).toString('base64');
                          const appUrl = process.env.APP_URL || "http://localhost:3000";
@@ -8346,11 +8503,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                              no: state.data.customerNo,
                              layanan: state.data.product.product_name + ` - ${pLabel}`,
                              total: total,
-                             detail: detail,
-                             userId: ctx.from?.id,
-                             telegramId: ctx.from?.id,
-                             customerDisplayName: member?.name || ctx.from?.first_name,
-                             whatsapp: member?.whatsapp
+                             detail: detail
                          };
                          const base64Data = Buffer.from(JSON.stringify(billData)).toString('base64');
                          const appUrl = process.env.APP_URL || "http://localhost:3000";
@@ -8602,11 +8755,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                              no: result.customer_no,
                              layanan: product.product_name,
                              total: total,
-                             detail: detail,
-                             userId: ctx.from?.id,
-                             telegramId: ctx.from?.id,
-                             customerDisplayName: member?.name || ctx.from?.first_name,
-                             whatsapp: member?.whatsapp
+                             detail: detail
                          };
                          const base64Data = Buffer.from(JSON.stringify(billData)).toString('base64');
                          const appUrl = "http://localhost:3000";
@@ -9738,6 +9887,8 @@ E4 Store`,
     }
   });
 
+  const demoImageCache = new Map<string, { buffer: Buffer; timestamp: number }>();
+
   // Route demo gambar nota Lunas (contoh PLN Token dari Gambar 1)
   app.get("/api/demo-nota/lunas", async (req, res) => {
     try {
@@ -9870,6 +10021,14 @@ E4 Store`,
             waPhotoUrl = 'public/default_wa_photo.png';
         }
 
+        const cacheKey = "cek-tagihan-" + (waPhotoUrl || "");
+        const cached = demoImageCache.get(cacheKey);
+        if (cached && (Date.now() - cached.timestamp < 120000)) {
+            res.setHeader('Content-Type', 'image/png');
+            res.setHeader('Cache-Control', 'public, max-age=60');
+            return res.send(cached.buffer);
+        }
+
         const sampleTagihan = {
             nama: (req.query.nama as string) || (req.query.name as string) || "A*D* *A*A*U*D*N",
             nomor: (req.query.no as string) || (req.query.nomor as string) || "234000182643",
@@ -9886,7 +10045,9 @@ E4 Store`,
         };
         const buffer = await generatePascabayarTagihanReceipt(sampleTagihan);
         if (buffer) {
+            demoImageCache.set(cacheKey, { buffer, timestamp: Date.now() });
             res.setHeader('Content-Type', 'image/png');
+            res.setHeader('Cache-Control', 'public, max-age=60');
             res.send(buffer);
         } else {
             res.status(500).send("Gagal generate gambar tagihan");
@@ -9997,6 +10158,14 @@ E4 Store`,
         const cat = (req.query.category as string) || 'game';
         let nama = (req.query.name as string) || 'Lio';
         let status = (req.query.status as string) || 'Lunas';
+
+        const cacheKey = "royal-" + cat + "-" + status + "-" + (waPhotoUrl || "");
+        const cached = demoImageCache.get(cacheKey);
+        if (cached && (Date.now() - cached.timestamp < 120000)) {
+            res.setHeader('Content-Type', 'image/png');
+            res.setHeader('Cache-Control', 'public, max-age=60');
+            return res.send(cached.buffer);
+        }
         let metode = (req.query.metode as string) || 'CASH';
         let orderId = (req.query.orderId as string) || 'PRE-1790198576914';
         let tanggal = (req.query.date as string) || '24/09/2026 05:23 WITA';
