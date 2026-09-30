@@ -202,62 +202,6 @@ export async function generateOrderConfirmationSticker(data: ConfirmationSticker
         avatarImg = await loadAvatarImage(data.waPhotoUrl);
     }
 
-    // Auto-lookup dari database jika avatarImg belum didapat
-    if (!avatarImg) {
-        try {
-            const dbPath = path.join(process.cwd(), 'db.json');
-            if (fs.existsSync(dbPath)) {
-                const dbContent = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
-                const photos = dbContent.waProfilePhotos || {};
-
-                // 1. Cek dari nama pelanggan / nickname di daftar member
-                if (data.nickname) {
-                    const nickLower = String(data.nickname).trim().toLowerCase().replace(/^kak\s+/i, '');
-                    const matchedMember = (dbContent.members || []).find((m: any) => m.name && m.name.trim().toLowerCase() === nickLower);
-                    if (matchedMember && matchedMember.whatsapp) {
-                        const mClean = String(matchedMember.whatsapp).replace(/\D/g, '').replace(/^0/, '62');
-                        if (photos[mClean]) {
-                            avatarImg = await loadAvatarImage(photos[mClean]);
-                        }
-                    }
-                }
-
-                // 2. Cek nomor tujuan targetNo jika format nomor HP
-                if (!avatarImg && data.targetNo) {
-                    const candClean = String(data.targetNo).replace(/\D/g, '').replace(/^0/, '62');
-                    if (photos[candClean]) {
-                        avatarImg = await loadAvatarImage(photos[candClean]);
-                    }
-                }
-
-                // 3. Cek nomor WhatsApp Owner
-                if (!avatarImg && Array.isArray(dbContent.ownerWhatsapps)) {
-                    for (const ow of dbContent.ownerWhatsapps) {
-                        const owClean = String(ow).replace(/\D/g, '').replace(/^0/, '62');
-                        if (photos[owClean]) {
-                            avatarImg = await loadAvatarImage(photos[owClean]);
-                            if (avatarImg) break;
-                        }
-                    }
-                }
-
-                // 4. Fallback foto profil WhatsApp default di database
-                if (!avatarImg) {
-                    if (photos['default']) {
-                        avatarImg = await loadAvatarImage(photos['default']);
-                    }
-                    if (!avatarImg) {
-                        const keys = Object.keys(photos);
-                        for (const k of keys) {
-                            avatarImg = await loadAvatarImage(photos[k]);
-                            if (avatarImg) break;
-                        }
-                    }
-                }
-            }
-        } catch (e) {}
-    }
-
     // Card coordinates on 1024x1024 grid
     const left = 48;
     const right = 976;
@@ -419,7 +363,7 @@ export async function generateOrderConfirmationSticker(data: ConfirmationSticker
         ctx.fill();
         ctx.restore();
 
-        // Elegant User Silhouette Icon in crisp white (NEVER print initials like "Ko")
+        // Elegant User Silhouette in crisp white (never print random initials or E4)
         ctx.save();
         ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
         ctx.beginPath();

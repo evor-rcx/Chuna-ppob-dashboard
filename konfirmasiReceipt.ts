@@ -16,6 +16,45 @@ export interface KonfirmasiData {
 
 let cachedTemplateImg: Image | null = null;
 
+/**
+ * Safely loads image from Buffer, HTTP/HTTPS URL, or local file path
+ */
+async function loadAvatarImage(input?: string | Buffer | null): Promise<any> {
+    if (!input) return null;
+    if (Buffer.isBuffer(input)) {
+        try {
+            return await loadImage(input);
+        } catch (e) {
+            return null;
+        }
+    }
+    if (typeof input === 'string') {
+        const str = input.trim();
+        if (str.startsWith('http://') || str.startsWith('https://')) {
+            try {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 6000);
+                const res = await fetch(str, {
+                    signal: controller.signal,
+                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+                });
+                clearTimeout(timeout);
+                if (res.ok) {
+                    const buf = Buffer.from(await res.arrayBuffer());
+                    return await loadImage(buf);
+                }
+            } catch (e) {
+                console.error("Gagal fetch avatar URL di konfirmasiReceipt:", e);
+            }
+        } else if (fs.existsSync(str)) {
+            try {
+                return await loadImage(str);
+            } catch (e) {}
+        }
+    }
+    return null;
+}
+
 async function getKonfirmasiTemplate(): Promise<Image | null> {
     if (cachedTemplateImg) return cachedTemplateImg;
     const candidates = [
@@ -94,89 +133,54 @@ export async function generateKonfirmasiReceipt(data: KonfirmasiData): Promise<B
     // Load foto profil user jika ada
     let userAvatarImg: any = null;
     if (data.avatarBuffer) {
-        try {
-            userAvatarImg = await loadImage(data.avatarBuffer);
-        } catch (e) {
-            console.error("Gagal load avatarBuffer konfirmasi:", e);
-        }
+        userAvatarImg = await loadAvatarImage(data.avatarBuffer);
+    }
+    if (!userAvatarImg && data.waPhotoUrl) {
+        userAvatarImg = await loadAvatarImage(data.waPhotoUrl);
     }
 
-    if (!userAvatarImg && !data.waPhotoUrl) {
+    // Auto-lookup jika belum ada
+    if (!userAvatarImg) {
         try {
             const dbPath = path.join(process.cwd(), 'db.json');
             if (fs.existsSync(dbPath)) {
                 const dbContent = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
                 const photos = dbContent.waProfilePhotos || {};
 
-                // 1. Cek dari nama member di daftar member offline / online
-                if (data.nama) {
+                // 1. Cek dari nomor whatsapp yang dipassing di data
+                const rawCand = data.whatsapp || data.customerWa || data.buyerWa || data.nomor;
+                if (rawCand) {
+                    const candClean = String(rawCand).replace(/\D/g, '').replace(/^0/, '62');
+                    if (photos[candClean]) {
+                        userAvatarImg = await loadAvatarImage(photos[candClean]);
+                    }
+                    if (!userAvatarImg) {
+                        const localPath = path.join(process.cwd(), 'public', 'avatars', `${candClean}.jpg`);
+                        if (fs.existsSync(localPath)) {
+                            userAvatarImg = await loadAvatarImage(localPath);
+                        }
+                    }
+                }
+
+                // 2. Cek dari nama member
+                if (!userAvatarImg && data.nama) {
                     const cLower = String(data.nama).trim().toLowerCase().replace(/^kak\s+/i, '');
                     const matchedMember = (dbContent.members || []).find((m: any) => m.name && m.name.trim().toLowerCase() === cLower);
                     if (matchedMember && matchedMember.whatsapp) {
-                        const mClean = String(matchedMember.whatsapp).replace(/[^0-9]/g, '').replace(/^0/, '62');
-                        if (mClean && photos[mClean] && !photos[mClean].includes('default_wa_photo')) {
-                            data.waPhotoUrl = photos[mClean];
+                        const mClean = String(matchedMember.whatsapp).replace(/\D/g, '').replace(/^0/, '62');
+                        if (photos[mClean]) {
+                            userAvatarImg = await loadAvatarImage(photos[mClean]);
                         }
-                    }
-                }
-
-                // 2. Cek nomor WhatsApp kandidat
-                if (!data.waPhotoUrl) {
-                    const rawCand = data.whatsapp || data.customerWa || data.buyerWa || data.phone || data.targetPhone;
-                    if (rawCand) {
-                        const candidate = String(rawCand).replace(/[^0-9]/g, '');
-                        const candClean = candidate.replace(/^0/, '62');
-                        if (photos[candClean] && !photos[candClean].includes('default_wa_photo')) {
-                            data.waPhotoUrl = photos[candClean];
-                        } else if (photos[candidate] && !photos[candidate].includes('default_wa_photo')) {
-                            data.waPhotoUrl = photos[candidate];
-                        }
-                    }
-                }
-
-                // 3. Cek nomor WhatsApp Owner
-                if (!data.waPhotoUrl && Array.isArray(dbContent.ownerWhatsapps)) {
-                    for (const ow of dbContent.ownerWhatsapps) {
-                        const owClean = String(ow).replace(/[^0-9]/g, '').replace(/^0/, '62');
-                        if (photos[owClean] && !photos[owClean].includes('default_wa_photo')) {
-                            data.waPhotoUrl = photos[owClean];
-                            break;
-                        }
-                    }
-                }
-
-                // 4. Fallback foto di cache database
-                if (!data.waPhotoUrl) {
-                    if (photos['default'] && !photos['default'].includes('default_wa_photo')) {
-                        data.waPhotoUrl = photos['default'];
-                    } else {
-                        const keys = Object.keys(photos).filter(k => !k.includes('default_wa_photo') && !k.startsWith('file_'));
-                        if (keys.length > 0) {
-                            data.waPhotoUrl = photos[keys[0]];
+                        if (!userAvatarImg) {
+                            const localPath = path.join(process.cwd(), 'public', 'avatars', `${mClean}.jpg`);
+                            if (fs.existsSync(localPath)) {
+                                userAvatarImg = await loadAvatarImage(localPath);
+                            }
                         }
                     }
                 }
             }
         } catch (e) {}
-    }
-
-    if (!userAvatarImg && data.waPhotoUrl) {
-        try {
-            if (data.waPhotoUrl.startsWith('http://') || data.waPhotoUrl.startsWith('https://')) {
-                const controller = new AbortController();
-                const timer = setTimeout(() => controller.abort(), 4000);
-                const res = await fetch(data.waPhotoUrl, { signal: controller.signal });
-                clearTimeout(timer);
-                if (res.ok) {
-                    const buf = Buffer.from(await res.arrayBuffer());
-                    userAvatarImg = await loadImage(buf);
-                }
-            } else if (fs.existsSync(data.waPhotoUrl)) {
-                userAvatarImg = await loadImage(data.waPhotoUrl);
-            }
-        } catch (e) {
-            console.error("Gagal load waPhotoUrl konfirmasi:", e);
-        }
     }
 
     // Base background di bawah lingkaran
@@ -207,11 +211,26 @@ export async function generateKonfirmasiReceipt(data: KonfirmasiData): Promise<B
     } else {
         // Latar gelap elegan serasi dengan tema neon cyberpunk
         const bgGrad = ctx.createLinearGradient(avatarCenterX - avatarRadius, avatarCenterY - avatarRadius, avatarCenterX + avatarRadius, avatarCenterY + avatarRadius);
-        bgGrad.addColorStop(0, '#090f26');
-        bgGrad.addColorStop(0.5, '#040714');
-        bgGrad.addColorStop(1, '#020308');
+        bgGrad.addColorStop(0, '#0c1538');
+        bgGrad.addColorStop(0.5, '#060b1e');
+        bgGrad.addColorStop(1, '#03050f');
         ctx.fillStyle = bgGrad;
         ctx.fillRect(avatarCenterX - avatarRadius, avatarCenterY - avatarRadius, avatarRadius * 2, avatarRadius * 2);
+
+        // Elegant Neon Avatar Silhouette
+        ctx.save();
+        ctx.fillStyle = 'rgba(74, 222, 128, 0.4)';
+        ctx.beginPath();
+        ctx.arc(avatarCenterX, avatarCenterY - 32, 52, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(avatarCenterX, avatarCenterY + 105, 100, Math.PI * 1.15, Math.PI * 1.85);
+        ctx.lineTo(avatarCenterX + 90, avatarCenterY + 140);
+        ctx.lineTo(avatarCenterX - 90, avatarCenterY + 140);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
     }
     ctx.restore();
 
