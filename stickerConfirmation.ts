@@ -30,16 +30,22 @@ async function loadAvatarImage(input?: string | Buffer | null): Promise<any> {
     }
     if (typeof input === 'string') {
         const str = input.trim();
+        if (!str) return null;
+
         if (str.startsWith('data:image/')) {
             try {
                 const base64 = str.split(',')[1];
                 if (base64) return await loadImage(Buffer.from(base64, 'base64'));
-            } catch (e) {}
+            } catch (e) {
+                return null;
+            }
         }
+
+        // Tipe 1: Remote URL (http/https) -> pakai fetch() dengan timeout 15 detik
         if (str.startsWith('http://') || str.startsWith('https://')) {
             try {
                 const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 6000);
+                const timeout = setTimeout(() => controller.abort(), 15000); // 15 detik timeout
                 const res = await fetch(str, {
                     signal: controller.signal,
                     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
@@ -49,18 +55,25 @@ async function loadAvatarImage(input?: string | Buffer | null): Promise<any> {
                     const buf = Buffer.from(await res.arrayBuffer());
                     return await loadImage(buf);
                 }
-            } catch (e) {
-                console.error("Gagal fetch avatar URL di stickerConfirmation:", e);
+            } catch (e: any) {
+                console.error("Gagal fetch avatar URL di stickerConfirmation:", e?.message || e?.toString() || JSON.stringify(e));
             }
             try {
                 return await loadImage(str);
-            } catch (e) {}
+            } catch (e) {
+                return null;
+            }
         } else {
-            const resolved = path.isAbsolute(str) ? str : path.resolve(process.cwd(), str);
-            if (fs.existsSync(resolved)) {
-                try {
-                    return await loadImage(resolved);
-                } catch (e) {}
+            // Tipe 2: Path lokal (/media/, /wa_photos/, ./public/, dll) -> pakai fs.readFileSync()
+            try {
+                const resolved = path.isAbsolute(str) ? str : path.resolve(process.cwd(), str);
+                if (fs.existsSync(resolved)) {
+                    const fileBuf = fs.readFileSync(resolved);
+                    return await loadImage(fileBuf);
+                }
+            } catch (e: any) {
+                console.error("Gagal membaca file avatar lokal di stickerConfirmation:", e?.message || e?.toString() || JSON.stringify(e));
+                return null;
             }
         }
     }
