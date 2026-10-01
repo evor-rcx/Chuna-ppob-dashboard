@@ -1,6 +1,7 @@
 import { BarChart3, ShoppingCart, FileText, Settings, Bot, Wallet, Users, Store, Lock, ShieldAlert, Sparkles, CheckCircle2, AlertCircle, RefreshCw, ZoomIn, Copy, Check, Crown } from 'lucide-react';
 import { Page } from '../../types';
-import { ReactNode, useState } from 'react';
+import { ReactNode, useState, useEffect } from 'react';
+import { WhatsAppProfileBadge } from '../WhatsAppProfileBadge';
 
 interface MenuProps {
   onNavigate: (page: Page) => void;
@@ -21,6 +22,13 @@ export function Menu({ onNavigate }: MenuProps) {
   const [imageTimestamp, setImageTimestamp] = useState<number>(Date.now());
   const [isZoomed, setIsZoomed] = useState<boolean>(false);
   const [copiedText, setCopiedText] = useState<boolean>(false);
+  const [imageLoading, setImageLoading] = useState<boolean>(true);
+  const [imageError, setImageError] = useState<boolean>(false);
+
+  useEffect(() => {
+    setImageLoading(true);
+    setImageError(false);
+  }, [activeNotaTab, royalCategory, imageTimestamp]);
 
   const tagihanPascaCaption = `E4 STORE\nCek Tagihan\n\nTagihan Ditemukan!\n\n----------------------------------------\nNama                         A*D* *A*A*U*D*N\nNomor                        234000182643\nLayanan                      Pln Pascabayar\n----------------------------------------\n\nTOTAL BAYAR    Lembar 1      Rp 119.283\nBulan 1 : 202607             Meter: 00007792 - 00007870\nTarif: R1M                   Daya: 900\n\nSilahkan Lanjutkan Pembayaran\n\n----------------------------------------\nTerima kasih telah berbelanja di E4 Store!\nCetak: 19/07/2026 16:59 WITA | Kode: #E4\nMinggu, Hari Kemerdekaan RI (29 hari lagi)`;
 
@@ -171,7 +179,7 @@ export function Menu({ onNavigate }: MenuProps) {
           <p className="text-slate-400 text-sm">Selamat datang kembali, Admin.</p>
         </div>
         <div className="flex items-center gap-4">
-          <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700"></div>
+          <WhatsAppProfileBadge variant="menu-header" />
         </div>
       </header>
       
@@ -204,13 +212,14 @@ export function Menu({ onNavigate }: MenuProps) {
         <div className="relative z-10">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-800">
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="p-1.5 bg-amber-500/20 text-amber-400 rounded-lg">
                   <Sparkles size={20} />
                 </span>
                 <h3 className="text-xl font-bold text-white tracking-wide">
                   Model Nota Pembayaran E4 Store (Chuna Luxury Gold)
                 </h3>
+                <WhatsAppProfileBadge variant="compact" />
               </div>
               <p className="text-slate-400 text-xs sm:text-sm mt-1">
                 Tampilan resmi nota pelunasan & angsuran utang dengan avatar profil WhatsApp, rincian produk, dan kalkulasi otomatis.
@@ -381,33 +390,83 @@ export function Menu({ onNavigate }: MenuProps) {
             {/* Left: The Generated Image Card */}
             <div className="lg:col-span-6 flex flex-col items-center">
               <div 
-                onClick={() => setIsZoomed(true)}
-                className="relative group cursor-pointer w-full max-w-md rounded-2xl overflow-hidden border-2 border-amber-500/40 shadow-2xl bg-black transition-all hover:scale-[1.01] hover:border-amber-400"
+                className="relative group w-full max-w-md rounded-2xl overflow-hidden border-2 border-amber-500/40 shadow-2xl bg-black min-h-[320px] flex items-center justify-center transition-all hover:scale-[1.01] hover:border-amber-400"
               >
-                <img
-                  src={currentImageUrl}
-                  alt="Preview Model Nota E4 Store"
-                  className="w-full h-auto aspect-square object-contain block bg-[#0a0a0c]"
-                  loading="eager"
-                />
+                {/* Loading Skeleton */}
+                {imageLoading && (
+                  <div className="absolute inset-0 bg-slate-900/95 flex flex-col items-center justify-center p-6 text-center z-20 backdrop-blur-sm animate-in fade-in duration-200">
+                    <RefreshCw size={36} className="text-amber-400 animate-spin mb-3" />
+                    <p className="text-sm font-bold text-amber-200">Merender Model Nota Digital...</p>
+                    <p className="text-xs text-slate-400 mt-1">Menggambar canvas resolusi tinggi 1024x1024</p>
+                  </div>
+                )}
+
+                {/* Error Fallback */}
+                {imageError ? (
+                  <div className="p-8 text-center flex flex-col items-center gap-3 z-20">
+                    <AlertCircle size={44} className="text-amber-400 animate-bounce" />
+                    <div>
+                      <h4 className="font-bold text-white text-base">Gagal Memuat Gambar Nota</h4>
+                      <p className="text-xs text-slate-400 mt-1 max-w-xs">
+                        Gambar sedang diproses atau koneksi memerlukan waktu refresh.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setImageError(false);
+                        setImageLoading(true);
+                        setImageTimestamp(Date.now());
+                      }}
+                      className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-lg shadow-amber-900/30 hover:from-amber-400 hover:to-amber-500 transition-all cursor-pointer"
+                    >
+                      <RefreshCw size={14} /> Refresh / Muat Ulang Sekarang
+                    </button>
+                  </div>
+                ) : (
+                  <img
+                    key={currentImageUrl}
+                    src={currentImageUrl}
+                    alt="Preview Model Nota E4 Store"
+                    className={`w-full h-auto aspect-square object-contain block bg-[#0a0a0c] transition-opacity duration-300 ${imageLoading ? 'opacity-0' : 'opacity-100 cursor-pointer'}`}
+                    loading="eager"
+                    onLoad={() => {
+                      setImageLoading(false);
+                      setImageError(false);
+                    }}
+                    onError={() => {
+                      setImageLoading(false);
+                      setImageError(true);
+                    }}
+                    onClick={() => {
+                      if (!imageLoading && !imageError) setIsZoomed(true);
+                    }}
+                  />
+                )}
                 
                 {/* Overlay hover hint */}
-                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 text-white font-semibold text-sm backdrop-blur-[2px]">
-                  <ZoomIn size={22} className="text-amber-400" /> Klik untuk memperbesar
-                </div>
+                {!imageLoading && !imageError && (
+                  <div 
+                    onClick={() => setIsZoomed(true)}
+                    className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 text-white font-semibold text-sm backdrop-blur-[2px] cursor-pointer"
+                  >
+                    <ZoomIn size={22} className="text-amber-400" /> Klik untuk memperbesar
+                  </div>
+                )}
 
                 {/* Badge Status */}
-                <div className="absolute top-3 left-3">
-                  <span className={`px-3 py-1 rounded-full text-xs font-bold shadow-lg uppercase tracking-wider backdrop-blur-md ${
-                    activeNotaTab === 'royal'
-                      ? 'bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 border border-amber-300/60 shadow-amber-500/20'
-                      : activeNotaTab === 'lunas'
-                      ? 'bg-emerald-500/90 text-white border border-emerald-300/40'
-                      : 'bg-amber-500/90 text-slate-950 border border-amber-300/40'
-                  }`}>
-                    {activeNotaTab === 'royal' ? '👑 STRUK PEMBAYARAN: LUNAS' : activeNotaTab === 'lunas' ? '✓ STATUS: LUNAS' : '⚠️ STATUS: BELUM LUNAS'}
-                  </span>
-                </div>
+                {!imageLoading && !imageError && (
+                  <div className="absolute top-3 left-3">
+                    <span className={`px-3 py-1 rounded-full text-xs font-bold shadow-lg uppercase tracking-wider backdrop-blur-md ${
+                      activeNotaTab === 'royal'
+                        ? 'bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 border border-amber-300/60 shadow-amber-500/20'
+                        : activeNotaTab === 'lunas'
+                        ? 'bg-emerald-500/90 text-white border border-emerald-300/40'
+                        : 'bg-amber-500/90 text-slate-950 border border-amber-300/40'
+                    }`}>
+                      {activeNotaTab === 'royal' ? '👑 STRUK PEMBAYARAN: LUNAS' : activeNotaTab === 'lunas' ? '✓ STATUS: LUNAS' : '⚠️ STATUS: BELUM LUNAS'}
+                    </span>
+                  </div>
+                )}
               </div>
               <p className="text-slate-400 text-xs mt-3 flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>

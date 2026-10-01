@@ -26,7 +26,7 @@ console.error = function(...args) {
 import { fetchTiktok } from "./downloader";
 import { generateDebtSettlementReceipt, formatDebtSettlementMessage } from "./debtReceipt";
 import { generateVintageTagihanReceipt, formatTagihanMessage } from "./debtTagihanReceipt";
-import { generateRoyalStrukReceipt, formatRoyalStrukMessage } from "./royalStrukReceipt";
+import { generateRoyalStrukReceipt, generateRoyalTidakLunasReceipt, formatRoyalStrukMessage } from "./royalStrukReceipt";
 import { generateOrderConfirmationSticker } from "./stickerConfirmation";
 import { generateEmeraldConfirmationImage } from "./emeraldConfirmationReceipt";
 import { generateKonfirmasiReceipt, formatKonfirmasiMessage } from "./konfirmasiReceipt";
@@ -484,6 +484,38 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
             } catch (e) {}
         }
 
+        const targetId = String(data.target || data.no || data.customerNo || data.idPelanggan || data.noHp || '-');
+        const prodName = String(data.product || (typeof data.product === 'object' ? data.product?.product_name : '') || data.layanan || data.itemGame || data.pembelian || 'PLN 20.000');
+
+        // Gunakan template mentahan resmi Picsart_26-09-28_17-53-27-094.png untuk Status SUKSES (BELUM LUNAS) / UTANG
+        if (!isLunas) {
+            return await generateRoyalTidakLunasReceipt({
+                nama: memberName,
+                status: (data.status || 'Belum Lunas').toString(),
+                metode: data.method || data.metode || (isUtang ? 'Utang / Kasbon' : 'CASH'),
+                product: prodName,
+                target: targetId,
+                type: data.type || '',
+                sku: data.sku || '',
+                namaPlg: namaPlg,
+                tarif: data.tarif || '',
+                daya: data.daya || '',
+                golDaya: golDaya,
+                kwh: kwh,
+                bulan: data.bulan || data.periode || '',
+                meter: data.meter || '',
+                lembar: data.lembar || data.lembar_tagihan || '',
+                orderId: orderIdStr,
+                tanggal: formattedDate,
+                date: txDate,
+                sn: token,
+                totalBayar: Number(data.price || data.totalBayar || data.total || 0),
+                waPhotoUrl: waPhotoUrl,
+                avatarBuffer: data.avatarBuffer || null,
+                holidayNotice: calText
+            });
+        }
+
         // 1. Clean white canvas background
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, width, height);
@@ -818,8 +850,7 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
             }
         };
 
-        const targetId = String(data.target || data.no || '-');
-        const prodName = String(data.product || (typeof data.product === 'object' ? data.product?.product_name : '') || 'PLN 20.000');
+        // targetId and prodName already declared above
         const prodLower = prodName.toLowerCase();
         const typeLower = String(data.type || '').toLowerCase();
         const skuLower = String(data.sku || '').toLowerCase();
@@ -9940,23 +9971,28 @@ E4 Store`,
     }
   });
 
-  // Route demo gambar nota Belum Lunas (contoh PLN Token dari Gambar 2)
+  // Route demo gambar nota Belum Lunas (menggunakan template resmi Picsart_26-09-28_17-53-27-094.png)
   app.get("/api/demo-nota/belum-lunas", async (req, res) => {
     try {
+        const item = (req.query.item as string) || (req.query.product as string);
+        const target = (req.query.target as string) || (req.query.no as string);
+        const name = (req.query.name as string) || (req.query.nama as string);
+        const sn = (req.query.sn as string) || (req.query.token as string);
+        const price = req.query.total ? Number(req.query.total) : (req.query.price ? Number(req.query.price) : undefined);
+        const orderId = (req.query.orderId as string) || (req.query.id as string);
+
         const sampleBelumLunas = {
-            id: 'PRE-1789646007593',
-            product: 'PLN 20.000',
-            sn: '6675-2989-1173-8554-7284',
-            target: '45055441815',
-            namaPlg: 'JAHRAH',
-            golDaya: 'R1 / 000001300',
-            price: 25000,
-            status: 'Sukses',
+            id: orderId || 'PRE-1790426558012',
+            product: item || 'Go Pay 19.000',
+            sn: sn || 'GoPay/19000/GP-08134621611/Ref:T6QBdlFIp4xECvR3ps,',
+            target: target || '08134621611',
+            nama: name || 'Indri',
+            price: price !== undefined ? price : 24000,
+            status: 'Belum Lunas',
             method: 'utang',
             isPaid: false,
-            nama: 'Rido',
-            waPhotoUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&h=200&fit=crop&crop=faces',
-            date: new Date('2026-09-17T19:53:00+08:00')
+            waPhotoUrl: 'https://images.unsplash.com/photo-1544717305-2782549b5136?w=200&h=200&fit=crop&crop=faces',
+            date: new Date('2026-09-26T20:43:00+08:00')
         };
         const buffer = await generateCanvasReceipt("nota", sampleBelumLunas);
         if (buffer) {

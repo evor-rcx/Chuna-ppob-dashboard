@@ -271,14 +271,53 @@ export async function generatePascabayarTagihanReceipt(data: PascabayarTagihanDa
             if (fs.existsSync(dbPath)) {
                 const dbContent = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
                 const photos = dbContent.waProfilePhotos || {};
-                const candidatePhone = data.target || data.no || data.nomor;
-                const cleanNum = candidatePhone ? String(candidatePhone).replace(/[^0-9]/g, '') : '';
-                if (cleanNum && photos[cleanNum]) {
-                    data.waPhotoUrl = photos[cleanNum];
-                } else {
-                    const keys = Object.keys(photos);
-                    if (keys.length > 0) {
-                        data.waPhotoUrl = photos[keys[keys.length - 1]];
+
+                // 1. Cek dari nama member di daftar member offline / online
+                if (!data.waPhotoUrl && (data.nama || data.customerDisplayName)) {
+                    const cLower = String(data.customerDisplayName || data.nama).trim().toLowerCase().replace(/^kak\s+/i, '');
+                    const matchedMember = (dbContent.members || []).find((m: any) => m.name && m.name.trim().toLowerCase() === cLower);
+                    if (matchedMember && matchedMember.whatsapp) {
+                        const mClean = String(matchedMember.whatsapp).replace(/[^0-9]/g, '').replace(/^0/, '62');
+                        if (mClean && photos[mClean] && !photos[mClean].includes('default_wa_photo')) {
+                            data.waPhotoUrl = photos[mClean];
+                        }
+                    }
+                }
+
+                // 2. Cek nomor WhatsApp kandidat
+                if (!data.waPhotoUrl) {
+                    const rawCand = data.targetPhone || data.customerPhone || data.whatsapp || data.customerWa || data.target || data.no || data.nomor;
+                    if (rawCand) {
+                        const candidate = String(rawCand).replace(/[^0-9]/g, '');
+                        const candClean = candidate.replace(/^0/, '62');
+                        if (photos[candClean] && !photos[candClean].includes('default_wa_photo')) {
+                            data.waPhotoUrl = photos[candClean];
+                        } else if (photos[candidate] && !photos[candidate].includes('default_wa_photo')) {
+                            data.waPhotoUrl = photos[candidate];
+                        }
+                    }
+                }
+
+                // 3. Cek nomor WhatsApp Owner
+                if (!data.waPhotoUrl && Array.isArray(dbContent.ownerWhatsapps)) {
+                    for (const ow of dbContent.ownerWhatsapps) {
+                        const owClean = String(ow).replace(/[^0-9]/g, '').replace(/^0/, '62');
+                        if (photos[owClean] && !photos[owClean].includes('default_wa_photo')) {
+                            data.waPhotoUrl = photos[owClean];
+                            break;
+                        }
+                    }
+                }
+
+                // 4. Fallback foto di cache database
+                if (!data.waPhotoUrl) {
+                    if (photos['default'] && !photos['default'].includes('default_wa_photo')) {
+                        data.waPhotoUrl = photos['default'];
+                    } else {
+                        const keys = Object.keys(photos).filter(k => !k.includes('default_wa_photo') && !k.startsWith('file_'));
+                        if (keys.length > 0) {
+                            data.waPhotoUrl = photos[keys[0]];
+                        }
                     }
                 }
             }
@@ -330,31 +369,12 @@ export async function generatePascabayarTagihanReceipt(data: PascabayarTagihanDa
             avatarRadius * 2
         );
     } else {
-        const grad = ctx.createLinearGradient(
-            avatarCx - avatarRadius,
-            avatarCy - avatarRadius,
-            avatarCx + avatarRadius,
-            avatarCy + avatarRadius
-        );
-        grad.addColorStop(0, '#0284c7');
-        grad.addColorStop(0.5, '#0369a1');
-        grad.addColorStop(1, '#075985');
-        ctx.fillStyle = grad;
-        ctx.fillRect(
-            avatarCx - avatarRadius,
-            avatarCy - avatarRadius,
-            avatarRadius * 2,
-            avatarRadius * 2
-        );
-
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 54px "Liberation Sans", "DejaVu Sans", Arial, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
-        ctx.shadowBlur = 8;
-        ctx.fillText(getInitials(data.nama || data.customer_name || 'E4'), avatarCx, avatarCy);
-        ctx.shadowBlur = 0;
+        const bgGrad = ctx.createLinearGradient(avatarCx - avatarRadius, avatarCy - avatarRadius, avatarCx + avatarRadius, avatarCy + avatarRadius);
+        bgGrad.addColorStop(0, '#0284c7');
+        bgGrad.addColorStop(0.5, '#0369a1');
+        bgGrad.addColorStop(1, '#075985');
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(avatarCx - avatarRadius, avatarCy - avatarRadius, avatarRadius * 2, avatarRadius * 2);
     }
     ctx.restore();
 

@@ -1,17 +1,73 @@
 import { createCanvas, loadImage, Image } from '@napi-rs/canvas';
 import path from 'path';
 import fs from 'fs';
+import { downloadImageBuffer } from './stickerConfirmation';
 
 export interface KonfirmasiData {
     nama?: string;
     layanan?: string;
     nomor?: string;
     totalBayar?: number;
+    whatsapp?: string;
+    customerWa?: string;
+    buyerWa?: string;
     waPhotoUrl?: string | null;
     avatarBuffer?: Buffer | null;
 }
 
 let cachedTemplateImg: Image | null = null;
+
+/**
+ * Safely loads image from Buffer, HTTP/HTTPS URL, or local file path
+ */
+async function loadAvatarImage(input?: string | Buffer | null): Promise<any> {
+    if (!input) return null;
+    if (Buffer.isBuffer(input)) {
+        try {
+            return await loadImage(input);
+        } catch (e) {
+            return null;
+        }
+    }
+    if (typeof input === 'string') {
+        const str = input.trim();
+        if (str.startsWith('http://') || str.startsWith('https://')) {
+            // Metode Utama: https.get dengan IPv4 (Anti fetch failed di Armbian STB)
+            try {
+                const buf = await downloadImageBuffer(str);
+                if (buf && buf.length > 0) {
+                    const img = await loadImage(buf);
+                    if (img) return img;
+                }
+            } catch (e) {}
+
+            try {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 10000);
+                const res = await fetch(str, {
+                    signal: controller.signal,
+                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+                });
+                clearTimeout(timeout);
+                if (res.ok) {
+                    const buf = Buffer.from(await res.arrayBuffer());
+                    return await loadImage(buf);
+                }
+            } catch (e: any) {
+                console.error("Gagal fetch avatar URL di konfirmasiReceipt:", e?.message || e?.toString() || JSON.stringify(e));
+            }
+        } else {
+            const resolved = path.isAbsolute(str) ? str : path.resolve(process.cwd(), str);
+            if (fs.existsSync(resolved)) {
+                try {
+                    const fileBuf = fs.readFileSync(resolved);
+                    return await loadImage(fileBuf);
+                } catch (e) {}
+            }
+        }
+    }
+    return null;
+}
 
 async function getKonfirmasiTemplate(): Promise<Image | null> {
     if (cachedTemplateImg) return cachedTemplateImg;
@@ -91,49 +147,54 @@ export async function generateKonfirmasiReceipt(data: KonfirmasiData): Promise<B
     // Load foto profil user jika ada
     let userAvatarImg: any = null;
     if (data.avatarBuffer) {
-        try {
-            userAvatarImg = await loadImage(data.avatarBuffer);
-        } catch (e) {
-            console.error("Gagal load avatarBuffer konfirmasi:", e);
-        }
+        userAvatarImg = await loadAvatarImage(data.avatarBuffer);
+    }
+    if (!userAvatarImg && data.waPhotoUrl) {
+        userAvatarImg = await loadAvatarImage(data.waPhotoUrl);
     }
 
-    if (!userAvatarImg && !data.waPhotoUrl) {
+    // Auto-lookup jika belum ada
+    if (!userAvatarImg) {
         try {
             const dbPath = path.join(process.cwd(), 'db.json');
             if (fs.existsSync(dbPath)) {
                 const dbContent = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
                 const photos = dbContent.waProfilePhotos || {};
-                const candidate = data.nomor ? String(data.nomor).replace(/[^0-9]/g, '') : '';
-                if (candidate && photos[candidate]) {
-                    data.waPhotoUrl = photos[candidate];
-                } else {
-                    const keys = Object.keys(photos);
-                    if (keys.length > 0) {
-                        data.waPhotoUrl = photos[keys[keys.length - 1]];
+
+                // 1. Cek dari nomor whatsapp yang dipassing di data
+                const rawCand = data.whatsapp || data.customerWa || data.buyerWa || data.nomor;
+                if (rawCand) {
+                    const candClean = String(rawCand).replace(/\D/g, '').replace(/^0/, '62');
+                    if (photos[candClean]) {
+                        userAvatarImg = await loadAvatarImage(photos[candClean]);
+                    }
+                    if (!userAvatarImg) {
+                        const localPath = path.join(process.cwd(), 'public', 'avatars', `${candClean}.jpg`);
+                        if (fs.existsSync(localPath)) {
+                            userAvatarImg = await loadAvatarImage(localPath);
+                        }
+                    }
+                }
+
+                // 2. Cek dari nama member
+                if (!userAvatarImg && data.nama) {
+                    const cLower = String(data.nama).trim().toLowerCase().replace(/^kak\s+/i, '');
+                    const matchedMember = (dbContent.members || []).find((m: any) => m.name && m.name.trim().toLowerCase() === cLower);
+                    if (matchedMember && matchedMember.whatsapp) {
+                        const mClean = String(matchedMember.whatsapp).replace(/\D/g, '').replace(/^0/, '62');
+                        if (photos[mClean]) {
+                            userAvatarImg = await loadAvatarImage(photos[mClean]);
+                        }
+                        if (!userAvatarImg) {
+                            const localPath = path.join(process.cwd(), 'public', 'avatars', `${mClean}.jpg`);
+                            if (fs.existsSync(localPath)) {
+                                userAvatarImg = await loadAvatarImage(localPath);
+                            }
+                        }
                     }
                 }
             }
         } catch (e) {}
-    }
-
-    if (!userAvatarImg && data.waPhotoUrl) {
-        try {
-            if (data.waPhotoUrl.startsWith('http://') || data.waPhotoUrl.startsWith('https://')) {
-                const controller = new AbortController();
-                const timer = setTimeout(() => controller.abort(), 4000);
-                const res = await fetch(data.waPhotoUrl, { signal: controller.signal });
-                clearTimeout(timer);
-                if (res.ok) {
-                    const buf = Buffer.from(await res.arrayBuffer());
-                    userAvatarImg = await loadImage(buf);
-                }
-            } else if (fs.existsSync(data.waPhotoUrl)) {
-                userAvatarImg = await loadImage(data.waPhotoUrl);
-            }
-        } catch (e) {
-            console.error("Gagal load waPhotoUrl konfirmasi:", e);
-        }
     }
 
     // Base background di bawah lingkaran
@@ -162,31 +223,28 @@ export async function generateKonfirmasiReceipt(data: KonfirmasiData): Promise<B
             avatarRadius * 2
         );
     } else {
-        const grad = ctx.createLinearGradient(
-            avatarCenterX - avatarRadius,
-            avatarCenterY - avatarRadius,
-            avatarCenterX + avatarRadius,
-            avatarCenterY + avatarRadius
-        );
-        grad.addColorStop(0, '#1e1b4b');
-        grad.addColorStop(0.5, '#0f172a');
-        grad.addColorStop(1, '#020617');
-        ctx.fillStyle = grad;
-        ctx.fillRect(
-            avatarCenterX - avatarRadius,
-            avatarCenterY - avatarRadius,
-            avatarRadius * 2,
-            avatarRadius * 2
-        );
+        // Latar gelap elegan serasi dengan tema neon cyberpunk
+        const bgGrad = ctx.createLinearGradient(avatarCenterX - avatarRadius, avatarCenterY - avatarRadius, avatarCenterX + avatarRadius, avatarCenterY + avatarRadius);
+        bgGrad.addColorStop(0, '#0c1538');
+        bgGrad.addColorStop(0.5, '#060b1e');
+        bgGrad.addColorStop(1, '#03050f');
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(avatarCenterX - avatarRadius, avatarCenterY - avatarRadius, avatarRadius * 2, avatarRadius * 2);
 
-        ctx.fillStyle = '#38bdf8';
-        ctx.font = 'bold 110px "Liberation Sans", "DejaVu Sans", Arial, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.shadowColor = 'rgba(56, 189, 248, 0.9)';
-        ctx.shadowBlur = 18;
-        ctx.fillText(getInitials(data.nama || 'E4'), avatarCenterX, avatarCenterY);
-        ctx.shadowBlur = 0;
+        // Elegant Neon Avatar Silhouette
+        ctx.save();
+        ctx.fillStyle = 'rgba(74, 222, 128, 0.4)';
+        ctx.beginPath();
+        ctx.arc(avatarCenterX, avatarCenterY - 32, 52, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(avatarCenterX, avatarCenterY + 105, 100, Math.PI * 1.15, Math.PI * 1.85);
+        ctx.lineTo(avatarCenterX + 90, avatarCenterY + 140);
+        ctx.lineTo(avatarCenterX - 90, avatarCenterY + 140);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
     }
     ctx.restore();
 

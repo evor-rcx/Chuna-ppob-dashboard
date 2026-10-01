@@ -1,6 +1,7 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import path from 'path';
 import fs from 'fs';
+import { getCalendarInfo } from './src/utils/holidays';
 
 export interface RoyalStrukData {
     nama: string;
@@ -570,7 +571,11 @@ export async function generateRoyalTidakLunasReceipt(data: RoyalStrukData): Prom
     const rightX = 872;
     const orderId = String(data.orderId || data.id || 'PRE-1788868200773');
     const tanggal = String(data.tanggal || data.cetakDate || '08/09/2026 19:50 WITA');
-    const metode = data.metode || 'CASH';
+    const metode = (data.metode || 'Utang / Kasbon').toString();
+    const rawStatus = (data.status || 'Belum Lunas').toString().trim();
+    const statusDisplay = rawStatus.toUpperCase().includes('LUNAS') 
+        ? rawStatus.toUpperCase() 
+        : 'BELUM LUNAS';
 
     ctx.save();
     ctx.font = 'bold 18.5px "DejaVu Sans", "Segoe UI", Arial, sans-serif';
@@ -581,7 +586,7 @@ export async function generateRoyalTidakLunasReceipt(data: RoyalStrukData): Prom
 
     // Kolom Kiri
     ctx.textAlign = 'left';
-    ctx.fillText(`Nama: ${data.nama || 'Lio'}`, leftX, 330);
+    ctx.fillText(`Nama: ${data.nama || 'Pelanggan'}`, leftX, 330);
     ctx.fillText(`${meta.targetLabel}${meta.targetVal}`, leftX, 374);
     ctx.fillText(`Order ID: ${orderId}`, leftX, 418);
     ctx.fillText(`Tanggal: ${tanggal}`, leftX, 462);
@@ -589,21 +594,29 @@ export async function generateRoyalTidakLunasReceipt(data: RoyalStrukData): Prom
     // Kolom Kanan (Right Aligned)
     ctx.textAlign = 'right';
     if (meta.isPln) {
-        ctx.fillText(`Pembelian: ${meta.prodName}`, rightX, 374);
-        ctx.fillText(`Nama Pel.: ${meta.namaPlg}`, rightX, 418);
-        ctx.fillText(`Gol/Daya: ${meta.golDaya}`, rightX, 462);
+        ctx.fillText(`Pembelian: ${meta.prodName}`, rightX, 330);
+        ctx.fillText(`Nama Pel.: ${meta.namaPlg}`, rightX, 374);
+        ctx.fillText(`Gol/Daya: ${meta.golDaya}`, rightX, 418);
+        ctx.fillText(`Status: ${statusDisplay}`, rightX, 462);
     } else {
-        ctx.fillText(`${meta.productLabel} ${meta.prodName}`, rightX, 374);
-        ctx.fillText(`Status: TIDAK LUNAS`, rightX, 418);
+        ctx.fillText(`Metode: ${metode}`, rightX, 330);
+        ctx.fillText(`${meta.productLabel}${meta.prodName}`, rightX, 374);
+        ctx.fillText(`Status: ${statusDisplay}`, rightX, 418);
     }
 
     // 5. SN / Token Text inside Cracked Glass Box (Divider 'SERIAL NUMBER / SN' sudah ada di mentahan)
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = 'bold 36px "DejaVu Serif", Georgia, serif';
+    const snDisplayText = meta.formattedToken || meta.rawSn || '0585-9340-6917-6385-5660';
+    let snFontSize = 34;
+    ctx.font = `bold ${snFontSize}px "DejaVu Serif", Georgia, serif`;
+    const maxBoxWidth = 640;
+    while (ctx.measureText(snDisplayText).width > maxBoxWidth && snFontSize > 16) {
+        snFontSize -= 1;
+        ctx.font = `bold ${snFontSize}px "DejaVu Serif", Georgia, serif`;
+    }
     ctx.fillStyle = '#0a0a0a';
     ctx.shadowBlur = 0; // Clear shadow inside white box
-    const snDisplayText = meta.formattedToken || meta.rawSn || '0585-9340-6917-6385-5660';
     ctx.fillText(snDisplayText, avatarCenterX, 586);
 
     // 7. TOTAL BAYAR
@@ -628,7 +641,7 @@ export async function generateRoyalTidakLunasReceipt(data: RoyalStrukData): Prom
     const cetakStr = data.cetakDate || tanggal;
     ctx.fillText(`Cetak: ${cetakStr} | Kode: #${orderCode.replace(/^#/, '')}`, avatarCenterX, 822);
 
-    const holidayStr = data.holidayNotice || 'Selasa, Hari Raya Natal (108 hari lagi)';
+    const holidayStr = data.holidayNotice || getCalendarInfo(data.date ? new Date(data.date) : new Date());
     ctx.fillText(holidayStr, avatarCenterX, 846);
 
     ctx.fillStyle = '#f59e0b';
