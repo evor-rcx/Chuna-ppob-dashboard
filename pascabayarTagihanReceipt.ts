@@ -129,7 +129,7 @@ export function formatPascabayarTagihanMessage(data: PascabayarTagihanData): str
         hour: '2-digit',
         minute: '2-digit',
         hour12: false
-    }).replace(/\./g, ':');
+    });
     const formattedDate = `${dateStr} ${timeStr} WITA`;
 
     const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
@@ -263,83 +263,18 @@ export async function generatePascabayarTagihanReceipt(data: PascabayarTagihanDa
             console.error("Gagal load avatarBuffer pascabayar:", e);
         }
     }
-
-    if (!userAvatarImg && !data.waPhotoUrl) {
-        // Auto-detect dari cache db.json jika nomor tersedia atau ambil foto WA terbaru
+    if (!userAvatarImg && data.waPhotoUrl && data.waPhotoUrl.startsWith('http')) {
         try {
-            const dbPath = path.join(process.cwd(), 'db.json');
-            if (fs.existsSync(dbPath)) {
-                const dbContent = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
-                const photos = dbContent.waProfilePhotos || {};
-
-                // 1. Cek dari nama member di daftar member offline / online
-                if (!data.waPhotoUrl && (data.nama || data.customerDisplayName)) {
-                    const cLower = String(data.customerDisplayName || data.nama).trim().toLowerCase().replace(/^kak\s+/i, '');
-                    const matchedMember = (dbContent.members || []).find((m: any) => m.name && m.name.trim().toLowerCase() === cLower);
-                    if (matchedMember && matchedMember.whatsapp) {
-                        const mClean = String(matchedMember.whatsapp).replace(/[^0-9]/g, '').replace(/^0/, '62');
-                        if (mClean && photos[mClean] && !photos[mClean].includes('default_wa_photo')) {
-                            data.waPhotoUrl = photos[mClean];
-                        }
-                    }
-                }
-
-                // 2. Cek nomor WhatsApp kandidat
-                if (!data.waPhotoUrl) {
-                    const rawCand = data.targetPhone || data.customerPhone || data.whatsapp || data.customerWa || data.target || data.no || data.nomor;
-                    if (rawCand) {
-                        const candidate = String(rawCand).replace(/[^0-9]/g, '');
-                        const candClean = candidate.replace(/^0/, '62');
-                        if (photos[candClean] && !photos[candClean].includes('default_wa_photo')) {
-                            data.waPhotoUrl = photos[candClean];
-                        } else if (photos[candidate] && !photos[candidate].includes('default_wa_photo')) {
-                            data.waPhotoUrl = photos[candidate];
-                        }
-                    }
-                }
-
-                // 3. Cek nomor WhatsApp Owner
-                if (!data.waPhotoUrl && Array.isArray(dbContent.ownerWhatsapps)) {
-                    for (const ow of dbContent.ownerWhatsapps) {
-                        const owClean = String(ow).replace(/[^0-9]/g, '').replace(/^0/, '62');
-                        if (photos[owClean] && !photos[owClean].includes('default_wa_photo')) {
-                            data.waPhotoUrl = photos[owClean];
-                            break;
-                        }
-                    }
-                }
-
-                // 4. Fallback foto di cache database
-                if (!data.waPhotoUrl) {
-                    if (photos['default'] && !photos['default'].includes('default_wa_photo')) {
-                        data.waPhotoUrl = photos['default'];
-                    } else {
-                        const keys = Object.keys(photos).filter(k => !k.includes('default_wa_photo') && !k.startsWith('file_'));
-                        if (keys.length > 0) {
-                            data.waPhotoUrl = photos[keys[0]];
-                        }
-                    }
-                }
-            }
-        } catch (e) {}
-    }
-
-    if (!userAvatarImg && data.waPhotoUrl) {
-        try {
-            if (data.waPhotoUrl.startsWith('http://') || data.waPhotoUrl.startsWith('https://')) {
-                const controller = new AbortController();
-                const timer = setTimeout(() => controller.abort(), 4000);
-                const res = await fetch(data.waPhotoUrl, { signal: controller.signal });
-                clearTimeout(timer);
-                if (res.ok) {
-                    const buf = Buffer.from(await res.arrayBuffer());
-                    userAvatarImg = await loadImage(buf);
-                }
-            } else if (fs.existsSync(data.waPhotoUrl)) {
-                userAvatarImg = await loadImage(data.waPhotoUrl);
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 4000);
+            const res = await fetch(data.waPhotoUrl, { signal: controller.signal });
+            clearTimeout(timer);
+            if (res.ok) {
+                const buf = Buffer.from(await res.arrayBuffer());
+                userAvatarImg = await loadImage(buf);
             }
         } catch (e) {
-            console.error("Gagal load waPhotoUrl pascabayar:", e);
+            console.error("Gagal fetch waPhotoUrl pascabayar:", e);
         }
     }
 
@@ -369,12 +304,31 @@ export async function generatePascabayarTagihanReceipt(data: PascabayarTagihanDa
             avatarRadius * 2
         );
     } else {
-        const bgGrad = ctx.createLinearGradient(avatarCx - avatarRadius, avatarCy - avatarRadius, avatarCx + avatarRadius, avatarCy + avatarRadius);
-        bgGrad.addColorStop(0, '#0284c7');
-        bgGrad.addColorStop(0.5, '#0369a1');
-        bgGrad.addColorStop(1, '#075985');
-        ctx.fillStyle = bgGrad;
-        ctx.fillRect(avatarCx - avatarRadius, avatarCy - avatarRadius, avatarRadius * 2, avatarRadius * 2);
+        const grad = ctx.createLinearGradient(
+            avatarCx - avatarRadius,
+            avatarCy - avatarRadius,
+            avatarCx + avatarRadius,
+            avatarCy + avatarRadius
+        );
+        grad.addColorStop(0, '#0284c7');
+        grad.addColorStop(0.5, '#0369a1');
+        grad.addColorStop(1, '#075985');
+        ctx.fillStyle = grad;
+        ctx.fillRect(
+            avatarCx - avatarRadius,
+            avatarCy - avatarRadius,
+            avatarRadius * 2,
+            avatarRadius * 2
+        );
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 54px "Liberation Sans", "DejaVu Sans", Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+        ctx.shadowBlur = 8;
+        ctx.fillText(getInitials(data.nama || data.customer_name || 'E4'), avatarCx, avatarCy);
+        ctx.shadowBlur = 0;
     }
     ctx.restore();
 
@@ -583,7 +537,7 @@ export async function generatePascabayarTagihanReceipt(data: PascabayarTagihanDa
         hour: '2-digit',
         minute: '2-digit',
         hour12: false
-    }).replace(/\./g, ':');
+    });
     const formattedDate = `${dateStr} ${timeStr} WITA`;
 
     const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];

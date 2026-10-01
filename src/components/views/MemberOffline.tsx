@@ -1,4 +1,3 @@
-// Version: clean-restore-member-offline
 import { useState, useEffect } from "react";
 import { PageContainer } from '../PageContainer';
 

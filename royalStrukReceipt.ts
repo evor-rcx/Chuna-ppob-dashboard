@@ -1,7 +1,6 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import path from 'path';
 import fs from 'fs';
-import { getCalendarInfo } from './src/utils/holidays';
 
 export interface RoyalStrukData {
     nama: string;
@@ -484,39 +483,15 @@ export async function generateRoyalTidakLunasReceipt(data: RoyalStrukData): Prom
             console.error("Gagal load avatarBuffer:", e);
         }
     }
-
-    if (!userAvatarImg && !data.waPhotoUrl) {
+    if (!userAvatarImg && data.waPhotoUrl && data.waPhotoUrl.startsWith('http')) {
         try {
-            const dbPath = path.join(process.cwd(), 'db.json');
-            if (fs.existsSync(dbPath)) {
-                const dbContent = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
-                const photos = dbContent.waProfilePhotos || {};
-                const candidate = data.target || data.no || data.noHp ? String(data.target || data.no || data.noHp).replace(/[^0-9]/g, '') : '';
-                if (candidate && photos[candidate]) {
-                    data.waPhotoUrl = photos[candidate];
-                } else {
-                    const keys = Object.keys(photos);
-                    if (keys.length > 0) {
-                        data.waPhotoUrl = photos[keys[keys.length - 1]];
-                    }
-                }
-            }
-        } catch (e) {}
-    }
-
-    if (!userAvatarImg && data.waPhotoUrl) {
-        try {
-            if (data.waPhotoUrl.startsWith('http://') || data.waPhotoUrl.startsWith('https://')) {
-                const controller = new AbortController();
-                const timer = setTimeout(() => controller.abort(), 4000);
-                const res = await fetch(data.waPhotoUrl, { signal: controller.signal });
-                clearTimeout(timer);
-                if (res.ok) {
-                    const buf = Buffer.from(await res.arrayBuffer());
-                    userAvatarImg = await loadImage(buf);
-                }
-            } else if (fs.existsSync(data.waPhotoUrl)) {
-                userAvatarImg = await loadImage(data.waPhotoUrl);
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 4000);
+            const res = await fetch(data.waPhotoUrl, { signal: controller.signal });
+            clearTimeout(timer);
+            if (res.ok) {
+                const buf = Buffer.from(await res.arrayBuffer());
+                userAvatarImg = await loadImage(buf);
             }
         } catch (e) {
             console.error("Gagal fetch waPhotoUrl:", e);
@@ -571,11 +546,7 @@ export async function generateRoyalTidakLunasReceipt(data: RoyalStrukData): Prom
     const rightX = 872;
     const orderId = String(data.orderId || data.id || 'PRE-1788868200773');
     const tanggal = String(data.tanggal || data.cetakDate || '08/09/2026 19:50 WITA');
-    const metode = (data.metode || 'Utang / Kasbon').toString();
-    const rawStatus = (data.status || 'Belum Lunas').toString().trim();
-    const statusDisplay = rawStatus.toUpperCase().includes('LUNAS') 
-        ? rawStatus.toUpperCase() 
-        : 'BELUM LUNAS';
+    const metode = data.metode || 'CASH';
 
     ctx.save();
     ctx.font = 'bold 18.5px "DejaVu Sans", "Segoe UI", Arial, sans-serif';
@@ -586,7 +557,7 @@ export async function generateRoyalTidakLunasReceipt(data: RoyalStrukData): Prom
 
     // Kolom Kiri
     ctx.textAlign = 'left';
-    ctx.fillText(`Nama: ${data.nama || 'Pelanggan'}`, leftX, 330);
+    ctx.fillText(`Nama: ${data.nama || 'Lio'}`, leftX, 330);
     ctx.fillText(`${meta.targetLabel}${meta.targetVal}`, leftX, 374);
     ctx.fillText(`Order ID: ${orderId}`, leftX, 418);
     ctx.fillText(`Tanggal: ${tanggal}`, leftX, 462);
@@ -594,20 +565,18 @@ export async function generateRoyalTidakLunasReceipt(data: RoyalStrukData): Prom
     // Kolom Kanan (Right Aligned)
     ctx.textAlign = 'right';
     if (meta.isPln) {
-        ctx.fillText(`Pembelian: ${meta.prodName}`, rightX, 330);
-        ctx.fillText(`Nama Pel.: ${meta.namaPlg}`, rightX, 374);
-        ctx.fillText(`Gol/Daya: ${meta.golDaya}`, rightX, 418);
-        ctx.fillText(`Status: ${statusDisplay}`, rightX, 462);
+        ctx.fillText(`Pembelian: ${meta.prodName}`, rightX, 374);
+        ctx.fillText(`Nama Pel.: ${meta.namaPlg}`, rightX, 418);
+        ctx.fillText(`Gol/Daya: ${meta.golDaya}`, rightX, 462);
     } else {
-        ctx.fillText(`Metode: ${metode}`, rightX, 330);
-        ctx.fillText(`${meta.productLabel}${meta.prodName}`, rightX, 374);
-        ctx.fillText(`Status: ${statusDisplay}`, rightX, 418);
+        ctx.fillText(`${meta.productLabel} ${meta.prodName}`, rightX, 374);
+        ctx.fillText(`Status: TIDAK LUNAS`, rightX, 418);
     }
 
     // 5. SN / Token Text inside Cracked Glass Box (Divider 'SERIAL NUMBER / SN' sudah ada di mentahan)
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = 'bold 34px "DejaVu Serif", Georgia, serif';
+    ctx.font = 'bold 36px "DejaVu Serif", Georgia, serif';
     ctx.fillStyle = '#0a0a0a';
     ctx.shadowBlur = 0; // Clear shadow inside white box
     const snDisplayText = meta.formattedToken || meta.rawSn || '0585-9340-6917-6385-5660';
@@ -676,39 +645,15 @@ export async function generateRoyalLunasReceipt(data: RoyalStrukData): Promise<B
             console.error("Gagal load avatarBuffer:", e);
         }
     }
-
-    if (!userAvatarImg && !data.waPhotoUrl) {
+    if (!userAvatarImg && data.waPhotoUrl && data.waPhotoUrl.startsWith('http')) {
         try {
-            const dbPath = path.join(process.cwd(), 'db.json');
-            if (fs.existsSync(dbPath)) {
-                const dbContent = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
-                const photos = dbContent.waProfilePhotos || {};
-                const candidate = data.target || data.no || data.noHp ? String(data.target || data.no || data.noHp).replace(/[^0-9]/g, '') : '';
-                if (candidate && photos[candidate]) {
-                    data.waPhotoUrl = photos[candidate];
-                } else {
-                    const keys = Object.keys(photos);
-                    if (keys.length > 0) {
-                        data.waPhotoUrl = photos[keys[keys.length - 1]];
-                    }
-                }
-            }
-        } catch (e) {}
-    }
-
-    if (!userAvatarImg && data.waPhotoUrl) {
-        try {
-            if (data.waPhotoUrl.startsWith('http://') || data.waPhotoUrl.startsWith('https://')) {
-                const controller = new AbortController();
-                const timer = setTimeout(() => controller.abort(), 4000);
-                const res = await fetch(data.waPhotoUrl, { signal: controller.signal });
-                clearTimeout(timer);
-                if (res.ok) {
-                    const buf = Buffer.from(await res.arrayBuffer());
-                    userAvatarImg = await loadImage(buf);
-                }
-            } else if (fs.existsSync(data.waPhotoUrl)) {
-                userAvatarImg = await loadImage(data.waPhotoUrl);
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 4000);
+            const res = await fetch(data.waPhotoUrl, { signal: controller.signal });
+            clearTimeout(timer);
+            if (res.ok) {
+                const buf = Buffer.from(await res.arrayBuffer());
+                userAvatarImg = await loadImage(buf);
             }
         } catch (e) {
             console.error("Gagal fetch waPhotoUrl:", e);
