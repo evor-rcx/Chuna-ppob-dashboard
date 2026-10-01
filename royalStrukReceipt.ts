@@ -607,16 +607,10 @@ export async function generateRoyalTidakLunasReceipt(data: RoyalStrukData): Prom
     // 5. SN / Token Text inside Cracked Glass Box (Divider 'SERIAL NUMBER / SN' sudah ada di mentahan)
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    const snDisplayText = meta.formattedToken || meta.rawSn || '0585-9340-6917-6385-5660';
-    let snFontSize = 34;
-    ctx.font = `bold ${snFontSize}px "DejaVu Serif", Georgia, serif`;
-    const maxBoxWidth = 640;
-    while (ctx.measureText(snDisplayText).width > maxBoxWidth && snFontSize > 16) {
-        snFontSize -= 1;
-        ctx.font = `bold ${snFontSize}px "DejaVu Serif", Georgia, serif`;
-    }
+    ctx.font = 'bold 34px "DejaVu Serif", Georgia, serif';
     ctx.fillStyle = '#0a0a0a';
     ctx.shadowBlur = 0; // Clear shadow inside white box
+    const snDisplayText = meta.formattedToken || meta.rawSn || '0585-9340-6917-6385-5660';
     ctx.fillText(snDisplayText, avatarCenterX, 586);
 
     // 7. TOTAL BAYAR
@@ -641,7 +635,7 @@ export async function generateRoyalTidakLunasReceipt(data: RoyalStrukData): Prom
     const cetakStr = data.cetakDate || tanggal;
     ctx.fillText(`Cetak: ${cetakStr} | Kode: #${orderCode.replace(/^#/, '')}`, avatarCenterX, 822);
 
-    const holidayStr = data.holidayNotice || getCalendarInfo(data.date ? new Date(data.date) : new Date());
+    const holidayStr = data.holidayNotice || 'Selasa, Hari Raya Natal (108 hari lagi)';
     ctx.fillText(holidayStr, avatarCenterX, 846);
 
     ctx.fillStyle = '#f59e0b';

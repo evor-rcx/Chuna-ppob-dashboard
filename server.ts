@@ -26,7 +26,7 @@ console.error = function(...args) {
 import { fetchTiktok } from "./downloader";
 import { generateDebtSettlementReceipt, formatDebtSettlementMessage } from "./debtReceipt";
 import { generateVintageTagihanReceipt, formatTagihanMessage } from "./debtTagihanReceipt";
-import { generateRoyalStrukReceipt, generateRoyalTidakLunasReceipt, formatRoyalStrukMessage } from "./royalStrukReceipt";
+import { generateRoyalStrukReceipt, formatRoyalStrukMessage } from "./royalStrukReceipt";
 import { generateOrderConfirmationSticker } from "./stickerConfirmation";
 import { generateEmeraldConfirmationImage } from "./emeraldConfirmationReceipt";
 import { generateKonfirmasiReceipt, formatKonfirmasiMessage } from "./konfirmasiReceipt";
@@ -486,35 +486,6 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
 
         const targetId = String(data.target || data.no || data.customerNo || data.idPelanggan || data.noHp || '-');
         const prodName = String(data.product || (typeof data.product === 'object' ? data.product?.product_name : '') || data.layanan || data.itemGame || data.pembelian || 'PLN 20.000');
-
-        // Gunakan template mentahan resmi Picsart_26-09-28_17-53-27-094.png untuk Status SUKSES (BELUM LUNAS) / UTANG
-        if (!isLunas) {
-            return await generateRoyalTidakLunasReceipt({
-                nama: memberName,
-                status: (data.status || 'Belum Lunas').toString(),
-                metode: data.method || data.metode || (isUtang ? 'Utang / Kasbon' : 'CASH'),
-                product: prodName,
-                target: targetId,
-                type: data.type || '',
-                sku: data.sku || '',
-                namaPlg: namaPlg,
-                tarif: data.tarif || '',
-                daya: data.daya || '',
-                golDaya: golDaya,
-                kwh: kwh,
-                bulan: data.bulan || data.periode || '',
-                meter: data.meter || '',
-                lembar: data.lembar || data.lembar_tagihan || '',
-                orderId: orderIdStr,
-                tanggal: formattedDate,
-                date: txDate,
-                sn: token,
-                totalBayar: Number(data.price || data.totalBayar || data.total || 0),
-                waPhotoUrl: waPhotoUrl,
-                avatarBuffer: data.avatarBuffer || null,
-                holidayNotice: calText
-            });
-        }
 
         // 1. Clean white canvas background
         ctx.fillStyle = '#ffffff';
