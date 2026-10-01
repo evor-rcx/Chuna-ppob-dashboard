@@ -1458,6 +1458,45 @@ function saveWaProfile(rawJidOrPhone: string, pushName?: string | null) {
     }
 }
 
+// Simpan LID WhatsApp ke db.waLids dan member.lid
+function saveWaLid(rawJidOrPhone: string, lid?: string | null) {
+    if (!lid || typeof lid !== 'string') return;
+    const cleanLid = lid.trim();
+    if (!cleanLid) return;
+
+    const cleanPhone = cleanWaPhone(rawJidOrPhone);
+    if (!cleanPhone || cleanPhone.length < 8) return;
+
+    if (!db.waLids) db.waLids = {};
+    let changed = false;
+
+    if (db.waLids[cleanPhone] !== cleanLid) {
+        db.waLids[cleanPhone] = cleanLid;
+        changed = true;
+    }
+    const localPhone = "0" + cleanPhone.replace(/^62/, '');
+    if (db.waLids[localPhone] !== cleanLid) {
+        db.waLids[localPhone] = cleanLid;
+        changed = true;
+    }
+
+    if (Array.isArray(db.members)) {
+        for (const m of db.members) {
+            const mClean = cleanWaPhone(m.whatsapp || '');
+            if (mClean && mClean === cleanPhone) {
+                if (m.lid !== cleanLid) {
+                    m.lid = cleanLid;
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    if (changed) {
+        writeDB(db);
+    }
+}
+
 async function getCustomerWaDetails(member: any, telegramUserId?: any, targetPhone?: string) {
     let rawWa = targetPhone || member?.whatsapp || (telegramUserId ? (registeredUsers[telegramUserId]?.wa || registeredUsers[Number(telegramUserId)]?.wa) : '') || '';
     let waPhone = rawWa || '-';
@@ -4906,10 +4945,15 @@ Chuna – E4 Store`;
       if (!photoUrl && cleanPhone && db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) {
         photoUrl = db.waProfilePhotos[cleanPhone];
       }
+      let lid = m.lid || null;
+      if (!lid && cleanPhone && db.waLids && db.waLids[cleanPhone]) {
+        lid = db.waLids[cleanPhone];
+      }
       return {
         ...m,
         photoUrl: photoUrl || null,
-        waProfileName: m.waProfileName || null
+        waProfileName: m.waProfileName || null,
+        lid: lid || null
       };
     });
     res.json({ success: true, members: enriched });
@@ -4984,7 +5028,7 @@ Chuna – E4 Store`;
   app.post("/api/members/:id/update-profile", async (req, res) => {
     try {
       const { id } = req.params;
-      const { name, waProfileName, whatsapp, type } = req.body;
+      const { name, waProfileName, whatsapp, type, lid } = req.body;
       const member = members.find(m => m.id === id);
       if (!member) return res.status(404).json({ success: false, error: 'Member tidak ditemukan' });
 
@@ -4992,6 +5036,18 @@ Chuna – E4 Store`;
       if (typeof waProfileName !== 'undefined') member.waProfileName = waProfileName;
       if (whatsapp) member.whatsapp = whatsapp;
       if (type) member.type = type;
+      if (typeof lid !== 'undefined') {
+        member.lid = lid ? String(lid).trim() : null;
+        const cleanPhone = cleanWaPhone(member.whatsapp || '');
+        if (cleanPhone) {
+          if (!db.waLids) db.waLids = {};
+          if (member.lid) {
+            db.waLids[cleanPhone] = member.lid;
+          } else {
+            delete db.waLids[cleanPhone];
+          }
+        }
+      }
 
       db.members = members;
       writeDB(db);

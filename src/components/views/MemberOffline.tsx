@@ -9,7 +9,8 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
     waProfileName: string;
     whatsapp: string;
     type: string;
-  }>({ name: '', waProfileName: '', whatsapp: '', type: 'Biasa' });
+    lid: string;
+  }>({ name: '', waProfileName: '', whatsapp: '', type: 'Biasa', lid: '' });
   const [loadingSync, setLoadingSync] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState<boolean>(false);
 
@@ -30,7 +31,8 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
       name: m.name || '',
       waProfileName: m.waProfileName === '-' ? '' : (m.waProfileName || ''),
       whatsapp: m.whatsapp || '',
-      type: m.type || 'Biasa'
+      type: m.type || 'Biasa',
+      lid: m.lid || ''
     });
   };
 
@@ -44,17 +46,20 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
         setMembers(prev => prev.map(m => m.id === memberId ? { 
           ...m, 
           photoUrl: data.photoUrl || m.photoUrl,
-          waProfileName: data.waProfileName || m.waProfileName
+          waProfileName: data.waProfileName || m.waProfileName,
+          lid: data.lid || m.lid
         } : m));
         if (selectedMember && selectedMember.id === memberId) {
           setSelectedMember({ 
             ...selectedMember, 
             photoUrl: data.photoUrl || selectedMember.photoUrl,
-            waProfileName: data.waProfileName || selectedMember.waProfileName
+            waProfileName: data.waProfileName || selectedMember.waProfileName,
+            lid: data.lid || selectedMember.lid
           });
           setEditForm(prev => ({
             ...prev,
-            waProfileName: data.waProfileName && data.waProfileName !== '-' ? data.waProfileName : prev.waProfileName
+            waProfileName: data.waProfileName && data.waProfileName !== '-' ? data.waProfileName : prev.waProfileName,
+            lid: data.lid || prev.lid
           }));
         }
         alert("✅ Berhasil menarik foto dan nama profil WhatsApp terbaru!");
@@ -85,7 +90,8 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
           name: editForm.name,
           waProfileName: editForm.waProfileName || '-',
           whatsapp: editForm.whatsapp,
-          type: editForm.type
+          type: editForm.type,
+          lid: editForm.lid || null
         };
         setSelectedMember(updated);
         setMembers(prev => prev.map(m => m.id === selectedMember.id ? updated : m));
@@ -122,6 +128,7 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
               <th className="px-6 py-3 font-semibold">Nama Member</th>
               <th className="px-6 py-3 font-semibold">Nama Profil WhatsApp</th>
               <th className="px-6 py-3 font-semibold">Nomor WhatsApp</th>
+              <th className="px-6 py-3 font-semibold">LID WhatsApp</th>
               <th className="px-6 py-3 font-semibold text-right">Aksi Cepat</th>
             </tr>
           </thead>
@@ -192,7 +199,18 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
                     {m.whatsapp || '-'}
                   </td>
 
-                  {/* KOLOM 6: AKSI CEPAT */}
+                  {/* KOLOM 6: LID WHATSAPP */}
+                  <td className="px-6 py-4 text-sm font-mono">
+                    {m.lid ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-sky-500/10 text-sky-400 border border-sky-500/30 text-xs select-all" title="LID WhatsApp">
+                        🆔 {m.lid}
+                      </span>
+                    ) : (
+                      <span className="text-slate-500 italic text-xs">-</span>
+                    )}
+                  </td>
+
+                  {/* KOLOM 7: AKSI CEPAT */}
                   <td className="px-6 py-4 text-sm text-right">
                     <button
                       type="button"
@@ -208,7 +226,7 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
             })}
             {members.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-6 py-10 text-center text-slate-400 text-sm">
+                <td colSpan={7} className="px-6 py-10 text-center text-slate-400 text-sm">
                   Tidak ada data member offline yang terdaftar.
                 </td>
               </tr>
@@ -329,6 +347,36 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
                     <option value="VIP">VIP</option>
                   </select>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  LID WhatsApp (Linked Device Identifier)
+                </label>
+                <div className="flex gap-2">
+                  <input 
+                    type="text"
+                    value={editForm.lid}
+                    onChange={(e) => setEditForm({ ...editForm, lid: e.target.value })}
+                    placeholder="Contoh: 123456789012345@lid"
+                    className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-white text-sm font-mono focus:outline-hidden focus:border-emerald-500"
+                  />
+                  {editForm.lid && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(editForm.lid);
+                        alert("✅ LID WhatsApp berhasil disalin!");
+                      }}
+                      className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-sky-300 border border-slate-700 whitespace-nowrap flex items-center gap-1"
+                    >
+                      📋 Salin
+                    </button>
+                  )}
+                </div>
+                <span className="text-[11px] text-slate-400 mt-1 block">
+                  *Identifier unik perangkat WhatsApp dari Baileys untuk identifikasi transaksi.
+                </span>
               </div>
             </div>
 
