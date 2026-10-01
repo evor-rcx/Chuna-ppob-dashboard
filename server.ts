@@ -6063,14 +6063,18 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca") {
                 const pendingHeader = isOwner ? "⏳ Selamat datang Owner!" : `⏳ Hai Kak${greetingWaName}!`;
 
                 if (status === 'Pending') {
-                    msg = `${pendingHeader}
+                    const cleanCustName = (customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak')
+                        ? customerDisplayName.replace(/^kak\s+/i, '').trim()
+                        : '';
+                    const greetingLine = isOwner ? 'Selamat datang Owner' : (cleanCustName ? `Kak ${cleanCustName}` : 'Kak');
+                    const targetSuffix = isOwner ? 'Owner' : (cleanCustName || '');
+                    msg = `⏳ ${greetingLine}, pesanan sedang diproses sistem pusat E4 Store.
+Akan update otomatis ya, Kak. Mohon ditunggu.
 
-Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa saat, nanti akan kami kabari setelah selesai.
+📦 Produk: ${product.product_name}
+🎯 Tujuan: ${targetDisplay}${targetSuffix ? ` (${targetSuffix})` : ''}
 
-📦 Produk  : ${product.product_name}
-🎯 Tujuan   : ${targetDisplay}${(customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak') ? ` (${customerDisplayName})` : ''}
-
-Chuna menunggu kabar baik dari Kakak! 😊`;
+Chuna siap bantu! 😊`;
 
                     let emeraldBuffer: Buffer | null = null;
                     try {
@@ -6441,14 +6445,18 @@ async function processPascaPayment(ctx: any, ref_id: string, method: string, sta
                 const pendingHeader = isOwner ? "⏳ Selamat datang Owner!" : `⏳ Hai Kak${greetingWaName}!`;
 
                 if (status === 'Pending') {
-                    msg = `${pendingHeader}
+                    const cleanCustName = (customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak')
+                        ? customerDisplayName.replace(/^kak\s+/i, '').trim()
+                        : (payJson.data?.customer_name || checkResult?.customer_name || '');
+                    const greetingLine = isOwner ? 'Selamat datang Owner' : (cleanCustName ? `Kak ${cleanCustName}` : 'Kak');
+                    const targetSuffix = isOwner ? 'Owner' : (cleanCustName || '');
+                    msg = `⏳ ${greetingLine}, pesanan sedang diproses sistem pusat E4 Store.
+Akan update otomatis ya, Kak. Mohon ditunggu.
 
-Pesanan Anda sedang diproses oleh sistem pusat E4 Store. Mohon tunggu beberapa saat, nanti akan kami kabari setelah selesai.
+📦 Produk: ${stateData.product.product_name}
+🎯 Tujuan: ${displayCustomerNo}${targetSuffix ? ` (${targetSuffix})` : ''}
 
-📦 Tagihan : ${stateData.product.product_name}
-🎯 Tujuan   : ${displayCustomerNo}${(customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak') ? ` (${customerDisplayName})` : (payJson.data?.customer_name || checkResult?.customer_name ? ` (${payJson.data?.customer_name || checkResult?.customer_name})` : '')}
-
-Chuna menunggu kabar baik dari Kakak! 😊`;
+Chuna siap bantu! 😊`;
 
                     let emeraldBuffer: Buffer | null = null;
                     try {
@@ -10836,7 +10844,7 @@ E4 Store`,
     }
   });
 
-  // Route demo uji coba nota pembayaran angsuran / status belum lunas (Template Baru Picsart_26-09-28_17-53-27-094.png)
+  // Route demo uji coba nota pembayaran angsuran / sisa utang (Picsart_26-09-28_20-16-52-477.png)
   app.get("/api/demo-nota-angsuran", async (req, res) => {
     try {
         let waPhotoUrl: string | null = null;
@@ -10848,18 +10856,18 @@ E4 Store`,
                 waPhotoUrl = db.waProfilePhotos[keys[0]];
             }
         }
-        const total = req.query.total ? Number(req.query.total) : 25000;
-        const buffer = await generateRoyalStrukReceipt({
-            nama: (req.query.nama as string) || (req.query.name as string) || 'Lio',
-            status: 'BELUM LUNAS',
-            metode: 'KASBON / UTANG',
-            product: (req.query.item as string) || 'PLN 20.000',
-            target: (req.query.target as string) || '32185604272',
-            namaPlg: 'YOHANIS-AF',
-            golDaya: 'R1 / 000000900',
-            sn: '0585-9340-6917-6385-5660',
-            totalBayar: total,
-            templateVariant: 'tidaklunas',
+        const total = req.query.total ? Number(req.query.total) : 100000;
+        const bayar = req.query.bayar ? Number(req.query.bayar) : 50000;
+        const sisa = Math.max(0, total - bayar);
+        const buffer = await generateDebtSettlementReceipt({
+            nama: (req.query.nama as string) || (req.query.name as string) || 'Kak Reza',
+            isLunasTotal: false,
+            products: [{ name: (req.query.item as string) || 'Telkomsel 100.000', price: total }],
+            totalDebt: total,
+            dibayarkan: bayar,
+            sisaUtang: sisa,
+            tglUtang: (req.query.tglUtang as string) || '17 September 2026',
+            tglBayar: (req.query.tglBayar as string) || '19 September 2026',
             waPhotoUrl: waPhotoUrl
         });
         res.setHeader('Content-Type', 'image/png');
@@ -10914,10 +10922,10 @@ E4 Store`,
             }
         }
 
-        const nama = (req.query.name as string) || (req.query.nama as string) || 'E4STORE';
-        const layanan = (req.query.layanan as string) || (req.query.item as string) || 'Go Pay 8.000';
-        const nomor = (req.query.nomor as string) || (req.query.target as string) || '08134621611';
-        const total = req.query.total ? Number(req.query.total) : 13000;
+        const nama = (req.query.name as string) || (req.query.nama as string) || 'Koi';
+        const layanan = (req.query.layanan as string) || (req.query.item as string) || 'Free Fire 70 Diamond';
+        const nomor = (req.query.nomor as string) || (req.query.target as string) || '1321';
+        const total = req.query.total ? Number(req.query.total) : 11000;
 
         const buffer = await generateKonfirmasiReceipt({
             nama: nama,

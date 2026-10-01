@@ -47,22 +47,31 @@ function getInitials(name: string): string {
  * Format Teks Pesan WhatsApp Konfirmasi Pembelian Customer
  */
 export function formatKonfirmasiMessage(data: KonfirmasiData): string {
-    const nama = data.nama || 'E4STORE';
-    const layanan = data.layanan || 'Go Pay 8.000';
-    const nomor = data.nomor || '08134621611';
-    const totalBayar = Number(data.totalBayar || 13000);
+    let rawName = (data.nama || 'Pelanggan').trim();
+    let cleanName = rawName;
+    const isOwner = rawName.toLowerCase().includes('owner');
 
-    return `E4 STORE
-Konfirmasi Pembelian Customer
+    if (cleanName.toLowerCase().startsWith('kak ')) {
+        cleanName = cleanName.substring(4).trim();
+    } else if (cleanName.toLowerCase().startsWith('kak')) {
+        cleanName = cleanName.substring(3).trim();
+    }
+    if (!cleanName || cleanName === '-' || cleanName === 'Kakak') {
+        cleanName = 'Pelanggan';
+    }
 
-Nama : ${nama}
-Layanan : ${layanan}
-Nomor : ${nomor}
+    const greetingName = isOwner ? 'Selamat datang Owner' : `Kak ${cleanName}`;
+    const targetSuffix = isOwner ? 'Owner' : cleanName;
+    const produk = data.layanan || 'Free Fire 70 Diamond';
+    const tujuan = data.nomor || '-';
 
-Total Bayar : Rp ${totalBayar.toLocaleString('id-ID')}
+    return `⏳ ${greetingName}, pesanan sedang diproses sistem pusat E4 Store.
+Akan update otomatis ya, Kak. Mohon ditunggu.
 
-Mohon ditunggu ya Kak, nanti diupdate
-di bawah chat ini ya Kak. Terima kasih`;
+📦 Produk: ${produk}
+🎯 Tujuan: ${tujuan} (${targetSuffix})
+
+Chuna siap bantu! 😊`;
 }
 
 /**

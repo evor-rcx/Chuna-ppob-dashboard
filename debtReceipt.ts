@@ -1,5 +1,5 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
-import { generateRoyalStrukReceipt, resolveAvatarImage } from './royalStrukReceipt';
+import { resolveAvatarImage } from './royalStrukReceipt';
 import path from 'path';
 import fs from 'fs';
 
@@ -196,30 +196,10 @@ export async function generateDebtSettlementReceipt(data: DebtSettlementReceiptD
 
     const totalDebt = Number(data.totalDebt || 0);
     const dibayarkan = Number(data.dibayarkan || 0);
-    // Otomatis hitung apakah lunas atau masih ada sisa utang
-    const isLunas = data.isLunasTotal !== undefined ? (data.isLunasTotal && dibayarkan >= totalDebt) : (dibayarkan >= totalDebt);
-    const kembalian = isLunas ? Math.max(0, dibayarkan - totalDebt) : 0;
-    const sisaUtang = isLunas ? 0 : Math.max(0, totalDebt - dibayarkan);
-
-    // Gunakan Template Resmi Baru E4 Store (Royal Lunas / Royal Tidak Lunas)
-    try {
-        const prod = (data.products && data.products.length > 0) ? data.products.map(p => p.name).join(', ') : 'Pelunasan Tagihan / Utang';
-        const royalBuffer = await generateRoyalStrukReceipt({
-            nama: data.nama,
-            status: isLunas ? 'Lunas' : 'TIDAK LUNAS',
-            metode: isLunas ? 'CASH / LUNAS' : 'ANGSURAN UTANG',
-            templateVariant: isLunas ? 'lunas' : 'tidaklunas',
-            product: prod,
-            totalBayar: isLunas ? dibayarkan : (sisaUtang || totalDebt),
-            waPhotoUrl: data.waPhotoUrl,
-            avatarBuffer: data.avatarBuffer
-        });
-        if (royalBuffer) {
-            return royalBuffer;
-        }
-    } catch (err) {
-        console.error("Gagal generateRoyalStrukReceipt di generateDebtSettlementReceipt, fallback:", err);
-    }
+    // Otomatis hitung apakah uangnya pas, lebih (kembalian), atau kurang (sisa utang / angsuran)
+    const isLunas = dibayarkan >= totalDebt;
+    const kembalian = Math.max(0, dibayarkan - totalDebt);
+    const sisaUtang = Math.max(0, totalDebt - dibayarkan);
 
     // 1. WhatsApp Avatar di bawah medali lingkaran emas (Center X: 546.5, Y: 194.5, Radius: 96)
     const avatarCenterX = 546.5;

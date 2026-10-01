@@ -24,7 +24,13 @@ export function Menu({ onNavigate }: MenuProps) {
 
   const tagihanPascaCaption = `E4 STORE\nCek Tagihan\n\nTagihan Ditemukan!\n\n----------------------------------------\nNama                         A*D* *A*A*U*D*N\nNomor                        234000182643\nLayanan                      Pln Pascabayar\n----------------------------------------\n\nTOTAL BAYAR    Lembar 1      Rp 119.283\nBulan 1 : 202607             Meter: 00007792 - 00007870\nTarif: R1M                   Daya: 900\n\nSilahkan Lanjutkan Pembayaran\n\n----------------------------------------\nTerima kasih telah berbelanja di E4 Store!\nCetak: 19/07/2026 16:59 WITA | Kode: #E4\nMinggu, Hari Kemerdekaan RI (29 hari lagi)`;
 
-  const konfirmasiCaption = `E4 STORE\nKonfirmasi Pembelian Customer\n\nNama : E4STORE\nLayanan : Go Pay 8.000\nNomor : 08134621611\n\nTotal Bayar : Rp 13.000\n\nMohon ditunggu ya Kak, nanti diupdate\ndi bawah chat ini ya Kak. Terima kasih`;
+  const konfirmasiCaption = `⏳ Kak Koi, pesanan sedang diproses sistem pusat E4 Store.
+Akan update otomatis ya, Kak. Mohon ditunggu.
+
+📦 Produk: Free Fire 70 Diamond
+🎯 Tujuan: 1321 (Koi)
+
+Chuna siap bantu! 😊`;
 
   const royalGameCaption = `E4 STORE\nStruk Pembayaran\n\nStatus: SUKSES (LUNAS)\n\n----------------------------------------\nNama: Lio\nStatus: Lunas\nMetode: CASH\nItem Game: Magic Chess Go Go 5 Diamonds\n\nID Tujuan Game: 836351001\nOrder ID: PRE-1790198576914\nTanggal: 24/09/2026 05:23 WITA\n----------------------------------------\n\nSERIAL NUMBER / SN\n@41 . RefId: GTX-260924XD2H4IF01V\n\n----------------------------------------\nTOTAL BAYAR: Rp 3.000\n----------------------------------------\n\nTerima kasih telah berbelanja di E4 Store!\nCetak: 24/09/2026 05:23 WITA | Kode: #PRE-179\nKamis, 24 September 2026 - Hari Tani Nasional (Hari Ini)\nChuna - Asisten Imutmu siap bantu 24 jam!`;
 
@@ -302,7 +308,7 @@ export function Menu({ onNavigate }: MenuProps) {
               }`}
             >
               <CheckCircle2 size={16} />
-              Model Pelunasan: Lunas (Kak Reza)
+              Model Pelunasan: Lunas (Picsart Chuna)
             </button>
             <button
               onClick={() => setActiveNotaTab('angsuran')}
@@ -313,7 +319,7 @@ export function Menu({ onNavigate }: MenuProps) {
               }`}
             >
               <AlertCircle size={16} />
-              Model Angsuran: Sisa Utang
+              Model Angsuran: Sisa Utang (Picsart Chuna)
             </button>
           </div>
 
