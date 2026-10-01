@@ -535,11 +535,6 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
         const formattedDate = `${dateStr} WITA`;
         const calText = getCalendarInfo(txDate);
 
-        // If type is tagihan, use the new official E4 Store Cek Tagihan layout (Picsart_26-09-28_23-03-28-209.png)
-        if (type === 'tagihan') {
-            return await generatePascabayarTagihanReceipt({ ...data, date: txDate });
-        }
-
         const width = 1000;
         const height = 1000;
         const canvas = createCanvas(width, height);
@@ -587,15 +582,17 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
             } catch (e) {}
         }
         const isUtang = methodLower === 'utang' || methodLower === 'kasbon' || statusLower.includes('utang') || statusLower.includes('kasbon');
-        const isExplicitlyPaid = data.isPaid === true || data.isLunas === true || statusLower.includes('lunas');
+        const isExplicitlyPaid = data.isPaid === true || data.isLunas === true;
         const isPending = statusLower.includes('pending') || statusLower.includes('menunggu');
 
         let isLunas = true;
-        if (isUtang && !isExplicitlyPaid) {
+        if (data.isPaid === false) {
+            isLunas = false;
+        } else if (isUtang && !isExplicitlyPaid) {
             isLunas = false;
         } else if (isPending) {
             isLunas = false;
-        } else if (statusLower.includes('belum lunas') || statusLower.includes('tidak lunas')) {
+        } else if (statusLower.includes('belum') || statusLower.includes('tidak') || statusLower.includes('utang') || statusLower.includes('kasbon')) {
             isLunas = false;
         }
 
@@ -614,8 +611,16 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
             const members = currentDb.members || [];
             let m = members.find((x: any) => x.id === data.memberId);
             if (!m && data.target) {
-                const cleanTarget = String(data.target).replace(/\D/g, '');
-                m = members.find((x: any) => x.whatsapp && x.whatsapp.replace(/\D/g, '') === cleanTarget);
+                const cleanTarget = cleanWaPhone(String(data.target));
+                if (cleanTarget) {
+                    m = members.find((x: any) => cleanWaPhone(x.whatsapp || '') === cleanTarget);
+                }
+            }
+            if (!m && data.whatsapp) {
+                const cleanW = cleanWaPhone(String(data.whatsapp));
+                if (cleanW) {
+                    m = members.find((x: any) => cleanWaPhone(x.whatsapp || '') === cleanW);
+                }
             }
             if (!m && data.memberId && String(data.memberId).startsWith('MBR-')) {
                 const tgId = String(data.memberId).replace('MBR-', '');
@@ -625,8 +630,8 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
             if (m && m.whatsapp) waPhone = m.whatsapp;
 
             if (!waPhone && data.target) {
-                const cleanT = String(data.target).replace(/\D/g, '');
-                if (cleanT.length >= 10 && (cleanT.startsWith('08') || cleanT.startsWith('628'))) {
+                const cleanT = cleanWaPhone(String(data.target));
+                if (cleanT.length >= 8) {
                     waPhone = cleanT;
                 }
             }
@@ -634,23 +639,22 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
             if (!waPhone && data.chatId) waPhone = String(data.chatId);
 
             if (waPhone) {
-                let clean = waPhone.replace(/\D/g, '');
-                if (clean.startsWith('0')) clean = '62' + clean.substring(1);
+                let clean = cleanWaPhone(waPhone);
 
                 // Cek nomor owner
                 const isOwnerNum = isOwnerWhatsapp(clean) || (m && Array.isArray(m.telegram) && m.telegram.some((tid: any) => (currentDb.owners || []).includes(parseInt(tid))));
                 if (isOwnerNum || (memberName && memberName.toLowerCase().includes("owner"))) {
                     memberName = 'Selamat datang Owner';
                 } else {
-                    // Prioritaskan 100% Nama Profil WhatsApp asli (db.waProfiles / waProfileName)
-                    if (clean && currentDb.waProfiles && currentDb.waProfiles[clean] && !isPhoneNumberOrEmpty(currentDb.waProfiles[clean])) {
-                        memberName = currentDb.waProfiles[clean].trim();
-                    } else if (m?.waProfileName && !isPhoneNumberOrEmpty(m.waProfileName)) {
+                    // Prioritaskan 100% Nama Profil WhatsApp asli dari Daftar Member Offline
+                    if (m?.waProfileName && !isPhoneNumberOrEmpty(m.waProfileName)) {
                         memberName = m.waProfileName.trim();
-                    } else if (data.customerDisplayName && !isPhoneNumberOrEmpty(data.customerDisplayName) && data.customerDisplayName !== 'Pelanggan Setia' && data.customerDisplayName !== 'Kakak') {
-                        memberName = data.customerDisplayName.trim();
+                    } else if (clean && currentDb.waProfiles && currentDb.waProfiles[clean] && !isPhoneNumberOrEmpty(currentDb.waProfiles[clean])) {
+                        memberName = currentDb.waProfiles[clean].trim();
                     } else if (m?.name && !isPhoneNumberOrEmpty(m.name)) {
                         memberName = m.name.trim();
+                    } else if (data.customerDisplayName && !isPhoneNumberOrEmpty(data.customerDisplayName) && data.customerDisplayName !== 'Pelanggan Setia' && data.customerDisplayName !== 'Kakak') {
+                        memberName = data.customerDisplayName.trim();
                     } else if (clean && clean.length >= 8) {
                         memberName = `+${clean}`;
                     } else {
@@ -660,6 +664,11 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
 
                 if (!memberName || memberName === '-' || memberName === 'Pelanggan Setia') {
                     memberName = (clean && clean.length >= 8) ? `+${clean}` : 'Kakak';
+                }
+
+                // Ambil Foto Profil WhatsApp dari Daftar Member Offline (m.photoUrl)
+                if (!waPhotoUrl && m?.photoUrl) {
+                    waPhotoUrl = m.photoUrl;
                 }
 
                 if (!waPhotoUrl && currentDb.waProfilePhotos && currentDb.waProfilePhotos[clean]) {
@@ -674,12 +683,60 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
                             waPhotoUrl = fetchedPhoto;
                             if (!currentDb.waProfilePhotos) currentDb.waProfilePhotos = {};
                             currentDb.waProfilePhotos[clean] = fetchedPhoto;
+                            if (m && !m.photoUrl) m.photoUrl = fetchedPhoto;
                             if (typeof writeDB === 'function') writeDB(currentDb);
                         }
                     } catch (e) {}
                 }
+            } else if (m && m.photoUrl && !waPhotoUrl) {
+                waPhotoUrl = m.photoUrl;
             }
         } catch (e) {}
+
+        const targetId = String(data.target || data.no || '-');
+        const prodName = String(data.product || (typeof data.product === 'object' ? data.product?.product_name : '') || 'PLN 20.000');
+
+        // Jika type tagihan, gunakan template cek tagihan pascabayar resmi dengan foto profil WA & nama member
+        if (type === 'tagihan') {
+            return await generatePascabayarTagihanReceipt({
+                ...data,
+                date: txDate,
+                customer_name: memberName,
+                nama_pelanggan: data.nama_pelanggan || data.namaPlg || memberName,
+                waPhotoUrl: waPhotoUrl || data.waPhotoUrl,
+                avatarBuffer: data.avatarBuffer || null
+            });
+        }
+
+        // Gunakan Template Resmi Nota Sukses Lunas Baru (Royal Struk Picsart E4 Store)
+        try {
+            const royalBuffer = await generateRoyalStrukReceipt({
+                nama: memberName,
+                status: isLunas ? 'Lunas' : 'TIDAK LUNAS',
+                metode: (methodLower || 'cash').toUpperCase(),
+                templateVariant: isLunas ? 'lunas' : 'tidaklunas',
+                product: prodName,
+                target: targetId,
+                type: data.type || '',
+                namaPlg: namaPlg,
+                golDaya: golDaya,
+                kwh: kwh,
+                lembar: data.lembar || data.lembar_tagihan || '',
+                bulan: data.bulan || data.periode || '',
+                meter: data.meter || '',
+                orderId: data.id || data.orderId || `PRE-${Date.now()}`,
+                tanggal: formattedDate,
+                sn: token || data.sn || '-',
+                totalBayar: Number(data.price || data.totalBayar || data.total || 0),
+                waPhotoUrl: waPhotoUrl,
+                avatarBuffer: data.avatarBuffer || null
+            });
+            if (royalBuffer) {
+                return royalBuffer;
+            }
+        } catch (royalErr) {
+            console.error("Gagal generateRoyalStrukReceipt di generateCanvasReceipt, fallback ke canvas:", royalErr);
+        }
 
         if (data.avatarBuffer) {
             try {
@@ -1025,8 +1082,6 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
             }
         };
 
-        const targetId = String(data.target || data.no || '-');
-        const prodName = String(data.product || (typeof data.product === 'object' ? data.product?.product_name : '') || 'PLN 20.000');
         const prodLower = prodName.toLowerCase();
         const typeLower = String(data.type || '').toLowerCase();
         const skuLower = String(data.sku || '').toLowerCase();
@@ -1516,8 +1571,10 @@ async function getCustomerWaDetails(member: any, telegramUserId?: any, targetPho
             waProfile = member.waProfileName;
         }
 
-        // 2. Ambil Foto Profil HANYA dari WhatsApp (Berdasarkan instruksi: FOKUS WHATSAPP SAJA, JANGAN AMBIL FOTO TELEGRAM)
-        if (db.waProfilePhotos && db.waProfilePhotos[clean]) {
+        // 2. Ambil Foto Profil dari Member Offline atau database foto WhatsApp
+        if (member?.photoUrl) {
+            waPhotoUrl = member.photoUrl;
+        } else if (db.waProfilePhotos && db.waProfilePhotos[clean]) {
             waPhotoUrl = db.waProfilePhotos[clean];
         }
 
@@ -1529,10 +1586,20 @@ async function getCustomerWaDetails(member: any, telegramUserId?: any, targetPho
                     waPhotoUrl = freshPhoto;
                     if (!db.waProfilePhotos) db.waProfilePhotos = {};
                     db.waProfilePhotos[clean] = freshPhoto;
+                    if (member && !member.photoUrl) member.photoUrl = freshPhoto;
                     writeDB(db);
                 }
             } catch (e) {}
         }
+    }
+
+    if (!waPhotoUrl && member?.photoUrl) {
+        waPhotoUrl = member.photoUrl;
+    }
+
+    // Sesuai instruksi: Jika nama profile whatsapp tidak terbaca, pakai nama member
+    if ((!waProfile || waProfile === '-' || isPhoneNumberOrEmpty(waProfile)) && member?.name && !isPhoneNumberOrEmpty(member.name)) {
+        waProfile = member.name.trim();
     }
 
     return {
@@ -2008,15 +2075,16 @@ export async function generateCanvasDebtReceipt(member: any, utangTxs: any[]): P
 
         try {
             const waDetails = await getCustomerWaDetails(member);
-            if (!memberName || isPhoneNumberOrEmpty(memberName)) {
-                if (waDetails.waProfile && waDetails.waProfile !== '-' && !isPhoneNumberOrEmpty(waDetails.waProfile)) {
-                    memberName = waDetails.waProfile;
-                } else {
-                    memberName = 'Kakak';
-                }
+            if (waDetails.waProfile && waDetails.waProfile !== '-' && !isPhoneNumberOrEmpty(waDetails.waProfile)) {
+                memberName = waDetails.waProfile;
+            } else if (member?.name && !isPhoneNumberOrEmpty(member.name)) {
+                memberName = member.name.trim();
+            } else {
+                memberName = 'Pelanggan';
             }
             if (waDetails.waPhone && waDetails.waPhone !== '-') waPhone = waDetails.waPhone;
             if (waDetails.waPhotoUrl) waPhotoUrl = waDetails.waPhotoUrl;
+            if (!waPhotoUrl && member?.photoUrl) waPhotoUrl = member.photoUrl;
         } catch (e) {}
 
         const txList = Array.isArray(utangTxs) ? utangTxs : (utangTxs ? [utangTxs] : []);
@@ -4957,6 +5025,50 @@ Chuna – E4 Store`;
       };
     });
     res.json({ success: true, members: enriched });
+  });
+
+  app.post("/api/members", async (req, res) => {
+    try {
+      const { name, waProfileName, whatsapp, type, lid, photoUrl } = req.body;
+      if (!name) return res.status(400).json({ success: false, error: 'Nama member wajib diisi' });
+
+      const newId = `MBR-OFF-${Date.now().toString().slice(-6)}`;
+      const cleanPhone = cleanWaPhone(whatsapp || '');
+      const newMember: any = {
+        id: newId,
+        name: String(name).trim(),
+        waProfileName: waProfileName ? String(waProfileName).trim() : null,
+        whatsapp: whatsapp ? String(whatsapp).trim() : '',
+        type: type || 'Biasa',
+        balance: 0,
+        registeredAt: new Date().toISOString(),
+        photoUrl: photoUrl || null,
+        lid: lid ? String(lid).trim() : null
+      };
+
+      if (!db.members) db.members = [];
+      db.members.unshift(newMember);
+
+      if (cleanPhone) {
+        if (newMember.waProfileName) {
+          if (!db.waProfiles) db.waProfiles = {};
+          db.waProfiles[cleanPhone] = newMember.waProfileName;
+        }
+        if (newMember.lid) {
+          if (!db.waLids) db.waLids = {};
+          db.waLids[cleanPhone] = newMember.lid;
+        }
+        if (newMember.photoUrl) {
+          if (!db.waProfilePhotos) db.waProfilePhotos = {};
+          db.waProfilePhotos[cleanPhone] = newMember.photoUrl;
+        }
+      }
+
+      writeDB(db);
+      res.json({ success: true, member: newMember });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
   });
 
   app.post("/api/members/:id/sync-photo", async (req, res) => {
@@ -10724,7 +10836,7 @@ E4 Store`,
     }
   });
 
-  // Route demo uji coba nota pembayaran angsuran (sebagian utang: misal utang 10.000 bayar 5.000 sisa 5.000 belum lunas)
+  // Route demo uji coba nota pembayaran angsuran / status belum lunas (Template Baru Picsart_26-09-28_17-53-27-094.png)
   app.get("/api/demo-nota-angsuran", async (req, res) => {
     try {
         let waPhotoUrl: string | null = null;
@@ -10736,18 +10848,18 @@ E4 Store`,
                 waPhotoUrl = db.waProfilePhotos[keys[0]];
             }
         }
-        const total = req.query.total ? Number(req.query.total) : 10000;
-        const bayar = req.query.bayar ? Number(req.query.bayar) : 5000;
-        const sisa = Math.max(0, total - bayar);
-        const buffer = await generateDebtSettlementReceipt({
-            nama: (req.query.nama as string) || 'Kak Reza',
-            isLunasTotal: false,
-            products: [{ name: (req.query.item as string) || 'Telkomsel 10.000', price: total }],
-            totalDebt: total,
-            dibayarkan: bayar,
-            sisaUtang: sisa,
-            tglUtang: (req.query.tglUtang as string) || '17 September 2026',
-            tglBayar: (req.query.tglBayar as string) || '19 September 2026',
+        const total = req.query.total ? Number(req.query.total) : 25000;
+        const buffer = await generateRoyalStrukReceipt({
+            nama: (req.query.nama as string) || (req.query.name as string) || 'Lio',
+            status: 'BELUM LUNAS',
+            metode: 'KASBON / UTANG',
+            product: (req.query.item as string) || 'PLN 20.000',
+            target: (req.query.target as string) || '32185604272',
+            namaPlg: 'YOHANIS-AF',
+            golDaya: 'R1 / 000000900',
+            sn: '0585-9340-6917-6385-5660',
+            totalBayar: total,
+            templateVariant: 'tidaklunas',
             waPhotoUrl: waPhotoUrl
         });
         res.setHeader('Content-Type', 'image/png');

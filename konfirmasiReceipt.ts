@@ -1,4 +1,5 @@
 import { createCanvas, loadImage, Image } from '@napi-rs/canvas';
+import { resolveAvatarImage } from './royalStrukReceipt';
 import path from 'path';
 import fs from 'fs';
 
@@ -88,29 +89,8 @@ export async function generateKonfirmasiReceipt(data: KonfirmasiData): Promise<B
     const avatarCenterY = 537.5;
     const avatarRadius = 216;
 
-    // Load foto profil user jika ada
-    let userAvatarImg: any = null;
-    if (data.avatarBuffer) {
-        try {
-            userAvatarImg = await loadImage(data.avatarBuffer);
-        } catch (e) {
-            console.error("Gagal load avatarBuffer konfirmasi:", e);
-        }
-    }
-    if (!userAvatarImg && data.waPhotoUrl && data.waPhotoUrl.startsWith('http')) {
-        try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 4000);
-            const res = await fetch(data.waPhotoUrl, { signal: controller.signal });
-            clearTimeout(timer);
-            if (res.ok) {
-                const buf = Buffer.from(await res.arrayBuffer());
-                userAvatarImg = await loadImage(buf);
-            }
-        } catch (e) {
-            console.error("Gagal fetch waPhotoUrl konfirmasi:", e);
-        }
-    }
+    // Load foto profil user jika ada (mendukung foto member offline lokal, base64, url)
+    const userAvatarImg = await resolveAvatarImage(data.waPhotoUrl, data.avatarBuffer);
 
     // Base background di bawah lingkaran
     ctx.fillStyle = '#060c24';

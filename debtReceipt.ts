@@ -1,4 +1,5 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
+import { generateRoyalStrukReceipt, resolveAvatarImage } from './royalStrukReceipt';
 import path from 'path';
 import fs from 'fs';
 
@@ -200,33 +201,33 @@ export async function generateDebtSettlementReceipt(data: DebtSettlementReceiptD
     const kembalian = isLunas ? Math.max(0, dibayarkan - totalDebt) : 0;
     const sisaUtang = isLunas ? 0 : Math.max(0, totalDebt - dibayarkan);
 
+    // Gunakan Template Resmi Baru E4 Store (Royal Lunas / Royal Tidak Lunas)
+    try {
+        const prod = (data.products && data.products.length > 0) ? data.products.map(p => p.name).join(', ') : 'Pelunasan Tagihan / Utang';
+        const royalBuffer = await generateRoyalStrukReceipt({
+            nama: data.nama,
+            status: isLunas ? 'Lunas' : 'TIDAK LUNAS',
+            metode: isLunas ? 'CASH / LUNAS' : 'ANGSURAN UTANG',
+            templateVariant: isLunas ? 'lunas' : 'tidaklunas',
+            product: prod,
+            totalBayar: isLunas ? dibayarkan : (sisaUtang || totalDebt),
+            waPhotoUrl: data.waPhotoUrl,
+            avatarBuffer: data.avatarBuffer
+        });
+        if (royalBuffer) {
+            return royalBuffer;
+        }
+    } catch (err) {
+        console.error("Gagal generateRoyalStrukReceipt di generateDebtSettlementReceipt, fallback:", err);
+    }
+
     // 1. WhatsApp Avatar di bawah medali lingkaran emas (Center X: 546.5, Y: 194.5, Radius: 96)
     const avatarCenterX = 546.5;
     const avatarCenterY = 194.5;
     const avatarRadius = 96;
 
-    let userAvatarImg: any = null;
-    if (data.avatarBuffer) {
-        try {
-            userAvatarImg = await loadImage(data.avatarBuffer);
-        } catch (e) {
-            console.error("Gagal load avatarBuffer:", e);
-        }
-    }
-    if (!userAvatarImg && data.waPhotoUrl && data.waPhotoUrl.startsWith('http')) {
-        try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 4000);
-            const res = await fetch(data.waPhotoUrl, { signal: controller.signal });
-            clearTimeout(timer);
-            if (res.ok) {
-                const buf = Buffer.from(await res.arrayBuffer());
-                userAvatarImg = await loadImage(buf);
-            }
-        } catch (e) {
-            console.error("Gagal fetch waPhotoUrl:", e);
-        }
-    }
+    // Load WhatsApp Avatar (mendukung foto member offline lokal, base64, url)
+    const userAvatarImg = await resolveAvatarImage(data.waPhotoUrl, data.avatarBuffer);
 
     ctx.save();
     ctx.beginPath();

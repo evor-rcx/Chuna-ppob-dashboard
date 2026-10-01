@@ -13,6 +13,14 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
   }>({ name: '', waProfileName: '', whatsapp: '', type: 'Biasa', lid: '' });
   const [loadingSync, setLoadingSync] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState<boolean>(false);
+  const [isAddingMember, setIsAddingMember] = useState<boolean>(false);
+  const [newMemberForm, setNewMemberForm] = useState<{
+    name: string;
+    waProfileName: string;
+    whatsapp: string;
+    type: string;
+    lid: string;
+  }>({ name: '', waProfileName: '', whatsapp: '', type: 'Biasa', lid: '' });
 
   const fetchMembers = () => {
     fetch("/api/members/offline")
@@ -105,18 +113,51 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
     }
   };
 
+  const handleAddMember = async () => {
+    if (!newMemberForm.name.trim()) {
+      alert("Nama member wajib diisi!");
+      return;
+    }
+    try {
+      const res = await fetch("/api/members", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newMemberForm)
+      });
+      const data = await res.json();
+      if (data.success && data.member) {
+        alert("✅ Member offline berhasil didaftarkan!");
+        setMembers(prev => [data.member, ...prev]);
+        setIsAddingMember(false);
+        setNewMemberForm({ name: '', waProfileName: '', whatsapp: '', type: 'Biasa', lid: '' });
+      } else {
+        alert(data.error || "Gagal menambah member");
+      }
+    } catch (e) {
+      alert("Gagal menghubungi server");
+    }
+  };
+
   return (
     <PageContainer title="Daftar Member Offline & Profil WhatsApp" onBack={onBack}>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <p className="text-xs text-slate-400">
-          💡 Klik pada baris member untuk melihat/mengedit foto profil dan nama WhatsApp yang digunakan pada <span className="text-emerald-400 font-semibold">Stiker Konfirmasi Pembelian</span>.
+          💡 Klik pada baris member untuk melihat/mengedit foto profil dan nama WhatsApp yang digunakan pada <span className="text-emerald-400 font-semibold">Stiker Konfirmasi Pembelian</span> dan <span className="text-amber-400 font-semibold">Nota Resmi Sukses Lunas</span>.
         </p>
-        <button
-          onClick={fetchMembers}
-          className="self-start sm:self-auto px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 transition-colors flex items-center gap-1.5"
-        >
-          🔄 Refresh Tabel
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            onClick={() => setIsAddingMember(true)}
+            className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs text-white font-semibold transition-colors flex items-center gap-1.5 shadow-md shadow-emerald-950/40"
+          >
+            ➕ Tambah Member Offline
+          </button>
+          <button
+            onClick={fetchMembers}
+            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 transition-colors flex items-center gap-1.5"
+          >
+            🔄 Refresh
+          </button>
+        </div>
       </div>
 
       <div className="-mx-6 overflow-x-auto">
@@ -484,6 +525,112 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* MODAL TAMBAH MEMBER OFFLINE */}
+      {isAddingMember && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl relative">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-5">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                ➕ Tambah Member Offline Baru
+              </h3>
+              <button 
+                type="button"
+                onClick={() => setIsAddingMember(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4 text-sm mb-6">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Nama Member * (Wajib)
+                </label>
+                <input 
+                  type="text"
+                  value={newMemberForm.name}
+                  onChange={(e) => setNewMemberForm({ ...newMemberForm, name: e.target.value })}
+                  placeholder="Misal: Koi"
+                  className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-white text-sm focus:outline-hidden focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Nama Profil WhatsApp (Ditampilkan di Stiker & Nota)
+                </label>
+                <input 
+                  type="text"
+                  value={newMemberForm.waProfileName}
+                  onChange={(e) => setNewMemberForm({ ...newMemberForm, waProfileName: e.target.value })}
+                  placeholder="Misal: Sar Tika"
+                  className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-white text-sm focus:outline-hidden focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Nomor WhatsApp
+                  </label>
+                  <input 
+                    type="text"
+                    value={newMemberForm.whatsapp}
+                    onChange={(e) => setNewMemberForm({ ...newMemberForm, whatsapp: e.target.value })}
+                    placeholder="0813xxxxxxxx"
+                    className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-white text-sm focus:outline-hidden focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Tipe Akun Member
+                  </label>
+                  <select 
+                    value={newMemberForm.type}
+                    onChange={(e) => setNewMemberForm({ ...newMemberForm, type: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-white text-sm focus:outline-hidden focus:border-emerald-500"
+                  >
+                    <option value="Biasa">Biasa</option>
+                    <option value="VIP">VIP</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  LID WhatsApp (Opsional)
+                </label>
+                <input 
+                  type="text"
+                  value={newMemberForm.lid}
+                  onChange={(e) => setNewMemberForm({ ...newMemberForm, lid: e.target.value })}
+                  placeholder="Misal: 123456789012345@lid"
+                  className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-white text-sm font-mono focus:outline-hidden focus:border-emerald-500"
+                />
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-slate-800 flex items-center gap-3">
+              <button 
+                type="button"
+                onClick={handleAddMember}
+                className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition-colors shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2"
+              >
+                💾 Daftarkan Member
+              </button>
+              <button 
+                type="button"
+                onClick={() => setIsAddingMember(false)}
+                className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-sm transition-colors"
+              >
+                Batal
+              </button>
+            </div>
           </div>
         </div>
       )}

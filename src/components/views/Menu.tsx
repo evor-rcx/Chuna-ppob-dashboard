@@ -269,7 +269,7 @@ export function Menu({ onNavigate }: MenuProps) {
               }`}
             >
               <AlertCircle size={16} className="text-red-400" />
-              Model Struk: Tidak Lunas
+              Model Struk: Belum Lunas (Template Baru)
             </button>
             <button
               onClick={() => setActiveNotaTab('royal')}

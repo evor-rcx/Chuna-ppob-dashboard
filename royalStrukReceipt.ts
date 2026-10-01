@@ -63,6 +63,69 @@ export interface RoyalStrukData {
 let cachedLunasTemplateImg: any = null;
 let cachedTidakLunasTemplateImg: any = null;
 
+export async function resolveAvatarImage(waPhotoUrl?: string | null, avatarBuffer?: Buffer | null): Promise<any> {
+    if (avatarBuffer) {
+        try {
+            return await loadImage(avatarBuffer);
+        } catch (e) {
+            console.error("Gagal load avatarBuffer:", e);
+        }
+    }
+    if (!waPhotoUrl || typeof waPhotoUrl !== 'string') return null;
+
+    const trimmed = waPhotoUrl.trim();
+    if (!trimmed) return null;
+
+    // 1. Data URL (Base64)
+    if (trimmed.startsWith('data:image')) {
+        try {
+            const base64Data = trimmed.replace(/^data:image\/\w+;base64,/, '');
+            const buf = Buffer.from(base64Data, 'base64');
+            return await loadImage(buf);
+        } catch (e) {
+            console.error("Gagal load base64 avatar:", e);
+        }
+    }
+
+    // 2. Local file path (e.g. /wa_photos/xxx.png or public/wa_photos/xxx.png from offline members)
+    if (!trimmed.startsWith('http')) {
+        const cleanPath = trimmed.replace(/^\/+/, '');
+        const candidatePaths = [
+            path.join(process.cwd(), 'public', cleanPath),
+            path.join(process.cwd(), cleanPath),
+            path.join(process.cwd(), 'public', trimmed),
+            path.join(process.cwd(), trimmed)
+        ];
+        for (const cp of candidatePaths) {
+            if (fs.existsSync(cp)) {
+                try {
+                    return await loadImage(cp);
+                } catch (e) {
+                    console.error("Gagal load avatar dari file lokal:", cp, e);
+                }
+            }
+        }
+    }
+
+    // 3. HTTP / HTTPS URL
+    if (trimmed.startsWith('http')) {
+        try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 4000);
+            const res = await fetch(trimmed, { signal: controller.signal });
+            clearTimeout(timer);
+            if (res.ok) {
+                const buf = Buffer.from(await res.arrayBuffer());
+                return await loadImage(buf);
+            }
+        } catch (e) {
+            console.error("Gagal fetch avatar URL:", e);
+        }
+    }
+
+    return null;
+}
+
 async function getLunasTemplateImage() {
     if (cachedLunasTemplateImg) return cachedLunasTemplateImg;
     // Template Royal Mahkota Emas Lunas (2048x2048)
@@ -475,28 +538,7 @@ export async function generateRoyalTidakLunasReceipt(data: RoyalStrukData): Prom
     const avatarCenterY = 161;
     const avatarRadius = 108;
 
-    let userAvatarImg: any = null;
-    if (data.avatarBuffer) {
-        try {
-            userAvatarImg = await loadImage(data.avatarBuffer);
-        } catch (e) {
-            console.error("Gagal load avatarBuffer:", e);
-        }
-    }
-    if (!userAvatarImg && data.waPhotoUrl && data.waPhotoUrl.startsWith('http')) {
-        try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 4000);
-            const res = await fetch(data.waPhotoUrl, { signal: controller.signal });
-            clearTimeout(timer);
-            if (res.ok) {
-                const buf = Buffer.from(await res.arrayBuffer());
-                userAvatarImg = await loadImage(buf);
-            }
-        } catch (e) {
-            console.error("Gagal fetch waPhotoUrl:", e);
-        }
-    }
+    const userAvatarImg = await resolveAvatarImage(data.waPhotoUrl, data.avatarBuffer);
 
     // Base background under the hole
     ctx.fillStyle = '#1c0f0f';
@@ -637,28 +679,7 @@ export async function generateRoyalLunasReceipt(data: RoyalStrukData): Promise<B
     const avatarCenterY = 327;
     const avatarRadius = 215;
 
-    let userAvatarImg: any = null;
-    if (data.avatarBuffer) {
-        try {
-            userAvatarImg = await loadImage(data.avatarBuffer);
-        } catch (e) {
-            console.error("Gagal load avatarBuffer:", e);
-        }
-    }
-    if (!userAvatarImg && data.waPhotoUrl && data.waPhotoUrl.startsWith('http')) {
-        try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 4000);
-            const res = await fetch(data.waPhotoUrl, { signal: controller.signal });
-            clearTimeout(timer);
-            if (res.ok) {
-                const buf = Buffer.from(await res.arrayBuffer());
-                userAvatarImg = await loadImage(buf);
-            }
-        } catch (e) {
-            console.error("Gagal fetch waPhotoUrl:", e);
-        }
-    }
+    const userAvatarImg = await resolveAvatarImage(data.waPhotoUrl, data.avatarBuffer);
 
     // Base background under the hole
     ctx.fillStyle = '#1e0c0c';

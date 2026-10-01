@@ -1,4 +1,5 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
+import { resolveAvatarImage } from './royalStrukReceipt';
 
 export interface VintageTagihanItem {
     name: string;
@@ -271,29 +272,8 @@ export async function generateVintageTagihanReceipt(data: VintageTagihanData): P
     ctx.fill();
     ctx.restore();
 
-    // Load WhatsApp Avatar
-    let userAvatarImg: any = null;
-    if (data.avatarBuffer) {
-        try {
-            userAvatarImg = await loadImage(data.avatarBuffer);
-        } catch (e) {
-            console.error("Gagal load avatarBuffer:", e);
-        }
-    }
-    if (!userAvatarImg && data.waPhotoUrl && data.waPhotoUrl.startsWith('http')) {
-        try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 4000);
-            const res = await fetch(data.waPhotoUrl, { signal: controller.signal });
-            clearTimeout(timer);
-            if (res.ok) {
-                const buf = Buffer.from(await res.arrayBuffer());
-                userAvatarImg = await loadImage(buf);
-            }
-        } catch (e) {
-            console.error("Gagal fetch waPhotoUrl:", e);
-        }
-    }
+    // Load WhatsApp Avatar (mendukung foto member offline lokal, base64, url)
+    const userAvatarImg = await resolveAvatarImage(data.waPhotoUrl, data.avatarBuffer);
 
     // Draw WhatsApp Avatar or Fallback Monogram
     ctx.save();

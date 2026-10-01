@@ -1,4 +1,5 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
+import { resolveAvatarImage } from './royalStrukReceipt';
 // @ts-ignore
 import webpmux from 'node-webpmux';
 
@@ -152,17 +153,8 @@ export async function generateOrderConfirmationSticker(data: ConfirmationSticker
 
     ctx.clearRect(0, 0, W, H);
 
-    // Load WhatsApp profile avatar if available
-    let avatarImg: any = null;
-    if (data.avatarBuffer) {
-        try {
-            avatarImg = await loadImage(data.avatarBuffer).catch(() => null);
-        } catch (e) {}
-    } else if (data.waPhotoUrl) {
-        try {
-            avatarImg = await loadImage(data.waPhotoUrl).catch(() => null);
-        } catch (e) {}
-    }
+    // Load WhatsApp profile avatar if available (supports local member photo, base64, url)
+    const avatarImg = await resolveAvatarImage(data.waPhotoUrl, data.avatarBuffer);
 
     // Card coordinates on 1024x1024 grid
     const left = 48;

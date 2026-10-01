@@ -1,4 +1,5 @@
 import { createCanvas, loadImage, Image } from '@napi-rs/canvas';
+import { resolveAvatarImage } from './royalStrukReceipt';
 import path from 'path';
 import fs from 'fs';
 import { getHolidayInfo, getWitaDateComponents } from './src/utils/holidays';
@@ -254,29 +255,8 @@ export async function generatePascabayarTagihanReceipt(data: PascabayarTagihanDa
     const avatarCy = 943.5;
     const avatarRadius = 104;
 
-    // Load foto profil WA jika ada
-    let userAvatarImg: any = null;
-    if (data.avatarBuffer) {
-        try {
-            userAvatarImg = await loadImage(data.avatarBuffer);
-        } catch (e) {
-            console.error("Gagal load avatarBuffer pascabayar:", e);
-        }
-    }
-    if (!userAvatarImg && data.waPhotoUrl && data.waPhotoUrl.startsWith('http')) {
-        try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 4000);
-            const res = await fetch(data.waPhotoUrl, { signal: controller.signal });
-            clearTimeout(timer);
-            if (res.ok) {
-                const buf = Buffer.from(await res.arrayBuffer());
-                userAvatarImg = await loadImage(buf);
-            }
-        } catch (e) {
-            console.error("Gagal fetch waPhotoUrl pascabayar:", e);
-        }
-    }
+    // Load foto profil WA jika ada (mendukung foto member offline lokal, base64, url)
+    const userAvatarImg = await resolveAvatarImage(data.waPhotoUrl, data.avatarBuffer);
 
     // Latar belakang dasar putih di bawah lingkaran
     ctx.fillStyle = '#ffffff';
