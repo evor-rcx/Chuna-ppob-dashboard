@@ -8,3 +8,15 @@ coverage/
 !.env.example
 
 db.json
+db.json.backup_*
+wa_auth/
+wa_auth_backup/
+public/avatars/
+backups/
+core
+Chuna-ppob-dashboard/
+ecosystem.config.cjs
+*.backup_*
+tmp_gen_vn_*
+test_wa_image_lokal.ts
+src/utils/bluetoothPrint.ts

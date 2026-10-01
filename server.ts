@@ -3579,7 +3579,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
               if (!db.waContacts.includes(contact.id)) {
                   db.waContacts.push(contact.id);
               }
-              const pName = (contact as any).notify || (contact as any).pushName || (contact as any).verifiedName;
+              const pName = (contact as any).pushName || (contact as any).notify || (contact as any).verifiedName;
               if (pName) {
                   saveWaProfile(contact.id, pName);
               }
@@ -3591,7 +3591,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
     waSocket.ev.on("contacts.update", (contacts) => {
       for (const contact of contacts) {
           if (contact.id) {
-              const pName = (contact as any).notify || (contact as any).pushName || (contact as any).verifiedName;
+              const pName = (contact as any).pushName || (contact as any).notify || (contact as any).verifiedName;
               if (pName) {
                   saveWaProfile(contact.id, pName);
               }
@@ -3606,7 +3606,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
               if (!db.waContacts.includes(contact.id)) {
                   db.waContacts.push(contact.id);
               }
-              const pName = (contact as any).notify || (contact as any).pushName || (contact as any).verifiedName;
+              const pName = (contact as any).pushName || (contact as any).notify || (contact as any).verifiedName;
               if (pName) {
                   saveWaProfile(contact.id, pName);
               }
@@ -4176,7 +4176,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
               
               let customerName = "";
               const cleanJid = cleanWaPhone(call.from);
-              const callPushName = (call as any).notify || (call as any).pushName;
+              const callPushName = (call as any).pushName || (call as any).notify;
               if (callPushName) {
                   saveWaProfile(call.from, callPushName);
               }
@@ -4900,7 +4900,105 @@ Chuna – E4 Store`;
   app.get("/api/members/offline", (req, res) => {
     // Return all members, or just those added manually (without telegram ID)
     const offlineMembers = members.filter(m => !m.telegram || !m.telegram.startsWith('ID:'));
-    res.json({ success: true, members: offlineMembers });
+    const enriched = offlineMembers.map(m => {
+      const cleanPhone = cleanWaPhone(m.whatsapp || '');
+      let photoUrl = m.photoUrl;
+      if (!photoUrl && cleanPhone && db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) {
+        photoUrl = db.waProfilePhotos[cleanPhone];
+      }
+      return {
+        ...m,
+        photoUrl: photoUrl || null,
+        waProfileName: m.waProfileName || null
+      };
+    });
+    res.json({ success: true, members: enriched });
+  });
+
+  app.post("/api/members/:id/sync-photo", async (req, res) => {
+    const { id } = req.params;
+    const member = members.find(m => m.id === id);
+    if (!member) return res.status(404).json({ success: false, error: 'Member tidak ditemukan' });
+    const cleanPhone = cleanWaPhone(member.whatsapp || '');
+    if (!cleanPhone) return res.status(400).json({ success: false, error: 'Nomor WhatsApp member tidak valid' });
+
+    let fetchedPhoto = null;
+    let fetchedName = null;
+    if (typeof waSocket !== 'undefined' && waSocket) {
+      try {
+        const jid = `${cleanPhone}@s.whatsapp.net`;
+        fetchedPhoto = await waSocket.profilePictureUrl(jid, 'image').catch(() => null);
+      } catch (e) {}
+    }
+
+    if (fetchedPhoto) {
+      if (!db.waProfilePhotos) db.waProfilePhotos = {};
+      db.waProfilePhotos[cleanPhone] = fetchedPhoto;
+      member.photoUrl = fetchedPhoto;
+      db.members = members;
+      writeDB(db);
+      return res.json({ success: true, photoUrl: fetchedPhoto, waProfileName: member.waProfileName || member.name });
+    }
+
+    if (db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) {
+      member.photoUrl = db.waProfilePhotos[cleanPhone];
+      writeDB(db);
+      return res.json({ success: true, photoUrl: db.waProfilePhotos[cleanPhone], waProfileName: member.waProfileName || member.name });
+    }
+
+    res.json({ success: false, error: 'Foto WhatsApp tidak dapat diambil (WhatsApp bot sedang offline atau privasi profil nomor disembunyikan).' });
+  });
+
+  app.post("/api/members/:id/custom-photo", express.json({ limit: '10mb' }), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { imageBase64 } = req.body;
+      const member = members.find(m => m.id === id);
+      if (!member) return res.status(404).json({ success: false, error: 'Member tidak ditemukan' });
+      if (!imageBase64 || typeof imageBase64 !== 'string') return res.status(400).json({ success: false, error: 'Format gambar tidak valid' });
+
+      const photosDir = path.join(process.cwd(), 'public', 'wa_photos');
+      if (!fs.existsSync(photosDir)) fs.mkdirSync(photosDir, { recursive: true });
+
+      const filename = `member_${member.id.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.png`;
+      const filepath = path.join(photosDir, filename);
+      const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+      fs.writeFileSync(filepath, Buffer.from(base64Data, 'base64'));
+
+      const photoUrl = `/wa_photos/${filename}`;
+      member.photoUrl = photoUrl;
+      const cleanPhone = cleanWaPhone(member.whatsapp || '');
+      if (!db.waProfilePhotos) db.waProfilePhotos = {};
+      if (cleanPhone) {
+        db.waProfilePhotos[cleanPhone] = photoUrl;
+      }
+      db.members = members;
+      writeDB(db);
+      res.json({ success: true, photoUrl });
+    } catch (err: any) {
+      console.error("Error saving custom photo:", err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post("/api/members/:id/update-profile", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { name, waProfileName, whatsapp, type } = req.body;
+      const member = members.find(m => m.id === id);
+      if (!member) return res.status(404).json({ success: false, error: 'Member tidak ditemukan' });
+
+      if (name) member.name = name;
+      if (typeof waProfileName !== 'undefined') member.waProfileName = waProfileName;
+      if (whatsapp) member.whatsapp = whatsapp;
+      if (type) member.type = type;
+
+      db.members = members;
+      writeDB(db);
+      res.json({ success: true, member });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
   });
 
   app.get("/api/members", (req, res) => {
