@@ -1,4 +1,3 @@
-// Version: clean-restore-server
 import fs from "fs";
 import dotenv from "dotenv";
 dotenv.config();
@@ -177,98 +176,343 @@ function drawGoldCornerFiligree(ctx: any, x: number, y: number, scaleX: number, 
 
 export async function generateTagihanCanvas(data: any, txDate: Date, formattedDate: string, calText: string): Promise<Buffer | null> {
     try {
-        // 2. Nota / Struk Pembayaran Resmi E4 Store:
-        // - Lunas: Template Picsart_26-09-28_17-56-42-115.png (Royal Mahkota Emas)
-        // - Belum Lunas / Utang: Template Picsart_26-09-28_17-53-27-094.png (Gothic Steampunk)
-        let waPhoto = data.waPhotoUrl || null;
-        if (!waPhoto) {
-            const candidatePhone = data.targetPhone || data.customerPhone || data.phone || data.whatsapp || data.target || data.no;
-            if (candidatePhone) {
-                const cleanPhone = cleanWaPhone(String(candidatePhone));
-                if (cleanPhone && db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) {
-                    waPhoto = db.waProfilePhotos[cleanPhone];
-                } else if (cleanPhone && typeof waSocket !== "undefined" && waSocket) {
-                    try {
-                        const jid = `${cleanPhone}@s.whatsapp.net`;
-                        const fetched = await waSocket.profilePictureUrl(jid, "image").catch(() => null);
-                        if (fetched) {
-                            waPhoto = fetched;
-                            if (!db.waProfilePhotos) db.waProfilePhotos = {};
-                            db.waProfilePhotos[cleanPhone] = fetched;
-                            writeDB(db);
-                        }
-                    } catch (e) {}
+        const width = 1000;
+        const height = 1000;
+        const canvas = createCanvas(width, height);
+        const ctx = canvas.getContext('2d');
+
+        // Extract Customer and Service Details
+        let nama = data.nama || data.customer_name || data.namaPlg || '-';
+        let no = data.no || data.customer_no || data.target || '-';
+        let layanan = data.layanan || data.product || 'Pln Pascabayar';
+
+        if (typeof layanan === 'object' && layanan) layanan = layanan.product_name || 'Pln Pascabayar';
+        if (typeof layanan === 'string' && layanan.includes(' - ')) {
+            layanan = layanan.split(' - ')[0].trim();
+        }
+
+        let total = Number(data.total || data.price || data.tagihan || data.selling_price || 115252);
+
+        // Extract Tarif, Daya, Lembar, Bulan/Periode, Meter
+        let tarif = data.tarif || data.desc?.tarif || '';
+        let daya = data.daya || data.desc?.daya || '';
+        let lembar = data.lembar || data.lembar_tagihan || data.desc?.lembar_tagihan || '';
+        let bulan = data.bulan || data.periode || '';
+        let meter = data.meter || '';
+
+        if (!bulan && data.desc?.detail && Array.isArray(data.desc.detail) && data.desc.detail.length > 0) {
+            const first = data.desc.detail[0];
+            bulan = first.periode || '';
+            if (first.meter_awal && first.meter_akhir) {
+                meter = `${first.meter_awal} - ${first.meter_akhir}`;
+            }
+        }
+
+        if (typeof data.detail === 'string') {
+            if (!tarif) {
+                const m = data.detail.match(/Tarif[:\s]+([^\n\r]+)/i);
+                if (m) tarif = m[1].replace(/^[⚡\s]+/, '').trim();
+            }
+            if (!daya) {
+                const m = data.detail.match(/Daya[:\s]+([^\n\r]+)/i);
+                if (m) daya = m[1].replace(/^[📊\s]+/, '').trim();
+            }
+            if (!lembar) {
+                const m = data.detail.match(/Lembar[:\s]+([^\n\r]+)/i);
+                if (m) lembar = m[1].replace(/^[📄\s]+/, '').trim();
+            }
+            if (!bulan) {
+                const m = data.detail.match(/Bulan\s*(\d*[:\s]+)?([^\n\r]+)/i);
+                if (m) bulan = (m[2] || m[1] || '').replace(/^[📆\s]+/, '').trim();
+            }
+            if (!meter) {
+                const m = data.detail.match(/Meter[:\s]+([^\n\r]+)/i);
+                if (m) meter = m[1].replace(/^[🔢\s]+/, '').trim();
+            }
+        }
+
+        // Sensible defaults matching PLN check
+        if (!tarif) tarif = 'R1M';
+        if (!daya) daya = '900';
+        if (!lembar) lembar = '1';
+        if (!bulan) bulan = '202609';
+        if (!meter) meter = '00007944 - 00008015';
+
+        // Extract or fetch WhatsApp profile photo
+        let waPhotoUrl: string | null = data.waPhotoUrl || null;
+        let waAvatarImg: any = null;
+        try {
+            const currentDb = (typeof db !== 'undefined' && db) ? db : readDB();
+            if (!waPhotoUrl && (data.target || data.no || data.customer_no)) {
+                const cleanT = String(data.target || data.no || data.customer_no).replace(/\D/g, '');
+                let clean = cleanT;
+                if (clean.startsWith('0')) clean = '62' + clean.substring(1);
+                if (currentDb.waProfilePhotos && currentDb.waProfilePhotos[clean]) {
+                    waPhotoUrl = currentDb.waProfilePhotos[clean];
                 }
             }
+        } catch (e) {}
+
+        if (data.avatarBuffer) {
+            try {
+                waAvatarImg = await loadImage(data.avatarBuffer).catch(() => null);
+            } catch (e) {}
+        } else if (waPhotoUrl) {
+            try {
+                waAvatarImg = await loadImage(waPhotoUrl).catch(() => null);
+            } catch (e) {}
         }
 
-        if (!waPhoto && (data.userId || data.telegramId || data.tgChatId)) {
-            const tgId = data.userId || data.telegramId || data.tgChatId;
-            const m = db.members?.find((x: any) => isTelegramMatch(x.telegram, tgId, undefined));
-            if (m) {
-                const waDetails = await getCustomerWaDetails(m, tgId, data.no || data.target);
-                if (waDetails?.waPhotoUrl) waPhoto = waDetails.waPhotoUrl;
+        // 1. Deep Midnight Royal Navy Background
+        const bgGrad = ctx.createLinearGradient(0, 0, width, height);
+        bgGrad.addColorStop(0, '#061332');
+        bgGrad.addColorStop(0.5, '#0a1a44');
+        bgGrad.addColorStop(1, '#05122e');
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(0, 0, width, height);
+
+        // 2. Rounded Gold Outer Frame (matching Picsart reference image)
+        const frameX = 38;
+        const frameY = 38;
+        const frameW = 924;
+        const frameH = 924;
+        const frameR = 34;
+
+        const goldFrameGrad = ctx.createLinearGradient(frameX, frameY, frameX + frameW, frameY + frameH);
+        goldFrameGrad.addColorStop(0, '#eac975');
+        goldFrameGrad.addColorStop(0.25, '#fae69e');
+        goldFrameGrad.addColorStop(0.5, '#dfb752');
+        goldFrameGrad.addColorStop(0.75, '#fae8a5');
+        goldFrameGrad.addColorStop(1, '#c19232');
+
+        ctx.save();
+        ctx.strokeStyle = goldFrameGrad;
+        ctx.lineWidth = 4.2;
+        roundRectPath(ctx, frameX, frameY, frameW, frameH, frameR);
+        ctx.stroke();
+
+        // Subtle inner gold rim
+        ctx.strokeStyle = 'rgba(235, 206, 126, 0.22)';
+        ctx.lineWidth = 1.0;
+        roundRectPath(ctx, frameX + 6, frameY + 6, frameW - 12, frameH - 12, frameR - 4);
+        ctx.stroke();
+        ctx.restore();
+
+        // Helper for consistent divider lines
+        const drawDividerLine = (y: number, dashed = false) => {
+            ctx.save();
+            ctx.lineWidth = 1.4;
+            if (dashed) {
+                ctx.setLineDash([9, 6]);
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+            } else {
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.38)';
             }
-        }
+            ctx.beginPath();
+            ctx.moveTo(92, y);
+            ctx.lineTo(908, y);
+            ctx.stroke();
+            ctx.restore();
+        };
 
-        if (!waPhoto) {
-            const tgId = data.userId || data.telegramId || data.tgChatId;
-            if (db.owners?.includes(tgId) || db.owners?.includes(Number(tgId))) {
-                if (db.ownerWhatsapps && db.ownerWhatsapps.length > 0) {
-                    const ownerClean = cleanWaPhone(db.ownerWhatsapps[0]);
-                    if (db.waProfilePhotos && db.waProfilePhotos[ownerClean]) {
-                        waPhoto = db.waProfilePhotos[ownerClean];
-                    } else if (typeof waSocket !== "undefined" && waSocket) {
-                        try {
-                            const jid = `${ownerClean}@s.whatsapp.net`;
-                            const fetched = await waSocket.profilePictureUrl(jid, "image").catch(() => null);
-                            if (fetched) {
-                                waPhoto = fetched;
-                                if (!db.waProfilePhotos) db.waProfilePhotos = {};
-                                db.waProfilePhotos[ownerClean] = fetched;
-                                writeDB(db);
-                            }
-                        } catch (e) {}
-                    }
-                }
+        // 3. Header Texts
+        // "E4 STORE" - Large bold warm gold
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = 'bold 54px system-ui, -apple-system, sans-serif';
+        ctx.fillStyle = '#f6cb4a'; // Vibrant Gold
+        ctx.fillText('E4 STORE', 500, 138);
+
+        // "Cek Tagihan" - White
+        ctx.font = '600 27px system-ui, -apple-system, sans-serif';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('Cek Tagihan', 500, 202);
+
+        // "Tagihan Ditemukan!" - White
+        ctx.font = '600 25px system-ui, -apple-system, sans-serif';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('Tagihan Ditemukan!', 500, 252);
+
+        // Top-Right WhatsApp Profile Photo Medallion (Enlarged)
+        const tagihanAvatarR = 54;
+        const tagihanAvatarX = frameX + frameW - 88;
+        const tagihanAvatarY = frameY + 98;
+
+        if (waAvatarImg || nama || true) {
+            ctx.save();
+            ctx.shadowColor = 'rgba(0,0,0,0.35)';
+            ctx.shadowBlur = 14;
+            ctx.shadowOffsetY = 4;
+            ctx.beginPath();
+            ctx.arc(tagihanAvatarX, tagihanAvatarY, tagihanAvatarR, 0, Math.PI * 2);
+            ctx.fillStyle = '#0a1a44';
+            ctx.fill();
+            ctx.restore();
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(tagihanAvatarX, tagihanAvatarY, tagihanAvatarR - 2, 0, Math.PI * 2);
+            ctx.clip();
+            if (waAvatarImg) {
+                ctx.drawImage(waAvatarImg, tagihanAvatarX - tagihanAvatarR, tagihanAvatarY - tagihanAvatarR, tagihanAvatarR * 2, tagihanAvatarR * 2);
+            } else {
+                // WhatsApp privat / foto tidak tersedia: lingkaran huruf E4 mewah
+                const fallbackGradNavy = ctx.createLinearGradient(tagihanAvatarX - tagihanAvatarR, tagihanAvatarY - tagihanAvatarR, tagihanAvatarX + tagihanAvatarR, tagihanAvatarY + tagihanAvatarR);
+                fallbackGradNavy.addColorStop(0, '#0a1a44');
+                fallbackGradNavy.addColorStop(0.5, '#132b6e');
+                fallbackGradNavy.addColorStop(1, '#050f28');
+                ctx.fillStyle = fallbackGradNavy;
+                ctx.fillRect(tagihanAvatarX - tagihanAvatarR, tagihanAvatarY - tagihanAvatarR, tagihanAvatarR * 2, tagihanAvatarR * 2);
+
+                // Inner subtle ring
+                ctx.strokeStyle = 'rgba(234, 201, 117, 0.4)';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.arc(tagihanAvatarX, tagihanAvatarY, tagihanAvatarR - 8, 0, Math.PI * 2);
+                ctx.stroke();
+
+                // Huruf E4 Emas Mewah
+                ctx.font = '900 34px system-ui, -apple-system, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                const textGradGold = ctx.createLinearGradient(tagihanAvatarX - 22, tagihanAvatarY - 18, tagihanAvatarX + 22, tagihanAvatarY + 18);
+                textGradGold.addColorStop(0, '#fff4cc');
+                textGradGold.addColorStop(0.5, '#eac975');
+                textGradGold.addColorStop(1, '#ab7c12');
+                ctx.fillStyle = textGradGold;
+                ctx.fillText('E4', tagihanAvatarX, tagihanAvatarY + 1.5);
             }
+            ctx.restore();
+
+            // Gold Outer Ring
+            ctx.save();
+            ctx.strokeStyle = goldFrameGrad;
+            ctx.lineWidth = 3.6;
+            ctx.beginPath();
+            ctx.arc(tagihanAvatarX, tagihanAvatarY, tagihanAvatarR, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // WhatsApp Badge
+            const tagihanBadgeR = 16;
+            const tagihanBadgeX = tagihanAvatarX + Math.round(tagihanAvatarR * 0.70);
+            const tagihanBadgeY = tagihanAvatarY + Math.round(tagihanAvatarR * 0.70);
+            ctx.beginPath();
+            ctx.arc(tagihanBadgeX, tagihanBadgeY, tagihanBadgeR, 0, Math.PI * 2);
+            ctx.fillStyle = '#25D366';
+            ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2.8;
+            ctx.stroke();
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 15px system-ui, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('✆', tagihanBadgeX, tagihanBadgeY);
+            ctx.restore();
         }
 
-        if (!waPhoto && db.waProfilePhotos) {
-            const keys = Object.keys(db.waProfilePhotos);
-            if (keys.length > 0) {
-                waPhoto = db.waProfilePhotos[keys[keys.length - 1]];
-            }
-        }
+        // Divider 1 (above Upper Section)
+        drawDividerLine(296);
 
-        const statusLower = (data.status || "").toString().toLowerCase().trim();
-        let methodLower = (data.method || data.metode || "").toString().toLowerCase().trim();
-        const isBelumLunas = statusLower.includes("tidak") || statusLower.includes("belum") || methodLower === "utang" || methodLower === "kasbon";
+        // 4. Upper Section
+        // Row 1: Nama | Nomor
+        const upperRow1Y = 334;
+        ctx.textBaseline = 'middle';
+        ctx.font = 'bold 25px system-ui, -apple-system, sans-serif';
+        ctx.fillStyle = '#ffffff';
 
-        return await generateRoyalStrukReceipt({
-            nama: data.nama || data.customerDisplayName || data.namaPlg || "Pelanggan",
-            status: isBelumLunas ? "TIDAK LUNAS" : "Lunas",
-            metode: (data.method || data.metode || (isBelumLunas ? "UTANG" : "CASH")).toString().toUpperCase(),
-            templateVariant: isBelumLunas ? "tidaklunas" : "lunas",
-            product: data.product || data.layanan || data.itemGame || data.pembelian || "",
-            target: data.target || data.no || data.customerNo || data.idTujuanGame || data.idPelanggan || "",
-            type: data.type || "",
-            sku: data.sku || "",
-            namaPlg: data.namaPlg || data.nama_pelanggan || "",
-            tarif: data.tarif || "",
-            daya: data.daya || "",
-            golDaya: data.golDaya || data.gol_daya || "",
-            kwh: data.kwh || "",
-            bulan: data.bulan || data.periode || "",
-            meter: data.meter || "",
-            lembar: data.lembar || data.lembar_tagihan || "",
-            orderId: data.orderId || data.id || data.ref_id || "",
-            tanggal: formattedDate,
-            date: txDate,
-            sn: data.sn || data.token || "",
-            totalBayar: Number(data.totalBayar || data.total || data.price || 0),
-            waPhotoUrl: waPhoto
-        });
+        // Left: Nama
+        ctx.textAlign = 'left';
+        ctx.fillText(`Nama ${nama}`, 92, upperRow1Y);
+
+        // Right: Nomor
+        ctx.textAlign = 'right';
+        ctx.fillText(`Nomor ${no}`, 908, upperRow1Y);
+
+        // Row 2: Layanan | Layanan
+        const upperRow2Y = 384;
+        ctx.textAlign = 'left';
+        ctx.fillText(`Layanan ${layanan}`, 92, upperRow2Y);
+
+        ctx.textAlign = 'right';
+        ctx.fillText(`Layanan ${layanan}`, 908, upperRow2Y);
+
+        // Divider 2 (below Upper Section)
+        drawDividerLine(420);
+
+        // 5. TOTAL BAYAR
+        const totalY = 466;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = 'bold 42px system-ui, -apple-system, sans-serif';
+        ctx.fillStyle = '#f6cb4a'; // Vibrant Gold
+        ctx.fillText(`TOTAL BAYAR Rp ${total.toLocaleString('id-ID')}`, 500, totalY);
+
+        // Divider 3 (below TOTAL BAYAR)
+        drawDividerLine(514);
+
+        // 6. Middle Section (3 Columns: Tarif, Daya, Lembar)
+        const midY = 550;
+        ctx.textBaseline = 'middle';
+        ctx.font = 'bold 25px system-ui, -apple-system, sans-serif';
+        ctx.fillStyle = '#ffffff';
+
+        // Left Column (centered at 210)
+        ctx.textAlign = 'center';
+        ctx.fillText(`Tarif ${tarif}`, 210, midY);
+
+        // Center Column (centered at 500)
+        ctx.textAlign = 'center';
+        ctx.fillText(`Daya ${daya}`, 500, midY);
+
+        // Right Column (centered at 790)
+        ctx.textAlign = 'center';
+        ctx.fillText(`Lembar ${lembar}`, 790, midY);
+
+        // Divider 4 (below 3 Columns)
+        drawDividerLine(586);
+
+        // 7. Meter & Periode Section (2 Columns)
+        const meterRowY = 624;
+        ctx.textAlign = 'left';
+        ctx.font = 'bold 25px system-ui, -apple-system, sans-serif';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(`Bulan 1: ${bulan}`, 92, meterRowY);
+
+        ctx.textAlign = 'right';
+        ctx.fillText(`Meter: ${meter}`, 908, meterRowY);
+
+        // 8. Silahkan Lanjutkan Pembayaran
+        const ctaY = 684;
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 27px system-ui, -apple-system, sans-serif';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('Silahkan Lanjutkan Pembayaran', 500, ctaY);
+
+        // Divider 5 (Dashed Line)
+        drawDividerLine(724, true);
+
+        // 9. Footer
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // Chuna line
+        ctx.font = '600 21px system-ui, -apple-system, sans-serif';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('Chuna - Asisten Imutmu siap bantu 24 jam!', 500, 818);
+
+        // Terimakasih line
+        ctx.font = '600 21px system-ui, -apple-system, sans-serif';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('Terimakasih telah berbelanja di E4 Store!', 500, 858);
+
+        // Cetak & Calendar info line
+        ctx.font = 'normal 15px system-ui, -apple-system, sans-serif';
+        ctx.fillStyle = '#cbd5e1';
+        ctx.fillText(`Cetak: ${formattedDate} | ${calText}`, 500, 892);
+
+        return canvas.toBuffer('image/png');
     } catch (e: any) {
         console.error("Canvas tagihan error:", e);
         return null;
@@ -293,45 +537,7 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
 
         // If type is tagihan, use the new official E4 Store Cek Tagihan layout (Picsart_26-09-28_23-03-28-209.png)
         if (type === 'tagihan') {
-            let waPhoto = data.waPhotoUrl || null;
-            if (!waPhoto) {
-                const candidatePhone = data.targetPhone || data.customerPhone || data.phone || data.whatsapp || data.target || data.no;
-                if (candidatePhone) {
-                    const cleanPhone = cleanWaPhone(String(candidatePhone));
-                    if (cleanPhone && db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) {
-                        waPhoto = db.waProfilePhotos[cleanPhone];
-                    } else if (cleanPhone && typeof waSocket !== 'undefined' && waSocket) {
-                        try {
-                            const jid = `${cleanPhone}@s.whatsapp.net`;
-                            const fetched = await waSocket.profilePictureUrl(jid, 'image').catch(() => null);
-                            if (fetched) {
-                                waPhoto = fetched;
-                                if (!db.waProfilePhotos) db.waProfilePhotos = {};
-                                db.waProfilePhotos[cleanPhone] = fetched;
-                                writeDB(db);
-                            }
-                        } catch (e) {}
-                    }
-                }
-            }
-
-            if (!waPhoto && (data.userId || data.telegramId)) {
-                const tgId = data.userId || data.telegramId;
-                const m = db.members?.find((x: any) => isTelegramMatch(x.telegram, tgId, undefined));
-                if (m) {
-                    const waDetails = await getCustomerWaDetails(m, tgId, data.no);
-                    if (waDetails?.waPhotoUrl) waPhoto = waDetails.waPhotoUrl;
-                }
-            }
-
-            if (!waPhoto && db.waProfilePhotos) {
-                const keys = Object.keys(db.waProfilePhotos);
-                if (keys.length > 0) {
-                    waPhoto = db.waProfilePhotos[keys[keys.length - 1]];
-                }
-            }
-
-            return await generatePascabayarTagihanReceipt({ ...data, date: txDate, waPhotoUrl: waPhoto });
+            return await generatePascabayarTagihanReceipt({ ...data, date: txDate });
         }
 
         const width = 1000;
@@ -484,9 +690,6 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
                 waAvatarImg = await loadImage(waPhotoUrl).catch(() => null);
             } catch (e) {}
         }
-
-        const targetId = String(data.target || data.no || data.customerNo || data.idPelanggan || data.noHp || '-');
-        const prodName = String(data.product || (typeof data.product === 'object' ? data.product?.product_name : '') || data.layanan || data.itemGame || data.pembelian || 'PLN 20.000');
 
         // 1. Clean white canvas background
         ctx.fillStyle = '#ffffff';
@@ -822,7 +1025,8 @@ export async function generateCanvasReceipt(type: 'nota' | 'tagihan', data: any)
             }
         };
 
-        // targetId and prodName already declared above
+        const targetId = String(data.target || data.no || '-');
+        const prodName = String(data.product || (typeof data.product === 'object' ? data.product?.product_name : '') || 'PLN 20.000');
         const prodLower = prodName.toLowerCase();
         const typeLower = String(data.type || '').toLowerCase();
         const skuLower = String(data.sku || '').toLowerCase();
@@ -1256,9 +1460,6 @@ function saveWaProfile(rawJidOrPhone: string, pushName?: string | null) {
 
 async function getCustomerWaDetails(member: any, telegramUserId?: any, targetPhone?: string) {
     let rawWa = targetPhone || member?.whatsapp || (telegramUserId ? (registeredUsers[telegramUserId]?.wa || registeredUsers[Number(telegramUserId)]?.wa) : '') || '';
-    if (!rawWa && telegramUserId && (db.owners?.includes(telegramUserId) || db.owners?.includes(Number(telegramUserId)))) {
-        rawWa = (db.ownerWhatsapps && db.ownerWhatsapps[0]) || '';
-    }
     let waPhone = rawWa || '-';
     let waProfile = '-';
     let waPhotoUrl: string | null = null;
@@ -1292,22 +1493,6 @@ async function getCustomerWaDetails(member: any, telegramUserId?: any, targetPho
                     writeDB(db);
                 }
             } catch (e) {}
-        }
-    }
-
-    // 3. Fallback: jika belum dapat, gunakan foto WhatsApp yang tersimpan di cache database
-    if (!waPhotoUrl && db.waProfilePhotos) {
-        if (telegramUserId && (db.owners?.includes(telegramUserId) || db.owners?.includes(Number(telegramUserId)))) {
-            const ownerClean = cleanWaPhone((db.ownerWhatsapps && db.ownerWhatsapps[0]) || '');
-            if (ownerClean && db.waProfilePhotos[ownerClean]) {
-                waPhotoUrl = db.waProfilePhotos[ownerClean];
-            }
-        }
-        if (!waPhotoUrl) {
-            const keys = Object.keys(db.waProfilePhotos);
-            if (keys.length > 0) {
-                waPhotoUrl = db.waProfilePhotos[keys[keys.length - 1]];
-            }
         }
     }
 
@@ -9943,28 +10128,23 @@ E4 Store`,
     }
   });
 
-  // Route demo gambar nota Belum Lunas (menggunakan template resmi Picsart_26-09-28_17-53-27-094.png)
+  // Route demo gambar nota Belum Lunas (contoh PLN Token dari Gambar 2)
   app.get("/api/demo-nota/belum-lunas", async (req, res) => {
     try {
-        const item = (req.query.item as string) || (req.query.product as string);
-        const target = (req.query.target as string) || (req.query.no as string);
-        const name = (req.query.name as string) || (req.query.nama as string);
-        const sn = (req.query.sn as string) || (req.query.token as string);
-        const price = req.query.total ? Number(req.query.total) : (req.query.price ? Number(req.query.price) : undefined);
-        const orderId = (req.query.orderId as string) || (req.query.id as string);
-
         const sampleBelumLunas = {
-            id: orderId || 'PRE-1790426558012',
-            product: item || 'Go Pay 19.000',
-            sn: sn || 'GoPay/19000/GP-08134621611/Ref:T6QBdlFIp4xECvR3ps,',
-            target: target || '08134621611',
-            nama: name || 'Indri',
-            price: price !== undefined ? price : 24000,
-            status: 'Belum Lunas',
+            id: 'PRE-1789646007593',
+            product: 'PLN 20.000',
+            sn: '6675-2989-1173-8554-7284',
+            target: '45055441815',
+            namaPlg: 'JAHRAH',
+            golDaya: 'R1 / 000001300',
+            price: 25000,
+            status: 'Sukses',
             method: 'utang',
             isPaid: false,
-            waPhotoUrl: 'https://images.unsplash.com/photo-1544717305-2782549b5136?w=200&h=200&fit=crop&crop=faces',
-            date: new Date('2026-09-26T20:43:00+08:00')
+            nama: 'Rido',
+            waPhotoUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&h=200&fit=crop&crop=faces',
+            date: new Date('2026-09-17T19:53:00+08:00')
         };
         const buffer = await generateCanvasReceipt("nota", sampleBelumLunas);
         if (buffer) {
