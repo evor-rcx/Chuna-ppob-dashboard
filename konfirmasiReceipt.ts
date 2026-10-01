@@ -104,28 +104,13 @@ export async function generateKonfirmasiReceipt(data: KonfirmasiData): Promise<B
             if (fs.existsSync(dbPath)) {
                 const dbContent = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
                 const photos = dbContent.waProfilePhotos || {};
-
-                // Cek dari nama member di daftar member offline
-                if (data.nama) {
-                    const cLower = String(data.nama).trim().toLowerCase();
-                    const matchedMember = (dbContent.members || []).find((m: any) => m.name && m.name.trim().toLowerCase() === cLower);
-                    if (matchedMember && matchedMember.whatsapp) {
-                        const mClean = String(matchedMember.whatsapp).replace(/[^0-9]/g, '');
-                        if (mClean && photos[mClean]) {
-                            data.waPhotoUrl = photos[mClean];
-                        }
-                    }
-                }
-
-                if (!data.waPhotoUrl) {
-                    const candidate = data.nomor ? String(data.nomor).replace(/[^0-9]/g, '') : '';
-                    if (candidate && photos[candidate]) {
-                        data.waPhotoUrl = photos[candidate];
-                    } else {
-                        const keys = Object.keys(photos);
-                        if (keys.length > 0) {
-                            data.waPhotoUrl = photos[keys[keys.length - 1]];
-                        }
+                const candidate = data.nomor ? String(data.nomor).replace(/[^0-9]/g, '') : '';
+                if (candidate && photos[candidate]) {
+                    data.waPhotoUrl = photos[candidate];
+                } else {
+                    const keys = Object.keys(photos);
+                    if (keys.length > 0) {
+                        data.waPhotoUrl = photos[keys[keys.length - 1]];
                     }
                 }
             }

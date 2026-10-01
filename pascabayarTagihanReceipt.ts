@@ -271,29 +271,14 @@ export async function generatePascabayarTagihanReceipt(data: PascabayarTagihanDa
             if (fs.existsSync(dbPath)) {
                 const dbContent = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
                 const photos = dbContent.waProfilePhotos || {};
-
-                // Cek dari nama member di daftar member offline
-                if (!data.waPhotoUrl && data.nama) {
-                    const cLower = String(data.nama).trim().toLowerCase();
-                    const matchedMember = (dbContent.members || []).find((m: any) => m.name && m.name.trim().toLowerCase() === cLower);
-                    if (matchedMember && matchedMember.whatsapp) {
-                        const mClean = String(matchedMember.whatsapp).replace(/[^0-9]/g, '');
-                        if (mClean && photos[mClean]) {
-                            data.waPhotoUrl = photos[mClean];
-                        }
-                    }
-                }
-
-                if (!data.waPhotoUrl) {
-                    const candidatePhone = data.target || data.no || data.nomor;
-                    const cleanNum = candidatePhone ? String(candidatePhone).replace(/[^0-9]/g, '') : '';
-                    if (cleanNum && photos[cleanNum]) {
-                        data.waPhotoUrl = photos[cleanNum];
-                    } else {
-                        const keys = Object.keys(photos);
-                        if (keys.length > 0) {
-                            data.waPhotoUrl = photos[keys[keys.length - 1]];
-                        }
+                const candidatePhone = data.target || data.no || data.nomor;
+                const cleanNum = candidatePhone ? String(candidatePhone).replace(/[^0-9]/g, '') : '';
+                if (cleanNum && photos[cleanNum]) {
+                    data.waPhotoUrl = photos[cleanNum];
+                } else {
+                    const keys = Object.keys(photos);
+                    if (keys.length > 0) {
+                        data.waPhotoUrl = photos[keys[keys.length - 1]];
                     }
                 }
             }
