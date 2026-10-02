@@ -3332,7 +3332,8 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
                         product: tx.product,
                         target: tx.target,
                         rawError: data.message,
-                        price: tx.price
+                        price: tx.price,
+                        method: tx.method
                     });
                     
                     if (data.message && data.message.toLowerCase().includes("harga seller lebih besar dari ketentuan harga buyer")) {
@@ -6290,7 +6291,11 @@ Daya         : ${parts.slice(1).join(' / ')}`;
                         db.members = members;
                         writeDB(db);
                     }
-                    let refundMsg = method === 'saldo' ? '✅ Saldo sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (method === 'utang' ? '✅ Utang sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + total.toLocaleString('id-ID') + ' kepada pelanggan.');
+                    let refundMsg = method === 'saldo'
+                        ? `✅ Saldo Rp ${total.toLocaleString('id-ID')} telah dikembalikan ke akun Kakak.`
+                        : (method === 'utang'
+                            ? `✅ Tenang, utang Rp ${total.toLocaleString('id-ID')} sudah Chuna batalkan ya, Kak.`
+                            : `✅ Mohon kembalikan uang tunai sebesar Rp ${total.toLocaleString('id-ID')} kepada pelanggan ya, Kak.`);
                     let isIpError = (payJson.data.message || '').toLowerCase().includes('ip anda tidak kami kenali') || (payJson.data.message || '').toLowerCase().includes('ip');
                     let customerErrorMsg = isIpError ? 'Sedang ada pemeliharaan' : (payJson.data.message || 'Transaksi Gagal');
                     if (customerErrorMsg.toLowerCase().includes('saldo') || customerErrorMsg.toLowerCase().includes('balance') || customerErrorMsg.toLowerCase().includes('cukup')) {
@@ -6312,7 +6317,7 @@ Keterangan : ${customerErrorMsg}
 
 ${refundMsg}
 
-${isIpError ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Tenang saja, Kakak bisa mencoba ulang kapan pun.'}
+${isIpError ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Silakan coba lagi kapan saja, Kak.'}
 
 Chuna siap bantu! 😊💪`;
 
@@ -6672,7 +6677,11 @@ Daya         : ${parts.slice(1).join(' / ')}`;
                         db.members = members;
                         writeDB(db);
                     }
-                    let refundMsg = method === 'saldo' ? '✅ Saldo sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (method === 'utang' ? '✅ Utang sebesar Rp ' + total.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + total.toLocaleString('id-ID') + ' kepada pelanggan.');
+                    let refundMsg = method === 'saldo'
+                        ? `✅ Saldo Rp ${total.toLocaleString('id-ID')} telah dikembalikan ke akun Kakak.`
+                        : (method === 'utang'
+                            ? `✅ Tenang, utang Rp ${total.toLocaleString('id-ID')} sudah Chuna batalkan ya, Kak.`
+                            : `✅ Mohon kembalikan uang tunai sebesar Rp ${total.toLocaleString('id-ID')} kepada pelanggan ya, Kak.`);
                     let isIpError = (payJson.data.message || '').toLowerCase().includes('ip anda tidak kami kenali') || (payJson.data.message || '').toLowerCase().includes('ip');
                     let customerErrorMsg = isIpError ? 'Sedang ada pemeliharaan' : (payJson.data.message || 'Transaksi Gagal');
                     if (customerErrorMsg.toLowerCase().includes('saldo') || customerErrorMsg.toLowerCase().includes('balance') || customerErrorMsg.toLowerCase().includes('cukup')) {
@@ -6694,7 +6703,7 @@ Keterangan : ${customerErrorMsg}
 
 ${refundMsg}
 
-${isIpError ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Tenang saja, Kakak bisa mencoba ulang kapan pun.'}
+${isIpError ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Silakan coba lagi kapan saja, Kak.'}
 
 Chuna siap bantu! 😊💪`;
 

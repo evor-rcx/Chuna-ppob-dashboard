@@ -99,7 +99,9 @@ export type GagalCategory =
     | 'server_ip' 
     | 'saldo_kurang' 
     | 'cut_off' 
-    | 'refund_lengkap';
+    | 'refund_lengkap'
+    | 'refund_cash'
+    | 'refund_utang';
 
 export function detectGagalCategory(rawError?: string): GagalCategory {
     const err = (rawError || '').toLowerCase();
@@ -181,6 +183,7 @@ export function formatKonfirmasiFailedCaption(params: {
     rawError?: string;
     price?: number;
     categoryOverride?: GagalCategory;
+    method?: 'saldo' | 'cash' | 'utang' | string;
 }): string {
     const { greetingName, targetSuffix } = resolveCustomerGreetingName(params.nama);
     const produk = params.product || 'Free Fire 70 Diamond';
@@ -228,6 +231,8 @@ Produk ini sedang tutup sementara dari pusat, jadi belum bisa diproses. Silakan 
 
 Chuna siap bantu! 😊`;
 
+        case 'refund_cash':
+        case 'refund_utang':
         case 'refund_lengkap':
         default:
             const raw = params.rawError || 'Terjadi kendala pada sistem pusat';
@@ -236,6 +241,28 @@ Chuna siap bantu! 😊`;
                 : (raw.toLowerCase().includes('saldo') || raw.toLowerCase().includes('balance') ? 'Produk sedang kosong' : raw);
             const nominalStr = params.price ? Number(params.price).toLocaleString('id-ID') : '0';
 
+            const method = (params.method || '').toLowerCase();
+            const isCash = category === 'refund_cash' || method === 'cash';
+            const isUtang = category === 'refund_utang' || method === 'utang';
+
+            let refundBlock = '';
+            if (isCash) {
+                refundBlock = `✅ Mohon kembalikan uang tunai sebesar Rp ${nominalStr} kepada pelanggan ya, Kak.
+
+Silakan coba lagi kapan saja.
+Chuna siap bantu! 😊💪`;
+            } else if (isUtang) {
+                refundBlock = `✅ Tenang, utang Rp ${nominalStr} sudah Chuna batalkan ya, Kak.
+
+Silakan coba lagi kapan saja.
+Chuna siap bantu! 😊💪`;
+            } else {
+                refundBlock = `✅ Saldo Rp ${nominalStr} telah dikembalikan ke akun Kakak.
+
+Silakan coba lagi kapan saja, Kak.
+Chuna siap bantu! 😊💪`;
+            }
+
             return `❌ Maaf ya ${greetingName}, transaksi belum berhasil diproses.
 
 📌 Keterangan: ${cleanReason}
@@ -243,10 +270,7 @@ Chuna siap bantu! 😊`;
 🎯 Tujuan: ${tujuan} (${targetSuffix})
 
 Kabar baiknya, dana Kakak sudah kami proses:
-✅ Saldo Rp ${nominalStr} telah dikembalikan ke akun Kakak.
-
-Silakan coba lagi kapan saja, Kak.
-Chuna siap bantu! 😊💪`;
+${refundBlock}`;
     }
 }
 

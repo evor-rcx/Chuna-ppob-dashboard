@@ -18,7 +18,7 @@ export function Menu({ onNavigate }: MenuProps) {
   // Live Nota Model Preview State
   const [activeNotaTab, setActiveNotaTab] = useState<'tagihan-pasca' | 'konfirmasi' | 'royal-tidaklunas' | 'royal' | 'tagihan' | 'lunas' | 'angsuran'>('tagihan-pasca');
   const [pascaVariant, setPascaVariant] = useState<'ditemukan' | 'tidak-ditemukan'>('ditemukan');
-  const [konfirmasiStatusTab, setKonfirmasiStatusTab] = useState<'pending' | 'sukses' | 'gagal-tujuan' | 'gagal-ip' | 'gagal-saldo' | 'gagal-cutoff' | 'gagal-refund'>('pending');
+  const [konfirmasiStatusTab, setKonfirmasiStatusTab] = useState<'pending' | 'sukses' | 'gagal-tujuan' | 'gagal-ip' | 'gagal-saldo' | 'gagal-cutoff' | 'gagal-refund-saldo' | 'gagal-refund-cash' | 'gagal-refund-utang'>('pending');
   const [royalCategory, setRoyalCategory] = useState<'game' | 'pln-token' | 'pln-pasca' | 'pulsa' | 'ewallet'>('pln-token');
   const [imageTimestamp, setImageTimestamp] = useState<number>(Date.now());
   const [isZoomed, setIsZoomed] = useState<boolean>(false);
@@ -87,7 +87,7 @@ Produk ini sedang tutup sementara dari pusat, jadi belum bisa diproses. Silakan 
 
 Chuna siap bantu! 😊`;
 
-  const konfirmasiGagalRefundCaption = `❌ Maaf ya Kak Koi, transaksi belum berhasil diproses.
+  const konfirmasiGagalRefundSaldoCaption = `❌ Maaf ya Kak Koi, transaksi belum berhasil diproses.
 
 📌 Keterangan: Terjadi kendala teknis dari pusat
 📦 Produk: Free Fire 70 Diamond
@@ -99,6 +99,30 @@ Kabar baiknya, dana Kakak sudah kami proses:
 Silakan coba lagi kapan saja, Kak.
 Chuna siap bantu! 😊💪`;
 
+  const konfirmasiGagalRefundCashCaption = `❌ Maaf ya Kak Koi, transaksi belum berhasil diproses.
+
+📌 Keterangan: Terjadi kendala teknis dari pusat
+📦 Produk: Free Fire 70 Diamond
+🎯 Tujuan: 121 (Koi)
+
+Kabar baiknya, dana Kakak sudah kami proses:
+✅ Mohon kembalikan uang tunai sebesar Rp 11.000 kepada pelanggan ya, Kak.
+
+Silakan coba lagi kapan saja.
+Chuna siap bantu! 😊💪`;
+
+  const konfirmasiGagalRefundUtangCaption = `❌ Maaf ya Kak Koi, transaksi belum berhasil diproses.
+
+📌 Keterangan: Terjadi kendala teknis dari pusat
+📦 Produk: Free Fire 70 Diamond
+🎯 Tujuan: 121 (Koi)
+
+Kabar baiknya, dana Kakak sudah kami proses:
+✅ Tenang, utang Rp 11.000 sudah Chuna batalkan ya, Kak.
+
+Silakan coba lagi kapan saja.
+Chuna siap bantu! 😊💪`;
+
   const konfirmasiCaption = 
     konfirmasiStatusTab === 'pending' ? konfirmasiPendingCaption :
     konfirmasiStatusTab === 'sukses' ? konfirmasiSuksesCaption :
@@ -106,7 +130,9 @@ Chuna siap bantu! 😊💪`;
     konfirmasiStatusTab === 'gagal-ip' ? konfirmasiGagalIpCaption :
     konfirmasiStatusTab === 'gagal-saldo' ? konfirmasiGagalSaldoCaption :
     konfirmasiStatusTab === 'gagal-cutoff' ? konfirmasiGagalCutoffCaption :
-    konfirmasiGagalRefundCaption;
+    konfirmasiStatusTab === 'gagal-refund-cash' ? konfirmasiGagalRefundCashCaption :
+    konfirmasiStatusTab === 'gagal-refund-utang' ? konfirmasiGagalRefundUtangCaption :
+    konfirmasiGagalRefundSaldoCaption;
 
   const royalGameCaption = `E4 STORE\nStruk Pembayaran\n\nStatus: SUKSES (LUNAS)\n\n----------------------------------------\nNama: Lio\nStatus: Lunas\nMetode: CASH\nItem Game: Magic Chess Go Go 5 Diamonds\n\nID Tujuan Game: 836351001\nOrder ID: PRE-1790198576914\nTanggal: 24/09/2026 05:23 WITA\n----------------------------------------\n\nSERIAL NUMBER / SN\n@41 . RefId: GTX-260924XD2H4IF01V\n\n----------------------------------------\nTOTAL BAYAR: Rp 3.000\n----------------------------------------\n\nTerima kasih telah berbelanja di E4 Store!\nCetak: 24/09/2026 05:23 WITA | Kode: #PRE-179\nKamis, 24 September 2026 - Hari Tani Nasional (Hari Ini)\nChuna - Asisten Imutmu siap bantu 24 jam!`;
 
@@ -552,14 +578,34 @@ Chuna tunggu pelunasannya! 😊💖`;
                 ❌ 6. Gagal: Cut Off / Tutup Sementara
               </button>
               <button
-                onClick={() => setKonfirmasiStatusTab('gagal-refund')}
+                onClick={() => setKonfirmasiStatusTab('gagal-refund-saldo')}
                 className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
-                  konfirmasiStatusTab === 'gagal-refund'
+                  konfirmasiStatusTab === 'gagal-refund-saldo'
                     ? 'bg-red-500 text-white shadow-md shadow-red-500/20'
                     : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
                 }`}
               >
-                ❌ 7. Gagal: Info Refund Lengkap
+                ❌ 7. Gagal: Refund Saldo
+              </button>
+              <button
+                onClick={() => setKonfirmasiStatusTab('gagal-refund-cash')}
+                className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                  konfirmasiStatusTab === 'gagal-refund-cash'
+                    ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                    : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                }`}
+              >
+                💵 8. Gagal: Refund CASH (Lebih Halus)
+              </button>
+              <button
+                onClick={() => setKonfirmasiStatusTab('gagal-refund-utang')}
+                className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                  konfirmasiStatusTab === 'gagal-refund-utang'
+                    ? 'bg-purple-500 text-white shadow-md shadow-purple-500/20'
+                    : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                }`}
+              >
+                📝 9. Gagal: Batal UTANG (Lebih Halus)
               </button>
             </div>
           )}
@@ -648,7 +694,9 @@ Chuna tunggu pelunasannya! 😊💖`;
                               konfirmasiStatusTab === 'gagal-ip' ? '❌ 4. GAGAL: SERVER / IP BERUBAH' :
                               konfirmasiStatusTab === 'gagal-saldo' ? '❌ 5. GAGAL: PRODUK KOSONG' :
                               konfirmasiStatusTab === 'gagal-cutoff' ? '❌ 6. GAGAL: TUTUP SEMENTARA' :
-                              '❌ 7. GAGAL: REFUND LENGKAP'
+                              konfirmasiStatusTab === 'gagal-refund-cash' ? '💵 8. GAGAL: REFUND CASH (LEBIH HALUS)' :
+                              konfirmasiStatusTab === 'gagal-refund-utang' ? '📝 9. GAGAL: BATAL UTANG (LEBIH HALUS)' :
+                              '❌ 7. GAGAL: REFUND SALDO'
                             )
                           : '⚠️ STATUS: BELUM LUNAS'}
                       </span>
