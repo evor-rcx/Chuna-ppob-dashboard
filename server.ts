@@ -29,8 +29,8 @@ import { generateVintageTagihanReceipt, formatTagihanMessage } from "./debtTagih
 import { generateRoyalStrukReceipt, formatRoyalStrukMessage } from "./royalStrukReceipt";
 import { generateOrderConfirmationSticker } from "./stickerConfirmation";
 import { generateEmeraldConfirmationImage } from "./emeraldConfirmationReceipt";
-import { generateKonfirmasiReceipt, formatKonfirmasiMessage } from "./konfirmasiReceipt";
-import { generatePascabayarTagihanReceipt, formatPascabayarTagihanMessage } from "./pascabayarTagihanReceipt";
+import { generateKonfirmasiReceipt, formatKonfirmasiMessage, formatKonfirmasiSuccessCaption, formatKonfirmasiFailedCaption } from "./konfirmasiReceipt";
+import { generatePascabayarTagihanReceipt, formatPascabayarTagihanMessage, formatPascabayarNotFoundMessage } from "./pascabayarTagihanReceipt";
 
 import path from 'path';
 
@@ -516,6 +516,44 @@ export async function generateTagihanCanvas(data: any, txDate: Date, formattedDa
     } catch (e: any) {
         console.error("Canvas tagihan error:", e);
         return null;
+    }
+}
+
+export function getTransactionReceiptCaption(tx: any): string {
+    const statusLower = (tx.status || '').toString().toLowerCase().trim();
+    if (statusLower.includes('gagal') || statusLower.includes('fail')) {
+        return "❌ Transaksi Gagal! Pesanan belum berhasil diproses sistem pusat. Detail transaksinya sudah Chuna lampirkan di gambar nota ya, Kak.";
+    }
+
+    let methodLower = (tx.method || '').toString().toLowerCase().trim();
+    if (!methodLower && tx.id) {
+        try {
+            const currentDb = (typeof db !== 'undefined' && db) ? db : readDB();
+            const foundTx = currentDb.transactions?.find((t: any) => t.id === tx.id);
+            if (foundTx && foundTx.method) {
+                methodLower = foundTx.method.toString().toLowerCase().trim();
+            }
+        } catch (e) {}
+    }
+    const isUtang = methodLower === 'utang' || methodLower === 'kasbon' || statusLower.includes('utang') || statusLower.includes('kasbon');
+    const isExplicitlyPaid = tx.isPaid === true || tx.isLunas === true;
+    const isPending = statusLower.includes('pending') || statusLower.includes('menunggu');
+
+    let isLunas = true;
+    if (tx.isPaid === false) {
+        isLunas = false;
+    } else if (isUtang && !isExplicitlyPaid) {
+        isLunas = false;
+    } else if (isPending) {
+        isLunas = false;
+    } else if (statusLower.includes('belum') || statusLower.includes('tidak') || statusLower.includes('utang') || statusLower.includes('kasbon')) {
+        isLunas = false;
+    }
+
+    if (isLunas) {
+        return "✅ Transaksi Berhasil! Nota pembelian Kakak sudah LUNAS ya, Kak. Detail notanya ada di gambar. Terima kasih sudah belanja di E4 Store! 🥰";
+    } else {
+        return "✅ Transaksi Berhasil! Nota pembelian Kakak sudah tercatat, tapi statusnya masih BELUM LUNAS ya, Kak. Detail notanya ada di gambar. Terima kasih sudah belanja di E4 Store! 🥰";
     }
 }
 
@@ -2545,7 +2583,8 @@ async function startServer() {
                               await waSocket.sendPresenceUpdate("composing", jid);
                               await new Promise(r => setTimeout(r, 1200));
                               await waSocket.sendPresenceUpdate("paused", jid);
-                              await waSocket.sendMessage(jid, { image: buffer, caption: "✅ *Transaksi Berhasil!* Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰" });
+                              const receiptCaption = getTransactionReceiptCaption(tx);
+                              await waSocket.sendMessage(jid, { image: buffer, caption: receiptCaption });
                                         
                               
                               const tIndex = db.transactions.findIndex((t: any) => t.id === tx.id);
@@ -3286,58 +3325,15 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
                 let msg = "";
                 let notaBuffer: Buffer | null = null;
                 if (status === 'Sukses') {
-                    
-                    const sn = data.sn || "-";
-                    const now = new Date();
-                    const months = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
-                    const dateStr = `${now.getDate().toString().padStart(2, '0')} ${months[now.getMonth()]} ${now.getFullYear()} WITA`;
-                    
-                    let displaySnMan = sn;
-                    let displayDayaMan = "";
-                    if (sn.includes('/')) {
-                        const parts = sn.split('/');
-                        displaySnMan = parts[0];
-                        if (parts.length > 1) {
-                            displayDayaMan = `\nDaya         : ${parts.slice(1).join(' / ')}`;
-                        }
-                    }
-                    msg = generateSuccessMessage({
-                        productName: tx.product || data.buyer_sku_code,
-                        category: tx.category,
-                        brand: tx.brand,
-                        sku: tx.sku || data.buyer_sku_code,
-                        target: tx.target || data.customer_no,
-                        customerName: finalDisplayName,
-                        isOwnerSelf: isOwnerSelf,
-                        tagihan: tx.tagihan,
+                    msg = formatKonfirmasiSuccessCaption({ nama: finalDisplayName });
+                } else if (status === 'Gagal') {
+                    msg = formatKonfirmasiFailedCaption({
+                        nama: finalDisplayName,
+                        product: tx.product,
+                        target: tx.target,
+                        rawError: data.message,
                         price: tx.price
                     });
-                } else if (status === 'Gagal') {
-                    let refundMsg = tx.method === 'saldo' ? '✅ Saldo sebesar Rp ' + tx.price.toLocaleString('id-ID') + ' telah dikembalikan ke akunmu!' : (tx.method === 'utang' ? '✅ Utang sebesar Rp ' + tx.price.toLocaleString('id-ID') + ' telah dibatalkan!' : '✅ Mohon kembalikan uang tunai sebesar Rp ' + tx.price.toLocaleString('id-ID') + ' kepada pelanggan.');
-                    let isIpError = (data.message || '').toLowerCase().includes('ip');
-                    let customerErrorMsg = isIpError ? 'Sedang ada pemeliharaan' : (data.message || 'Transaksi Gagal');
-                    if (customerErrorMsg.toLowerCase().includes('saldo') || customerErrorMsg.toLowerCase().includes('balance')) {
-                        customerErrorMsg = 'Produk sedang kosong';
-                    }
-
-                    const isFailOwner = (finalDisplayName && finalDisplayName.toLowerCase().includes("owner")) || isOwnerSelf;
-                    const failGreeting = isFailOwner
-                        ? "❌ Maaf Owner, pembayaran untuk pesanan Anda gagal diproses."
-                        : (finalDisplayName && finalDisplayName !== 'Pelanggan Setia' && finalDisplayName !== 'Kakak'
-                            ? `❌ Maaf Kak ${finalDisplayName}, pembayaran untuk pesanan Anda gagal diproses.`
-                            : "❌ Maaf Kak, pembayaran untuk pesanan Anda gagal diproses.");
-
-                    msg = `${failGreeting}
-
-Keterangan : ${customerErrorMsg}
-📦 Produk  : ${tx.product}
-🎯 Tujuan   : ${tx.target}${(finalDisplayName && finalDisplayName !== 'Pelanggan Setia' && finalDisplayName !== 'Kakak') ? ` (${finalDisplayName})` : ''}
-
-${refundMsg}
-
-${isIpError ? 'Jangan khawatir, Kakak bisa mencoba ulang kapan saja.' : 'Tenang saja, Kakak bisa mencoba ulang kapan pun.'}
-
-${isIpError ? `Chuna siap membantu dengan senyum! 😊💪` : `Chuna siap bantu! 😊💪`}`;
                     
                     if (data.message && data.message.toLowerCase().includes("harga seller lebih besar dari ketentuan harga buyer")) {
                         const ownerMsg = `🚨 *INFO PENTING DARI CHUNA!* 🚨
@@ -3376,8 +3372,9 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                             }
                             const buffer = await generateCanvasReceipt("nota", tx);
                             if (buffer) {
+                                const receiptCaption = getTransactionReceiptCaption(tx);
                                 await bot.telegram.sendPhoto(tx.tgChatId, { source: buffer }, { 
-                                    caption: "✅ Transaksi Berhasil! Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰" 
+                                    caption: receiptCaption 
                                 });
                             }
                         } else {
@@ -3406,8 +3403,9 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                             await bot.telegram.sendMessage(tgId, msg);
                             const buffer = await generateCanvasReceipt("nota", tx);
                             if (buffer) {
+                                const receiptCaption = getTransactionReceiptCaption(tx);
                                 await bot.telegram.sendPhoto(tgId, { source: buffer }, { 
-                                    caption: "✅ Transaksi Berhasil! Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰" 
+                                    caption: receiptCaption 
                                 });
                             }
                         } else {
@@ -3466,9 +3464,10 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                                     // 2. Send the official Nota receipt canvas
                                     const buffer = await generateCanvasReceipt("nota", tx);
                                     if (buffer) {
+                                        const receiptCaption = getTransactionReceiptCaption(tx);
                                         await waSocket.sendMessage(jid, { 
                                             image: buffer, 
-                                            caption: "✅ Transaksi Berhasil! Berikut nota pembelian kamu ya, kak. Terima kasih sudah belanja di E4 Store! 🥰" 
+                                            caption: receiptCaption 
                                         });
                                     } else if (!edited) {
                                         await waSocket.sendMessage(jid, { text: msg });
@@ -3766,6 +3765,20 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
         if (msgItem && msgItem.pushName) {
           const senderJid = msgItem.key?.participant || msgItem.key?.remoteJid || '';
           saveWaProfile(senderJid, msgItem.pushName);
+        }
+        if (msgItem && msgItem.key) {
+          const rJid = String(msgItem.key.remoteJid || '');
+          const pJid = String(msgItem.key.participant || '');
+          const participantPn = String((msgItem.key as any).participantPn || '');
+
+          if (rJid.endsWith('@s.whatsapp.net') && pJid.endsWith('@lid')) {
+            saveWaLid(rJid, pJid);
+          } else if (rJid.endsWith('@lid') && pJid.endsWith('@s.whatsapp.net')) {
+            saveWaLid(pJid, rJid);
+          } else if (participantPn && (rJid.endsWith('@lid') || pJid.endsWith('@lid'))) {
+            const lidVal = rJid.endsWith('@lid') ? rJid : pJid;
+            saveWaLid(participantPn, lidVal);
+          }
         }
       }
       const msg = m.messages[0];
@@ -5004,11 +5017,125 @@ Chuna – E4 Store`;
     res.json({ success: true });
   });
 
+// Helper untuk menarik profil lengkap Telegram (Foto & Nama Profil)
+async function fetchTelegramUserProfile(tgIdOrUsername: string) {
+  if (!bot) return null;
+  const cleanId = String(tgIdOrUsername || '').replace(/^(ID:|@)/, '').trim();
+  if (!cleanId) return null;
+
+  let tgProfileName: string | null = null;
+  let tgPhotoUrl: string | null = null;
+
+  try {
+    const chat: any = await bot.telegram.getChat(cleanId).catch(() => null);
+    if (chat) {
+      const first = chat.first_name || '';
+      const last = chat.last_name || '';
+      tgProfileName = [first, last].filter(Boolean).join(' ') || (chat.username ? `@${chat.username}` : '');
+      if (chat.photo?.small_file_id || chat.photo?.big_file_id) {
+        const fId = chat.photo.big_file_id || chat.photo.small_file_id;
+        const link = await bot.telegram.getFileLink(fId).catch(() => null);
+        if (link && link.href) {
+          tgPhotoUrl = link.href;
+        }
+      }
+    }
+  } catch (e) {}
+
+  if (!tgPhotoUrl && /^\d+$/.test(cleanId)) {
+    try {
+      const photos = await bot.telegram.getUserProfilePhotos(Number(cleanId), 0, 1).catch(() => null);
+      if (photos && photos.total_count > 0 && photos.photos[0]?.length > 0) {
+        const sizeArr = photos.photos[0];
+        const fileId = sizeArr[sizeArr.length - 1].file_id;
+        const link = await bot.telegram.getFileLink(fileId).catch(() => null);
+        if (link && link.href) {
+          tgPhotoUrl = link.href;
+        }
+      }
+    } catch (e) {}
+  }
+
+  if (tgPhotoUrl && tgPhotoUrl.startsWith('http')) {
+    try {
+      const photosDir = path.join(process.cwd(), 'public', 'wa_photos');
+      if (!fs.existsSync(photosDir)) fs.mkdirSync(photosDir, { recursive: true });
+      const filename = `tg_${cleanId}_${Date.now()}.jpg`;
+      const filepath = path.join(photosDir, filename);
+      const resp = await fetch(tgPhotoUrl);
+      const arrayBuffer = await resp.arrayBuffer();
+      fs.writeFileSync(filepath, Buffer.from(arrayBuffer));
+      tgPhotoUrl = `/wa_photos/${filename}`;
+    } catch (e) {}
+  }
+
+  if (!tgProfileName && db.tgProfiles && db.tgProfiles[cleanId]) {
+    tgProfileName = db.tgProfiles[cleanId];
+  }
+  if (!tgPhotoUrl && db.tgProfilePhotos && db.tgProfilePhotos[cleanId]) {
+    tgPhotoUrl = db.tgProfilePhotos[cleanId];
+  }
+
+  if (tgProfileName) {
+    if (!db.tgProfiles) db.tgProfiles = {};
+    db.tgProfiles[cleanId] = tgProfileName;
+  }
+  if (tgPhotoUrl) {
+    if (!db.tgProfilePhotos) db.tgProfilePhotos = {};
+    db.tgProfilePhotos[cleanId] = tgPhotoUrl;
+  }
+
+  return {
+    cleanId,
+    tgProfileName: tgProfileName || null,
+    tgPhotoUrl: tgPhotoUrl || null
+  };
+}
+
+// Helper untuk menarik profil lengkap WhatsApp (Foto, Nama Profil, dan LID)
+async function fetchWaUserProfile(rawPhone: string) {
+  const cleanPhone = cleanWaPhone(rawPhone);
+  if (!cleanPhone || cleanPhone.length < 8) return null;
+
+  let photoUrl: string | null = (db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) || null;
+  let waProfileName: string | null = (db.waProfiles && db.waProfiles[cleanPhone]) || null;
+  let lid: string | null = (db.waLids && db.waLids[cleanPhone]) || null;
+
+  if (typeof waSocket !== 'undefined' && waSocket) {
+    const jid = `${cleanPhone}@s.whatsapp.net`;
+    try {
+      const onWa = await waSocket.onWhatsApp(jid).catch(() => null);
+      if (Array.isArray(onWa) && onWa.length > 0) {
+        if (onWa[0].lid) {
+          lid = onWa[0].lid;
+          saveWaLid(cleanPhone, lid);
+        }
+      }
+    } catch (e) {}
+
+    try {
+      const pic = await waSocket.profilePictureUrl(jid, 'image').catch(() => null);
+      if (pic) {
+        photoUrl = pic;
+        if (!db.waProfilePhotos) db.waProfilePhotos = {};
+        db.waProfilePhotos[cleanPhone] = pic;
+      }
+    } catch (e) {}
+  }
+
+  return {
+    cleanPhone,
+    photoUrl: photoUrl || null,
+    waProfileName: waProfileName || null,
+    lid: lid || null
+  };
+}
+
   app.get("/api/members/offline", (req, res) => {
-    // Return all members, or just those added manually (without telegram ID)
-    const offlineMembers = members.filter(m => !m.telegram || !m.telegram.startsWith('ID:'));
-    const enriched = offlineMembers.map(m => {
+    const enriched = members.map(m => {
       const cleanPhone = cleanWaPhone(m.whatsapp || '');
+      const cleanTg = String(m.telegram || '').replace(/^(ID:|@)/, '').trim();
+
       let photoUrl = m.photoUrl;
       if (!photoUrl && cleanPhone && db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) {
         photoUrl = db.waProfilePhotos[cleanPhone];
@@ -5017,10 +5144,26 @@ Chuna – E4 Store`;
       if (!lid && cleanPhone && db.waLids && db.waLids[cleanPhone]) {
         lid = db.waLids[cleanPhone];
       }
+      let waProfileName = m.waProfileName || null;
+      if (!waProfileName && cleanPhone && db.waProfiles && db.waProfiles[cleanPhone]) {
+        waProfileName = db.waProfiles[cleanPhone];
+      }
+
+      let tgPhotoUrl = m.tgPhotoUrl || null;
+      if (!tgPhotoUrl && cleanTg && db.tgProfilePhotos && db.tgProfilePhotos[cleanTg]) {
+        tgPhotoUrl = db.tgProfilePhotos[cleanTg];
+      }
+      let tgProfileName = m.tgProfileName || null;
+      if (!tgProfileName && cleanTg && db.tgProfiles && db.tgProfiles[cleanTg]) {
+        tgProfileName = db.tgProfiles[cleanTg];
+      }
+
       return {
         ...m,
         photoUrl: photoUrl || null,
-        waProfileName: m.waProfileName || null,
+        tgPhotoUrl: tgPhotoUrl || null,
+        waProfileName: waProfileName || null,
+        tgProfileName: tgProfileName || null,
         lid: lid || null
       };
     });
@@ -5034,16 +5177,59 @@ Chuna – E4 Store`;
 
       const newId = `MBR-OFF-${Date.now().toString().slice(-6)}`;
       const cleanPhone = cleanWaPhone(whatsapp || '');
+
+      let finalLid = lid ? String(lid).trim() : null;
+      let finalWaName = waProfileName ? String(waProfileName).trim() : null;
+      let finalPhoto = photoUrl || null;
+
+      // Auto-resolve LID, Profile Name, and Profile Photo if WhatsApp number provided
+      if (cleanPhone) {
+        if (!finalLid && db.waLids && db.waLids[cleanPhone]) {
+          finalLid = db.waLids[cleanPhone];
+        }
+        if (!finalWaName && db.waProfiles && db.waProfiles[cleanPhone]) {
+          finalWaName = db.waProfiles[cleanPhone];
+        }
+        if (!finalPhoto && db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) {
+          finalPhoto = db.waProfilePhotos[cleanPhone];
+        }
+
+        // Try querying live WhatsApp bot if connected
+        if (typeof waSocket !== 'undefined' && waSocket) {
+          const jid = `${cleanPhone}@s.whatsapp.net`;
+          try {
+            if (!finalLid) {
+              const onWa = await waSocket.onWhatsApp(jid).catch(() => null);
+              if (Array.isArray(onWa) && onWa[0]?.lid) {
+                finalLid = onWa[0].lid;
+                saveWaLid(cleanPhone, finalLid);
+              }
+            }
+          } catch (e) {}
+
+          try {
+            if (!finalPhoto) {
+              const pic = await waSocket.profilePictureUrl(jid, 'image').catch(() => null);
+              if (pic) {
+                finalPhoto = pic;
+                if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                db.waProfilePhotos[cleanPhone] = pic;
+              }
+            }
+          } catch (e) {}
+        }
+      }
+
       const newMember: any = {
         id: newId,
         name: String(name).trim(),
-        waProfileName: waProfileName ? String(waProfileName).trim() : null,
+        waProfileName: finalWaName || null,
         whatsapp: whatsapp ? String(whatsapp).trim() : '',
         type: type || 'Biasa',
         balance: 0,
         registeredAt: new Date().toISOString(),
-        photoUrl: photoUrl || null,
-        lid: lid ? String(lid).trim() : null
+        photoUrl: finalPhoto || null,
+        lid: finalLid || null
       };
 
       if (!db.members) db.members = [];
@@ -5071,6 +5257,71 @@ Chuna – E4 Store`;
     }
   });
 
+  // Endpoint untuk cek & tarik otomatis nomor WhatsApp (Foto, Nama, dan LID)
+  app.get("/api/wa/lookup/:phone", async (req, res) => {
+    try {
+      const { phone } = req.params;
+      const cleanPhone = cleanWaPhone(phone || '');
+      if (!cleanPhone || cleanPhone.length < 8) {
+        return res.status(400).json({ success: false, error: 'Nomor WhatsApp tidak valid (minimal 8 angka)' });
+      }
+
+      let exists = false;
+      let jid = `${cleanPhone}@s.whatsapp.net`;
+      let lid: string | null = (db.waLids && db.waLids[cleanPhone]) || null;
+      let waProfileName: string | null = (db.waProfiles && db.waProfiles[cleanPhone]) || null;
+      let photoUrl: string | null = (db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) || null;
+
+      // Cek dari member yang sudah ada jika belum ada di cache
+      const existingMember = (db.members || []).find((m: any) => cleanWaPhone(m.whatsapp || '') === cleanPhone);
+      if (existingMember) {
+        if (!lid && existingMember.lid) lid = existingMember.lid;
+        if (!waProfileName && existingMember.waProfileName) waProfileName = existingMember.waProfileName;
+        if (!photoUrl && existingMember.photoUrl) photoUrl = existingMember.photoUrl;
+      }
+
+      // Query ke Baileys jika bot aktif
+      if (typeof waSocket !== 'undefined' && waSocket) {
+        try {
+          const onWaResults = await waSocket.onWhatsApp(jid).catch(() => null);
+          if (Array.isArray(onWaResults) && onWaResults.length > 0) {
+            const hit = onWaResults[0];
+            exists = Boolean(hit.exists);
+            if (hit.jid) jid = hit.jid;
+            if (hit.lid) {
+              lid = hit.lid;
+              saveWaLid(cleanPhone, hit.lid);
+            }
+          }
+        } catch (e) {}
+
+        if (!photoUrl) {
+          try {
+            const pic = await waSocket.profilePictureUrl(jid, 'image').catch(() => null);
+            if (pic) {
+              photoUrl = pic;
+              if (!db.waProfilePhotos) db.waProfilePhotos = {};
+              db.waProfilePhotos[cleanPhone] = pic;
+              writeDB(db);
+            }
+          } catch (e) {}
+        }
+      }
+
+      res.json({
+        success: true,
+        exists,
+        phone: cleanPhone,
+        jid,
+        lid: lid || null,
+        waProfileName: waProfileName || null,
+        photoUrl: photoUrl || null
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   app.post("/api/members/:id/sync-photo", async (req, res) => {
     const { id } = req.params;
     const member = members.find(m => m.id === id);
@@ -5079,30 +5330,53 @@ Chuna – E4 Store`;
     if (!cleanPhone) return res.status(400).json({ success: false, error: 'Nomor WhatsApp member tidak valid' });
 
     let fetchedPhoto = null;
-    let fetchedName = null;
+    let fetchedLid: string | null = member.lid || (db.waLids && db.waLids[cleanPhone]) || null;
+    let fetchedName: string | null = member.waProfileName || (db.waProfiles && db.waProfiles[cleanPhone]) || null;
+
     if (typeof waSocket !== 'undefined' && waSocket) {
+      const jid = `${cleanPhone}@s.whatsapp.net`;
       try {
-        const jid = `${cleanPhone}@s.whatsapp.net`;
         fetchedPhoto = await waSocket.profilePictureUrl(jid, 'image').catch(() => null);
+      } catch (e) {}
+
+      // Tarik LID dari WhatsApp jika belum ada
+      try {
+        const onWa = await waSocket.onWhatsApp(jid).catch(() => null);
+        if (Array.isArray(onWa) && onWa[0]?.lid) {
+          fetchedLid = onWa[0].lid;
+          saveWaLid(cleanPhone, fetchedLid);
+        }
       } catch (e) {}
     }
 
+    let updated = false;
     if (fetchedPhoto) {
       if (!db.waProfilePhotos) db.waProfilePhotos = {};
       db.waProfilePhotos[cleanPhone] = fetchedPhoto;
       member.photoUrl = fetchedPhoto;
+      updated = true;
+    } else if (db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) {
+      member.photoUrl = db.waProfilePhotos[cleanPhone];
+      fetchedPhoto = member.photoUrl;
+      updated = true;
+    }
+
+    if (fetchedLid && member.lid !== fetchedLid) {
+      member.lid = fetchedLid;
+      updated = true;
+    }
+
+    if (updated) {
       db.members = members;
       writeDB(db);
-      return res.json({ success: true, photoUrl: fetchedPhoto, waProfileName: member.waProfileName || member.name });
     }
 
-    if (db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) {
-      member.photoUrl = db.waProfilePhotos[cleanPhone];
-      writeDB(db);
-      return res.json({ success: true, photoUrl: db.waProfilePhotos[cleanPhone], waProfileName: member.waProfileName || member.name });
-    }
-
-    res.json({ success: false, error: 'Foto WhatsApp tidak dapat diambil (WhatsApp bot sedang offline atau privasi profil nomor disembunyikan).' });
+    return res.json({ 
+      success: true, 
+      photoUrl: fetchedPhoto || member.photoUrl, 
+      waProfileName: fetchedName || member.name,
+      lid: fetchedLid || member.lid || null
+    });
   });
 
   app.post("/api/members/:id/custom-photo", express.json({ limit: '10mb' }), async (req, res) => {
@@ -5137,16 +5411,107 @@ Chuna – E4 Store`;
     }
   });
 
+  // Endpoint untuk cek & tarik otomatis nomor Telegram (Foto & Nama Profil)
+  app.get("/api/tg/lookup/:query", async (req, res) => {
+    try {
+      const { query } = req.params;
+      const data = await fetchTelegramUserProfile(query);
+      if (data) {
+        writeDB(db);
+        return res.json({ success: true, ...data });
+      }
+      res.json({ success: false, error: 'Profil Telegram tidak ditemukan atau bot belum pernah di-start oleh user.' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Tarik SEMUA data (Foto WA, Foto TG, LID WA, Nama WA, Nama TG) untuk 1 member
+  app.post("/api/members/:id/sync-all", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const member = members.find(m => m.id === id);
+      if (!member) return res.status(404).json({ success: false, error: 'Member tidak ditemukan' });
+
+      let updated = false;
+
+      // 1. Tarik WhatsApp (Foto, Nama, LID)
+      if (member.whatsapp) {
+        const waData = await fetchWaUserProfile(member.whatsapp);
+        if (waData) {
+          if (waData.photoUrl) { member.photoUrl = waData.photoUrl; updated = true; }
+          if (waData.waProfileName) { member.waProfileName = waData.waProfileName; updated = true; }
+          if (waData.lid) { member.lid = waData.lid; updated = true; }
+        }
+      }
+
+      // 2. Tarik Telegram (Foto, Nama)
+      if (member.telegram) {
+        const tgData = await fetchTelegramUserProfile(member.telegram);
+        if (tgData) {
+          if (tgData.tgPhotoUrl) { member.tgPhotoUrl = tgData.tgPhotoUrl; updated = true; }
+          if (tgData.tgProfileName) { member.tgProfileName = tgData.tgProfileName; updated = true; }
+        }
+      }
+
+      if (updated) {
+        db.members = members;
+        writeDB(db);
+      }
+
+      res.json({ success: true, member });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Tarik massal semua profil untuk seluruh member
+  app.post("/api/members/sync-all-batch", async (req, res) => {
+    try {
+      let updatedCount = 0;
+      for (const member of members) {
+        let changed = false;
+        if (member.whatsapp) {
+          const waData = await fetchWaUserProfile(member.whatsapp);
+          if (waData) {
+            if (waData.photoUrl && member.photoUrl !== waData.photoUrl) { member.photoUrl = waData.photoUrl; changed = true; }
+            if (waData.waProfileName && member.waProfileName !== waData.waProfileName) { member.waProfileName = waData.waProfileName; changed = true; }
+            if (waData.lid && member.lid !== waData.lid) { member.lid = waData.lid; changed = true; }
+          }
+        }
+        if (member.telegram) {
+          const tgData = await fetchTelegramUserProfile(member.telegram);
+          if (tgData) {
+            if (tgData.tgPhotoUrl && member.tgPhotoUrl !== tgData.tgPhotoUrl) { member.tgPhotoUrl = tgData.tgPhotoUrl; changed = true; }
+            if (tgData.tgProfileName && member.tgProfileName !== tgData.tgProfileName) { member.tgProfileName = tgData.tgProfileName; changed = true; }
+          }
+        }
+        if (changed) updatedCount++;
+      }
+
+      if (updatedCount > 0) {
+        db.members = members;
+        writeDB(db);
+      }
+      res.json({ success: true, updatedCount });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   app.post("/api/members/:id/update-profile", async (req, res) => {
     try {
       const { id } = req.params;
-      const { name, waProfileName, whatsapp, type, lid } = req.body;
+      const { name, waProfileName, whatsapp, telegram, tgProfileName, tgPhotoUrl, type, lid } = req.body;
       const member = members.find(m => m.id === id);
       if (!member) return res.status(404).json({ success: false, error: 'Member tidak ditemukan' });
 
       if (name) member.name = name;
       if (typeof waProfileName !== 'undefined') member.waProfileName = waProfileName;
-      if (whatsapp) member.whatsapp = whatsapp;
+      if (typeof whatsapp !== 'undefined') member.whatsapp = whatsapp;
+      if (typeof telegram !== 'undefined') member.telegram = telegram;
+      if (typeof tgProfileName !== 'undefined') member.tgProfileName = tgProfileName;
+      if (typeof tgPhotoUrl !== 'undefined') member.tgPhotoUrl = tgPhotoUrl;
       if (type) member.type = type;
       if (typeof lid !== 'undefined') {
         member.lid = lid ? String(lid).trim() : null;
@@ -5171,7 +5536,42 @@ Chuna – E4 Store`;
 
   app.get("/api/members", (req, res) => {
     const onlineMembers = members.filter(m => m.telegram && m.telegram.startsWith('ID:'));
-    res.json({ success: true, members: onlineMembers });
+    const enriched = onlineMembers.map(m => {
+      const cleanPhone = cleanWaPhone(m.whatsapp || '');
+      const cleanTg = String(m.telegram || '').replace(/^(ID:|@)/, '').trim();
+
+      let photoUrl = m.photoUrl;
+      if (!photoUrl && cleanPhone && db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) {
+        photoUrl = db.waProfilePhotos[cleanPhone];
+      }
+      let lid = m.lid || null;
+      if (!lid && cleanPhone && db.waLids && db.waLids[cleanPhone]) {
+        lid = db.waLids[cleanPhone];
+      }
+      let waProfileName = m.waProfileName || null;
+      if (!waProfileName && cleanPhone && db.waProfiles && db.waProfiles[cleanPhone]) {
+        waProfileName = db.waProfiles[cleanPhone];
+      }
+
+      let tgPhotoUrl = m.tgPhotoUrl || null;
+      if (!tgPhotoUrl && cleanTg && db.tgProfilePhotos && db.tgProfilePhotos[cleanTg]) {
+        tgPhotoUrl = db.tgProfilePhotos[cleanTg];
+      }
+      let tgProfileName = m.tgProfileName || null;
+      if (!tgProfileName && cleanTg && db.tgProfiles && db.tgProfiles[cleanTg]) {
+        tgProfileName = db.tgProfiles[cleanTg];
+      }
+
+      return {
+        ...m,
+        photoUrl: photoUrl || null,
+        tgPhotoUrl: tgPhotoUrl || null,
+        waProfileName: waProfileName || null,
+        tgProfileName: tgProfileName || null,
+        lid: lid || null
+      };
+    });
+    res.json({ success: true, members: enriched });
   });
 
   app.get("/api/topup-requests", (req, res) => {
@@ -8804,14 +9204,15 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                     const result = await checkPascaBill(state.data.product.buyer_sku_code, omniFinalCustomerNo);
                     if (result.status === 'Gagal') {
                          let errMsg = result.message || "";
-                         let displayMsg = `❌ Pengecekan Gagal:\n${errMsg}`;
+                         const memberId = state.data?.memberId || `MBR-${ctx.from?.id}`;
+                         const regMember = members.find((m: any) => m.id === memberId || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
+                         const regName = regMember?.name || registeredUsers[ctx.from?.id]?.username || "-";
+                         const waInfo = await getCustomerWaDetails(regMember, ctx.from?.id);
+                         const waProfileName = waInfo?.waProfile && !isPhoneNumberOrEmpty(waInfo.waProfile) && waInfo.waProfile !== '-' ? waInfo.waProfile : (state.data?.nama || ctx.from?.first_name || 'Pelanggan');
+                         let displayMsg = formatPascabayarNotFoundMessage(waProfileName);
                          if (errMsg.toLowerCase().includes("ip anda tidak kami kenali")) {
-                             displayMsg = `❌ Maaf Kak, pengecekan untuk pesanan Anda gagal diproses.\n\nKemungkinan ada kesalahan data atau jaringan. Silakan cek kembali, atau hubungi Chuna untuk bantuan lebih lanjut.\n\nKeterangan : Sedang ada pemeliharaan\n📦 Produk  : ${state.data.product.product_name}\n🎯 Tujuan   : ${omniFinalCustomerNo}\n\nJangan khawatir, Kakak bisa mencoba ulang kapan saja.\n\nChuna siap bantu! 😊💪`;
                              const custName = ctx.from?.first_name || "Pelanggan";
-                             const memberId = state.data?.memberId || `MBR-${ctx.from?.id}`;
-                             const regMember = members.find((m: any) => m.id === memberId || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
-                             const regName = regMember?.name || registeredUsers[ctx.from?.id]?.username || "-";
-                             const waInfo = await getCustomerWaDetails(regMember, ctx.from?.id);
+                             displayMsg = `❌ Maaf Kak, pengecekan untuk pesanan Anda gagal diproses.\n\nKemungkinan ada kesalahan data atau jaringan. Silakan cek kembali, atau hubungi Chuna untuk bantuan lebih lanjut.\n\nKeterangan : Sedang ada pemeliharaan\n📦 Produk  : ${state.data.product.product_name}\n🎯 Tujuan   : ${omniFinalCustomerNo}\n\nJangan khawatir, Kakak bisa mencoba ulang kapan saja.\n\nChuna siap bantu! 😊💪`;
                              const photoLine = waInfo.waPhotoUrl ? `\n🖼️ Foto Profil WA: Terlampir` : ``;
                              const ownerMsg = `🚨 INFO PENTING DARI CHUNA! 🚨\nIP Digiflazz tidak dikenali!\nPelanggan mencoba memesan namun gagal karena error IP.\n👤 Pelanggan: ${custName} (${omniFinalCustomerNo})\n🏷️ Nama Terdaftar: ${regName}\n📱 No. WhatsApp: ${waInfo.waPhone}\n💬 Profil WhatsApp: ${waInfo.waProfile}${photoLine}\n📦 Produk: ${state.data.product.product_name}\n⚠️ Error: ${errMsg}\n\nSegera cek dan update whitelist IP di dashboard Digiflazz Kakak!`;
                              for (const ownerId of db.owners) {
@@ -8846,12 +9247,17 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          
                          let detail = selectedPkg.name;
                          
+                         const waInfo = await getCustomerWaDetails(member, ctx.from?.id);
+                         const waProfileName = waInfo?.waProfile && !isPhoneNumberOrEmpty(waInfo.waProfile) && waInfo.waProfile !== '-' ? waInfo.waProfile : undefined;
+                         
                          const billData = {
                              nama: nama,
                              no: state.data.customerNo, // The phone number instead of the giant base64 code
                              layanan: state.data.product.product_name + " - Omni",
                              total: total,
-                             detail: detail
+                             detail: detail,
+                             waProfileName: waProfileName,
+                             waPhotoUrl: waInfo?.waPhotoUrl || null
                          };
                          const base64Data = Buffer.from(JSON.stringify(billData)).toString('base64');
                          const appUrl = process.env.APP_URL || "http://localhost:3000";
@@ -8940,14 +9346,15 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                     const result = await checkPascaBill(state.data.product.buyer_sku_code, finalCustomerNoVal);
                     if (result.status === 'Gagal') {
                          let errMsg = result.message || "";
-                         let displayMsg = `❌ Pengecekan Gagal:\n${errMsg}`;
+                         const memberId = state.data?.memberId || `MBR-${ctx.from?.id}`;
+                         const regMember = members.find((m: any) => m.id === memberId || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
+                         const regName = regMember?.name || registeredUsers[ctx.from?.id]?.username || "-";
+                         const waInfo = await getCustomerWaDetails(regMember, ctx.from?.id);
+                         const waProfileName = waInfo?.waProfile && !isPhoneNumberOrEmpty(waInfo.waProfile) && waInfo.waProfile !== '-' ? waInfo.waProfile : (state.data?.nama || ctx.from?.first_name || 'Pelanggan');
+                         let displayMsg = formatPascabayarNotFoundMessage(waProfileName);
                          if (errMsg.toLowerCase().includes("ip anda tidak kami kenali")) {
-                             displayMsg = `❌ Maaf Kak, pengecekan untuk pesanan Anda gagal diproses.\n\nKemungkinan ada kesalahan data atau jaringan. Silakan cek kembali, atau hubungi Chuna untuk bantuan lebih lanjut.\n\nKeterangan : Sedang ada pemeliharaan\n📦 Produk  : ${state.data.product.product_name}\n🎯 Tujuan   : ${finalCustomerNoVal}\n\nJangan khawatir, Kakak bisa mencoba ulang kapan saja.\n\nChuna siap bantu! 😊💪`;
                              const custName = ctx.from?.first_name || "Pelanggan";
-                             const memberId = state.data?.memberId || `MBR-${ctx.from?.id}`;
-                             const regMember = members.find((m: any) => m.id === memberId || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
-                             const regName = regMember?.name || registeredUsers[ctx.from?.id]?.username || "-";
-                             const waInfo = await getCustomerWaDetails(regMember, ctx.from?.id);
+                             displayMsg = `❌ Maaf Kak, pengecekan untuk pesanan Anda gagal diproses.\n\nKemungkinan ada kesalahan data atau jaringan. Silakan cek kembali, atau hubungi Chuna untuk bantuan lebih lanjut.\n\nKeterangan : Sedang ada pemeliharaan\n📦 Produk  : ${state.data.product.product_name}\n🎯 Tujuan   : ${finalCustomerNoVal}\n\nJangan khawatir, Kakak bisa mencoba ulang kapan saja.\n\nChuna siap bantu! 😊💪`;
                              const photoLine = waInfo.waPhotoUrl ? `\n🖼️ Foto Profil WA: Terlampir` : ``;
                              const ownerMsg = `🚨 INFO PENTING DARI CHUNA! 🚨\nIP Digiflazz tidak dikenali!\nPelanggan mencoba memesan namun gagal karena error IP.\n👤 Pelanggan: ${custName} (${finalCustomerNoVal})\n🏷️ Nama Terdaftar: ${regName}\n📱 No. WhatsApp: ${waInfo.waPhone}\n💬 Profil WhatsApp: ${waInfo.waProfile}${photoLine}\n📦 Produk: ${state.data.product.product_name}\n⚠️ Error: ${errMsg}\n\nSegera cek dan update whitelist IP di dashboard Digiflazz Kakak!`;
                              for (const ownerId of db.owners) {
@@ -8983,12 +9390,17 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                          
                          let detail = selectedPkg.name;
                          
+                         const waInfo = await getCustomerWaDetails(member, ctx.from?.id);
+                         const waProfileName = waInfo?.waProfile && !isPhoneNumberOrEmpty(waInfo.waProfile) && waInfo.waProfile !== '-' ? waInfo.waProfile : undefined;
+                         
                          const billData = {
                              nama: nama,
                              no: state.data.customerNo,
                              layanan: state.data.product.product_name + ` - ${pLabel}`,
                              total: total,
-                             detail: detail
+                             detail: detail,
+                             waProfileName: waProfileName,
+                             waPhotoUrl: waInfo?.waPhotoUrl || null
                          };
                          const base64Data = Buffer.from(JSON.stringify(billData)).toString('base64');
                          const appUrl = process.env.APP_URL || "http://localhost:3000";
@@ -9177,14 +9589,15 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                     const result = await checkPascaBill(product.buyer_sku_code, finalCustomerNo);
                     if (result.status === 'Gagal') {
                          let errMsg = result.message || "";
-                         let displayMsg = `❌ Pengecekan Gagal:\n${errMsg}`;
+                         const memberId = state.data?.memberId || `MBR-${ctx.from?.id}`;
+                         const regMember = members.find((m: any) => m.id === memberId || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
+                         const regName = regMember?.name || registeredUsers[ctx.from?.id]?.username || "-";
+                         const waInfo = await getCustomerWaDetails(regMember, ctx.from?.id);
+                         const waProfileName = waInfo?.waProfile && !isPhoneNumberOrEmpty(waInfo.waProfile) && waInfo.waProfile !== '-' ? waInfo.waProfile : (state.data?.nama || ctx.from?.first_name || 'Pelanggan');
+                         let displayMsg = formatPascabayarNotFoundMessage(waProfileName);
                          if (errMsg.toLowerCase().includes("ip anda tidak kami kenali")) {
-                             displayMsg = `❌ Maaf Kak, pengecekan untuk pesanan Anda gagal diproses.\n\nKemungkinan ada kesalahan data atau jaringan. Silakan cek kembali, atau hubungi Chuna untuk bantuan lebih lanjut.\n\nKeterangan : Sedang ada pemeliharaan\n📦 Produk  : ${product.product_name}\n🎯 Tujuan   : ${finalCustomerNo}\n\nJangan khawatir, Kakak bisa mencoba ulang kapan saja.\n\nChuna siap bantu! 😊💪`;
                              const custName = ctx.from?.first_name || "Pelanggan";
-                             const memberId = state.data?.memberId || `MBR-${ctx.from?.id}`;
-                             const regMember = members.find((m: any) => m.id === memberId || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
-                             const regName = regMember?.name || registeredUsers[ctx.from?.id]?.username || "-";
-                             const waInfo = await getCustomerWaDetails(regMember, ctx.from?.id);
+                             displayMsg = `❌ Maaf Kak, pengecekan untuk pesanan Anda gagal diproses.\n\nKemungkinan ada kesalahan data atau jaringan. Silakan cek kembali, atau hubungi Chuna untuk bantuan lebih lanjut.\n\nKeterangan : Sedang ada pemeliharaan\n📦 Produk  : ${product.product_name}\n🎯 Tujuan   : ${finalCustomerNo}\n\nJangan khawatir, Kakak bisa mencoba ulang kapan saja.\n\nChuna siap bantu! 😊💪`;
                              const photoLine = waInfo.waPhotoUrl ? `\n🖼️ Foto Profil WA: Terlampir` : ``;
                              const ownerMsg = `🚨 INFO PENTING DARI CHUNA! 🚨\nIP Digiflazz tidak dikenali!\nPelanggan mencoba memesan namun gagal karena error IP.\n👤 Pelanggan: ${custName} (${finalCustomerNo})\n🏷️ Nama Terdaftar: ${regName}\n📱 No. WhatsApp: ${waInfo.waPhone}\n💬 Profil WhatsApp: ${waInfo.waProfile}${photoLine}\n📦 Produk: ${product.product_name}\n⚠️ Error: ${errMsg}\n\nSegera cek dan update whitelist IP di dashboard Digiflazz Kakak!`;
                              for (const ownerId of db.owners) {
@@ -9234,13 +9647,17 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                            }
                          }
                          
+                         const waInfo = await getCustomerWaDetails(member, ctx.from?.id);
+                         const waProfileName = waInfo?.waProfile && !isPhoneNumberOrEmpty(waInfo.waProfile) && waInfo.waProfile !== '-' ? waInfo.waProfile : undefined;
                          
                          const billData = {
                              nama: nama,
                              no: result.customer_no,
                              layanan: product.product_name,
                              total: total,
-                             detail: detail
+                             detail: detail,
+                             waProfileName: waProfileName,
+                             waPhotoUrl: waInfo?.waPhotoUrl || null
                          };
                          const base64Data = Buffer.from(JSON.stringify(billData)).toString('base64');
                          const appUrl = "http://localhost:3000";
@@ -10824,17 +11241,17 @@ E4 Store`,
                 waPhotoUrl = db.waProfilePhotos[keys[0]];
             }
         }
-        const total = req.query.total ? Number(req.query.total) : 103000;
+        const total = req.query.total ? Number(req.query.total) : 105000;
         const bayar = req.query.bayar ? Number(req.query.bayar) : 105000;
         const buffer = await generateDebtSettlementReceipt({
             nama: (req.query.nama as string) || 'Kak Reza',
             isLunasTotal: true,
-            products: [{ name: (req.query.item as string) || 'Telkomsel 100.000', price: total }],
+            products: [{ name: (req.query.item as string) || 'PLN 100.000', price: total }],
             totalDebt: total,
             dibayarkan: bayar,
             kembalian: Math.max(0, bayar - total),
-            tglUtang: (req.query.tglUtang as string) || '17 September 2026',
-            tglBayar: (req.query.tglBayar as string) || '19 September 2026',
+            tglUtang: (req.query.tglUtang as string) || '29 September 2026',
+            tglBayar: (req.query.tglBayar as string) || '29 September 2026',
             waPhotoUrl: waPhotoUrl
         });
         res.setHeader('Content-Type', 'image/png');

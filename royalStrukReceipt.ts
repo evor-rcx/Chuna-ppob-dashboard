@@ -508,6 +508,14 @@ ${holidayStr}
 Chuna - Asisten Imutmu siap bantu 24 jam!`;
 }
 
+export function getRoyalStrukCaption(isLunas: boolean): string {
+    if (isLunas) {
+        return "✅ Transaksi Berhasil! Nota pembelian Kakak sudah LUNAS ya, Kak. Detail notanya ada di gambar. Terima kasih sudah belanja di E4 Store! 🥰";
+    } else {
+        return "✅ Transaksi Berhasil! Nota pembelian Kakak sudah tercatat, tapi statusnya masih BELUM LUNAS ya, Kak. Detail notanya ada di gambar. Terima kasih sudah belanja di E4 Store! 🥰";
+    }
+}
+
 /**
  * Generate 1024x1024 Struk Pembayaran Royal E4 Store: Model Status TIDAK LUNAS
  * Menggunakan template baru Picsart_26-09-28_17-53-27-094.png
@@ -606,13 +614,16 @@ export async function generateRoyalTidakLunasReceipt(data: RoyalStrukData): Prom
 
     // Kolom Kanan (Right Aligned)
     ctx.textAlign = 'right';
+    const isStatusGagal = statusLower.includes('gagal') || statusLower.includes('fail');
+    const displayStatusLabel = isStatusGagal ? 'Status: GAGAL' : 'Status: TIDAK LUNAS';
+
     if (meta.isPln) {
         ctx.fillText(`Pembelian: ${meta.prodName}`, rightX, 374);
         ctx.fillText(`Nama Pel.: ${meta.namaPlg}`, rightX, 418);
-        ctx.fillText(`Gol/Daya: ${meta.golDaya}`, rightX, 462);
+        ctx.fillText(isStatusGagal ? displayStatusLabel : `Gol/Daya: ${meta.golDaya}`, rightX, 462);
     } else {
         ctx.fillText(`${meta.productLabel} ${meta.prodName}`, rightX, 374);
-        ctx.fillText(`Status: TIDAK LUNAS`, rightX, 418);
+        ctx.fillText(displayStatusLabel, rightX, 418);
     }
 
     // 5. SN / Token Text inside Cracked Glass Box (Divider 'SERIAL NUMBER / SN' sudah ada di mentahan)
@@ -621,7 +632,9 @@ export async function generateRoyalTidakLunasReceipt(data: RoyalStrukData): Prom
     ctx.font = 'bold 36px "DejaVu Serif", Georgia, serif';
     ctx.fillStyle = '#0a0a0a';
     ctx.shadowBlur = 0; // Clear shadow inside white box
-    const snDisplayText = meta.formattedToken || meta.rawSn || '0585-9340-6917-6385-5660';
+    const snDisplayText = isStatusGagal 
+        ? (meta.rawSn && meta.rawSn !== '-' ? meta.rawSn : 'TRANSAKSI GAGAL')
+        : (meta.formattedToken || meta.rawSn || '0585-9340-6917-6385-5660');
     ctx.fillText(snDisplayText, avatarCenterX, 586);
 
     // 7. TOTAL BAYAR
@@ -631,7 +644,10 @@ export async function generateRoyalTidakLunasReceipt(data: RoyalStrukData): Prom
     ctx.fillStyle = '#ffffff';
     ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
     ctx.shadowBlur = 6;
-    ctx.fillText(`TOTAL BAYAR: Rp ${totalBayar.toLocaleString('id-ID')}`, avatarCenterX, 696);
+    const totalLabel = isStatusGagal 
+        ? `TOTAL BAYAR: Rp ${totalBayar.toLocaleString('id-ID')} (REFUND)`
+        : `TOTAL BAYAR: Rp ${totalBayar.toLocaleString('id-ID')}`;
+    ctx.fillText(totalLabel, avatarCenterX, 696);
 
     // 8. Footer Info (Diturunkan agar bersih dan tidak menimpa tulisan mentahan 'Segerah di lunasi ya kak')
     ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
@@ -865,6 +881,8 @@ export async function generateRoyalLunasReceipt(data: RoyalStrukData): Promise<B
 export async function generateRoyalStrukReceipt(data: RoyalStrukData): Promise<Buffer> {
     const statusLower = (data.status || '').toLowerCase();
     const isTidakLunas = data.templateVariant === 'tidaklunas' || 
+                         statusLower.includes('gagal') || 
+                         statusLower.includes('fail') || 
                          statusLower.includes('tidak') || 
                          statusLower.includes('belum') || 
                          statusLower.includes('utang') || 

@@ -124,57 +124,37 @@ export function formatDebtSettlementMessage(data: DebtSettlementReceiptData): st
     const totalDebt = data.totalDebt || 0;
     const dibayarkan = data.dibayarkan || 0;
     const isLunas = data.isLunasTotal !== undefined ? (data.isLunasTotal && dibayarkan >= totalDebt) : (dibayarkan >= totalDebt);
-    const kembalian = isLunas ? Math.max(0, dibayarkan - totalDebt) : 0;
-    const sisaUtang = isLunas ? 0 : Math.max(0, totalDebt - dibayarkan);
+    const sisaUtang = data.sisaUtang !== undefined ? data.sisaUtang : (isLunas ? 0 : Math.max(0, totalDebt - dibayarkan));
 
-    let rincianProduk = "";
-    if (data.products && data.products.length > 0) {
-        data.products.forEach(p => {
-            const pName = (p.name || 'Produk').padEnd(30, ' ');
-            rincianProduk += `${pName} Rp ${p.price.toLocaleString('id-ID')}\n`;
-        });
-    } else {
-        rincianProduk = `Tagihan Produk                 Rp ${totalDebt.toLocaleString('id-ID')}\n`;
+    let rawName = (data.nama || 'Pelanggan').trim();
+    let cleanName = rawName;
+    const isOwner = rawName.toLowerCase().includes('owner');
+
+    if (cleanName.toLowerCase().startsWith('kak ')) {
+        cleanName = cleanName.substring(4).trim();
+    } else if (cleanName.toLowerCase().startsWith('kak')) {
+        cleanName = cleanName.substring(3).trim();
+    }
+    if (!cleanName || cleanName === '-' || cleanName === 'Kakak') {
+        cleanName = 'Pelanggan';
     }
 
-    const tglUtangStr = (data.tglUtang || '-').padEnd(30, ' ');
-    const tglBayarStr = data.tglBayar || '-';
+    const greetingName = isOwner ? 'Owner' : `Kak ${cleanName}`;
 
-    return `🎁 E4 STORE
-NOTA PEMBAYARAN ${isLunas ? 'LUNAS' : 'SEBAGIAN'}
-Atas Nama: ${data.nama}
+    if (isLunas) {
+        return `🎉 Horee! Lunas, ${greetingName}!
 
-========================================
-RINCIAN PRODUK
-========================================
-Nama Produk                     Harga
-${rincianProduk.trimEnd()}
+Utang Rp ${totalDebt.toLocaleString('id-ID')} sudah dinyatakan LUNAS. Pembayaran tercatat Rp ${dibayarkan.toLocaleString('id-ID')}. Detail nota ada di gambar ya, Kak. 💪🔥
 
-Total Utang: Rp ${totalDebt.toLocaleString('id-ID')}
+Terima kasih belanja di E4 Store! 🐾
+Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💖`;
+    } else {
+        return `⏳ ${greetingName}, pembayaran sebagian sudah diterima!
 
-========================================
-TANGGAL TRANSAKSI
-========================================
-TANGGAL UTANG:                  TANGGAL BAYAR:
-${tglUtangStr}  ${tglBayarStr}
+Utang awal Rp ${totalDebt.toLocaleString('id-ID')}. Sudah dibayar Rp ${dibayarkan.toLocaleString('id-ID')}. Sisa Rp ${sisaUtang.toLocaleString('id-ID')} lagi ya, Kak. Rincian ada di gambar.
 
-========================================
-RINCIAN PEMBAYARAN
-========================================
-• Total Utang:                  Rp ${totalDebt.toLocaleString('id-ID')}
-• Dibayarkan:                   Rp ${dibayarkan.toLocaleString('id-ID')}
-${isLunas ? `• Kembalian:                    Rp ${kembalian.toLocaleString('id-ID')}` : `• Sisa Utang:                   Rp ${sisaUtang.toLocaleString('id-ID')}`}
-
-========================================
-${isLunas ? 'STATUS LUNAS' : `STATUS BELUM LUNAS (Kurang Rp ${sisaUtang.toLocaleString('id-ID')})`}
-========================================
-
-Terima kasih sudah percaya sama kami.
-Jangan lupa, Chuna - Asisten Imutmu siap bantu 24 jam!
-kalau ada yang mau ditanyain lagi ya, Kak.
-
-Terimakasih telah berbelanja di E4 Store!
-Semoga produknya bermanfaat dan kami tunggu kunjungan berikutnya!`;
+Chuna tunggu pelunasannya! 😊💖`;
+    }
 }
 
 /**

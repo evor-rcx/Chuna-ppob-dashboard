@@ -46,22 +46,27 @@ function getInitials(name: string): string {
 /**
  * Format Teks Pesan WhatsApp Konfirmasi Pembelian Customer
  */
+export function resolveCustomerGreetingName(rawName?: string): { greetingName: string; targetSuffix: string } {
+    let clean = (rawName || 'Pelanggan').trim();
+    const isOwner = clean.toLowerCase().includes('owner');
+
+    if (clean.toLowerCase().startsWith('kak ')) {
+        clean = clean.substring(4).trim();
+    } else if (clean.toLowerCase().startsWith('kak')) {
+        clean = clean.substring(3).trim();
+    }
+    if (!clean || clean === '-' || clean === 'Kakak' || clean.includes('*')) {
+        clean = 'Pelanggan';
+    }
+
+    const greetingName = isOwner ? 'Kak Owner' : `Kak ${clean}`;
+    const targetSuffix = isOwner ? 'Owner' : clean;
+
+    return { greetingName, targetSuffix };
+}
+
 export function formatKonfirmasiMessage(data: KonfirmasiData): string {
-    let rawName = (data.nama || 'Pelanggan').trim();
-    let cleanName = rawName;
-    const isOwner = rawName.toLowerCase().includes('owner');
-
-    if (cleanName.toLowerCase().startsWith('kak ')) {
-        cleanName = cleanName.substring(4).trim();
-    } else if (cleanName.toLowerCase().startsWith('kak')) {
-        cleanName = cleanName.substring(3).trim();
-    }
-    if (!cleanName || cleanName === '-' || cleanName === 'Kakak') {
-        cleanName = 'Pelanggan';
-    }
-
-    const greetingName = isOwner ? 'Selamat datang Owner' : `Kak ${cleanName}`;
-    const targetSuffix = isOwner ? 'Owner' : cleanName;
+    const { greetingName, targetSuffix } = resolveCustomerGreetingName(data.nama);
     const produk = data.layanan || 'Free Fire 70 Diamond';
     const tujuan = data.nomor || '-';
 
@@ -72,6 +77,177 @@ Akan update otomatis ya, Kak. Mohon ditunggu.
 🎯 Tujuan: ${tujuan} (${targetSuffix})
 
 Chuna siap bantu! 😊`;
+}
+
+/**
+ * ✅ SUKSES
+ * Format caption saat transaksi berhasil diproses
+ */
+export function formatKonfirmasiSuccessCaption(data: { nama?: string }): string {
+    const { greetingName } = resolveCustomerGreetingName(data.nama);
+
+    return `🎉 Horee! Sukses, ${greetingName}!
+
+Pesanan sudah diproses otomatis oleh E4 Store. 💪🔥
+
+Terima kasih telah berbelanja di E4 Store! 🐾
+Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💖`;
+}
+
+export type GagalCategory = 
+    | 'tujuan_salah' 
+    | 'server_ip' 
+    | 'saldo_kurang' 
+    | 'cut_off' 
+    | 'refund_lengkap';
+
+export function detectGagalCategory(rawError?: string): GagalCategory {
+    const err = (rawError || '').toLowerCase();
+    
+    // 1. Nomor/ID Tujuan Salah
+    if (
+        err.includes('tujuan salah') ||
+        err.includes('nomor salah') ||
+        err.includes('id salah') ||
+        err.includes('id game') ||
+        err.includes('id pln') ||
+        err.includes('nomor meter salah') ||
+        err.includes('nomor tidak valid') ||
+        err.includes('invalid customer') ||
+        err.includes('customer no invalid') ||
+        err.includes('id tidak ditemukan') ||
+        err.includes('tidak terdaftar') ||
+        err.includes('wrong number') ||
+        err.includes('invalid number') ||
+        err.includes('nomor tujuan')
+    ) {
+        return 'tujuan_salah';
+    }
+
+    // 2. IP Berubah / Ada Perbaikan Server
+    if (
+        err.includes('ip anda tidak kami kenali') ||
+        err.includes('ip') ||
+        err.includes('pemeliharaan') ||
+        err.includes('perbaikan server') ||
+        err.includes('maintenance') ||
+        err.includes('rto') ||
+        err.includes('timeout') ||
+        err.includes('koneksi') ||
+        err.includes('server pusat')
+    ) {
+        return 'server_ip';
+    }
+
+    // 3. Saldo Digiflazz Kurang (Bilang Produk Kosong)
+    if (
+        err.includes('saldo') ||
+        err.includes('balance') ||
+        err.includes('saldo seller') ||
+        err.includes('saldo tidak cukup') ||
+        err.includes('produk kosong') ||
+        err.includes('out of stock') ||
+        err.includes('stok kosong') ||
+        err.includes('habis')
+    ) {
+        return 'saldo_kurang';
+    }
+
+    // 4. Cut Off / Produk Tutup Sementara
+    if (
+        err.includes('cut off') ||
+        err.includes('cutoff') ||
+        err.includes('tutup') ||
+        err.includes('gangguan') ||
+        err.includes('jadwal operasional') ||
+        err.includes('closed') ||
+        err.includes('offline')
+    ) {
+        return 'cut_off';
+    }
+
+    // 5. Default: Versi Lengkap dengan Info Refund
+    return 'refund_lengkap';
+}
+
+/**
+ * ❌ GAGAL
+ * Format caption edit saat pesanan gagal diproses sesuai 5 kategori
+ */
+export function formatKonfirmasiFailedCaption(params: {
+    nama?: string;
+    product?: string;
+    target?: string;
+    rawError?: string;
+    price?: number;
+    categoryOverride?: GagalCategory;
+}): string {
+    const { greetingName, targetSuffix } = resolveCustomerGreetingName(params.nama);
+    const produk = params.product || 'Free Fire 70 Diamond';
+    const tujuan = params.target || '-';
+    const category = params.categoryOverride || detectGagalCategory(params.rawError);
+
+    switch (category) {
+        case 'tujuan_salah':
+            return `❌ Aduh, ${greetingName}, pesanan belum bisa diproses nih.
+
+📦 Produk: ${produk}
+🎯 Tujuan: ${tujuan} (${targetSuffix})
+
+Sepertinya nomor tujuan / ID game / ID PLN yang dimasukkan kurang tepat ya, Kak. Coba dicek lagi, pastikan tidak ada angka yang tertukar atau kurang. Kalau sudah benar, silakan order ulang ya, Kak.
+
+Chuna siap bantu! 😊`;
+
+        case 'server_ip':
+            return `❌ Maaf ya ${greetingName}, pesanan belum berhasil diproses.
+
+📦 Produk: ${produk}
+🎯 Tujuan: ${tujuan} (${targetSuffix})
+
+Saat ini sedang ada perbaikan server dari pusat, jadi transaksi belum bisa dilanjutkan. Mohon tunggu sampai server kembali normal ya, Kak. Nanti bisa dicoba order ulang.
+
+Chuna siap bantu! 😊`;
+
+        case 'saldo_kurang':
+            return `❌ Maaf ya ${greetingName}, pesanan belum bisa diproses.
+
+📦 Produk: ${produk}
+🎯 Tujuan: ${tujuan} (${targetSuffix})
+
+Produk ini sedang kosong di pusat, jadi belum bisa diproses saat ini. Silakan coba beberapa saat lagi atau pilih nominal lain ya, Kak.
+
+Chuna siap bantu! 😊`;
+
+        case 'cut_off':
+            return `❌ Maaf ya ${greetingName}, pesanan belum bisa diproses.
+
+📦 Produk: ${produk}
+🎯 Tujuan: ${tujuan} (${targetSuffix})
+
+Produk ini sedang tutup sementara dari pusat, jadi belum bisa diproses. Silakan dicoba lagi nanti ya, Kak. Nanti Chuna kabari kalau sudah buka.
+
+Chuna siap bantu! 😊`;
+
+        case 'refund_lengkap':
+        default:
+            const raw = params.rawError || 'Terjadi kendala pada sistem pusat';
+            const cleanReason = raw.toLowerCase().includes('ip anda')
+                ? 'Sedang ada pemeliharaan server pusat'
+                : (raw.toLowerCase().includes('saldo') || raw.toLowerCase().includes('balance') ? 'Produk sedang kosong' : raw);
+            const nominalStr = params.price ? Number(params.price).toLocaleString('id-ID') : '0';
+
+            return `❌ Maaf ya ${greetingName}, transaksi belum berhasil diproses.
+
+📌 Keterangan: ${cleanReason}
+📦 Produk: ${produk}
+🎯 Tujuan: ${tujuan} (${targetSuffix})
+
+Kabar baiknya, dana Kakak sudah kami proses:
+✅ Saldo Rp ${nominalStr} telah dikembalikan ke akun Kakak.
+
+Silakan coba lagi kapan saja, Kak.
+Chuna siap bantu! 😊💪`;
+    }
 }
 
 /**

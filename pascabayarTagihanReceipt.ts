@@ -30,6 +30,10 @@ export interface PascabayarTagihanData {
     kode?: string;
     waPhotoUrl?: string | null;
     avatarBuffer?: Buffer | null;
+    customerDisplayName?: string;
+    waProfileName?: string;
+    senderName?: string;
+    isNotFound?: boolean;
 }
 
 let cachedTemplateImg: Image | null = null;
@@ -64,115 +68,67 @@ function getInitials(name: string): string {
 }
 
 /**
- * Format Text Pesan WhatsApp / Telegram untuk Cek Tagihan Pascabayar
+ * Format Text Pesan WhatsApp / Telegram untuk Cek Tagihan Pascabayar (Ditemukan)
  */
 export function formatPascabayarTagihanMessage(data: PascabayarTagihanData): string {
-    const nama = data.nama || data.customer_name || data.namaPlg || 'A*D* *A*A*U*D*N';
-    const nomor = data.nomor || data.no || data.customer_no || data.target || '234000182643';
-    
-    let layanan = data.layanan || data.product || 'Pln Pascabayar';
-    if (typeof layanan === 'object' && layanan) layanan = layanan.product_name || 'Pln Pascabayar';
-    if (typeof layanan === 'string' && layanan.includes(' - ')) {
-        layanan = layanan.split(' - ')[0].trim();
+    let rawName = (
+        data.waProfileName || 
+        (data as any).waProfile || 
+        (data.customerDisplayName && !data.customerDisplayName.includes('*') ? data.customerDisplayName : '') || 
+        data.senderName || 
+        (data.nama && !data.nama.includes('*') ? data.nama : '') || 
+        'Pelanggan'
+    ).trim();
+    let cleanName = rawName;
+    const isOwner = rawName.toLowerCase().includes('owner');
+
+    if (cleanName.toLowerCase().startsWith('kak ')) {
+        cleanName = cleanName.substring(4).trim();
+    } else if (cleanName.toLowerCase().startsWith('kak')) {
+        cleanName = cleanName.substring(3).trim();
+    }
+    if (!cleanName || cleanName === '-' || cleanName === 'Kakak' || cleanName.includes('*')) {
+        cleanName = 'Pelanggan';
     }
 
-    const total = Number(data.total || data.price || data.tagihan || data.selling_price || 119283);
+    const greetingName = isOwner ? 'Kak Owner' : `Kak ${cleanName}`;
 
-    // Lembar, Bulan, Meter, Tarif, Daya
-    let lembar = data.lembar || data.desc?.lembar_tagihan || '1';
-    let bulan = data.bulan || data.periode || '202607';
-    let meter = data.meter || '';
-    let tarif = data.tarif || data.desc?.tarif || 'R1M';
-    let daya = data.daya || data.desc?.daya || '900';
+    return `Tagihan ${greetingName} ditemukan!
+Rincian lengkapnya sudah Chuna lampirkan di gambar ya. Silakan lanjutkan pembayaran.
+Terima kasih telah berbelanja di E4 Store! 🐾
+Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💖`;
+}
 
-    if (!meter && data.desc?.detail && Array.isArray(data.desc.detail) && data.desc.detail.length > 0) {
-        const first = data.desc.detail[0];
-        if (first.periode) bulan = first.periode;
-        if (first.meter_awal && first.meter_akhir) {
-            meter = `${first.meter_awal} - ${first.meter_akhir}`;
-        }
+/**
+ * Format Text Pesan WhatsApp / Telegram saat Tagihan Tidak Ditemukan
+ */
+export function formatPascabayarNotFoundMessage(dataOrName?: any): string {
+    let rawName = typeof dataOrName === 'string'
+        ? dataOrName
+        : (
+            dataOrName?.waProfileName || 
+            dataOrName?.waProfile || 
+            (dataOrName?.customerDisplayName && !dataOrName.customerDisplayName.includes('*') ? dataOrName.customerDisplayName : '') || 
+            dataOrName?.senderName || 
+            (dataOrName?.nama && !dataOrName.nama.includes('*') ? dataOrName.nama : '') || 
+            'Pelanggan'
+        );
+    let cleanName = (rawName || 'Pelanggan').trim();
+    const isOwner = cleanName.toLowerCase().includes('owner');
+
+    if (cleanName.toLowerCase().startsWith('kak ')) {
+        cleanName = cleanName.substring(4).trim();
+    } else if (cleanName.toLowerCase().startsWith('kak')) {
+        cleanName = cleanName.substring(3).trim();
     }
-    if (!meter) meter = '00007792 - 00007870';
-
-    if (typeof data.detail === 'string') {
-        if (!tarif) {
-            const m = data.detail.match(/Tarif[:\s]+([^\n\r]+)/i);
-            if (m) tarif = m[1].replace(/^[⚡\s]+/, '').trim();
-        }
-        if (!daya) {
-            const m = data.detail.match(/Daya[:\s]+([^\n\r]+)/i);
-            if (m) daya = m[1].replace(/^[📊\s]+/, '').trim();
-        }
-        if (!lembar || lembar === '1') {
-            const m = data.detail.match(/Lembar[:\s]+([^\n\r]+)/i);
-            if (m) lembar = m[1].replace(/^[📄\s]+/, '').trim();
-        }
-        if (!bulan || bulan === '202607') {
-            const m = data.detail.match(/Bulan\s*(\d*[:\s]+)?([^\n\r]+)/i);
-            if (m) bulan = (m[2] || m[1] || '').replace(/^[📆\s]+/, '').trim();
-        }
-        if (!meter || meter === '00007792 - 00007870') {
-            const m = data.detail.match(/Meter[:\s]+([^\n\r]+)/i);
-            if (m) meter = m[1].replace(/^[🔢\s]+/, '').trim();
-        }
+    if (!cleanName || cleanName === '-' || cleanName === 'Kakak' || cleanName.includes('*')) {
+        cleanName = 'Pelanggan';
     }
 
-    // Tanggal Cetak & Hari Nasional
-    const txDate = data.date ? new Date(data.date) : new Date();
-    const dateStr = txDate.toLocaleDateString('id-ID', {
-        timeZone: 'Asia/Makassar',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric'
-    });
-    const timeStr = txDate.toLocaleTimeString('id-ID', {
-        timeZone: 'Asia/Makassar',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false
-    });
-    const formattedDate = `${dateStr} ${timeStr} WITA`;
+    const greetingName = isOwner ? 'Kak Owner' : `Kak ${cleanName}`;
 
-    const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-    const { year, month, day } = getWitaDateComponents(txDate);
-    const witaDate = new Date(year, month - 1, day);
-    const dayName = days[witaDate.getDay()];
-
-    const holiday = getHolidayInfo(txDate);
-    let calText = `${dayName}, Hari Besar Nasional`;
-    if (holiday) {
-        if (holiday.isToday) {
-            calText = `${dayName}, ${holiday.name} (Hari Ini)`;
-        } else {
-            calText = `${dayName}, ${holiday.name} (${holiday.diffDays} hari lagi)`;
-        }
-    } else {
-        calText = `${dayName}, Hari Kemerdekaan RI (29 hari lagi)`;
-    }
-
-    const kode = data.kode || '#E4';
-
-    return `E4 STORE
-Cek Tagihan
-
-Tagihan Ditemukan!
-
-----------------------------------------
-Nama                         ${nama}
-Nomor                        ${nomor}
-Layanan                      ${layanan}
-----------------------------------------
-
-TOTAL BAYAR    Lembar ${lembar}      Rp ${total.toLocaleString('id-ID')}
-Bulan 1 : ${bulan}             Meter: ${meter}
-Tarif: ${tarif}                   Daya: ${daya}
-
-Silahkan Lanjutkan Pembayaran
-
-----------------------------------------
-Terima kasih telah berbelanja di E4 Store!
-Cetak: ${formattedDate} | Kode: ${kode}
-${calText}`;
+    return `❌ Yah, tagihan ${greetingName} tidak ditemukan.
+Pastikan ID Pelanggan / Nomor Meter sudah benar`;
 }
 
 /**
@@ -453,56 +409,76 @@ export async function generatePascabayarTagihanReceipt(data: PascabayarTagihanDa
         }
     }
 
-    // "TOTAL BAYAR" (Extra Bold Black)
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#000000';
-    ctx.font = '900 42px "Liberation Sans", "DejaVu Sans", Arial, sans-serif';
-    ctx.fillText('TOTAL BAYAR', leftX, 584);
+    if (data.isNotFound) {
+        // Status Tagihan Tidak Ditemukan
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#dc2626'; // Red 600
+        ctx.font = '900 42px "Liberation Sans", "DejaVu Sans", Arial, sans-serif';
+        ctx.fillText('TAGIHAN TIDAK DITEMUKAN', width / 2, 600);
 
-    // "Lembar 1"
-    ctx.fillStyle = '#0f172a';
-    ctx.font = '600 32px "Liberation Sans", "DejaVu Sans", Arial, sans-serif';
-    ctx.fillText(`Lembar ${lembarVal}`, 480, 584);
+        ctx.fillStyle = '#334155'; // Slate 700
+        ctx.font = 'bold 28px "Liberation Sans", "DejaVu Sans", Arial, sans-serif';
+        ctx.fillText('Pastikan ID Pelanggan / Nomor Meter sudah benar,', width / 2, 655);
+        ctx.fillText('atau tagihan untuk periode ini belum terbit / sudah lunas.', width / 2, 695);
 
-    // "Rp 119.283" (Extra Bold Black)
-    ctx.textAlign = 'right';
-    ctx.fillStyle = '#000000';
-    ctx.font = '900 48px "Liberation Sans", "DejaVu Sans", Arial, sans-serif';
-    ctx.fillText(totalStr, rightX, 584);
+        ctx.fillStyle = '#b91c1c';
+        ctx.font = 'bold 31px "Liberation Sans", "DejaVu Sans", Arial, sans-serif';
+        ctx.fillText('❌ Silakan Periksa Kembali Nomor Tujuan', width / 2, 755);
 
-    // Row 5: Bulan & Meter
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#0f172a';
-    ctx.font = 'bold 31px "Liberation Sans", "DejaVu Sans", Arial, sans-serif';
-    ctx.fillText(`Bulan 1 : ${bulanVal}`, leftX, 646);
+        // Pembatas Dekoratif Bawah
+        drawDecorativeDivider(828);
+    } else {
+        // "TOTAL BAYAR" (Extra Bold Black)
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#000000';
+        ctx.font = '900 42px "Liberation Sans", "DejaVu Sans", Arial, sans-serif';
+        ctx.fillText('TOTAL BAYAR', leftX, 584);
 
-    ctx.textAlign = 'right';
-    ctx.fillText(`Meter: ${meterVal}`, rightX, 646);
+        // "Lembar 1"
+        ctx.fillStyle = '#0f172a';
+        ctx.font = '600 32px "Liberation Sans", "DejaVu Sans", Arial, sans-serif';
+        ctx.fillText(`Lembar ${lembarVal}`, 480, 584);
 
-    // Row 6: Tarif & Daya
-    ctx.textAlign = 'left';
-    ctx.fillText(`Tarif: ${tarifVal}`, leftX, 704);
+        // "Rp 119.283" (Extra Bold Black)
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#000000';
+        ctx.font = '900 48px "Liberation Sans", "DejaVu Sans", Arial, sans-serif';
+        ctx.fillText(totalStr, rightX, 584);
 
-    ctx.textAlign = 'right';
-    ctx.fillText(`Daya: ${dayaVal}`, rightX, 704);
+        // Row 5: Bulan & Meter
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 31px "Liberation Sans", "DejaVu Sans", Arial, sans-serif';
+        ctx.fillText(`Bulan 1 : ${bulanVal}`, leftX, 646);
 
-    // Row 7: "Silahkan Lanjutkan Pembayaran" + Vector Hand Cursor
-    const actionText = 'Silahkan Lanjutkan Pembayaran';
-    ctx.font = 'bold 35px "Liberation Sans", "DejaVu Sans", Arial, sans-serif';
-    const textWidth = ctx.measureText(actionText).width;
-    const handWidth = 36;
-    const totalRowWidth = textWidth + 14 + handWidth;
-    const startRowX = (width - totalRowWidth) / 2;
+        ctx.textAlign = 'right';
+        ctx.fillText(`Meter: ${meterVal}`, rightX, 646);
 
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#000000';
-    ctx.fillText(actionText, startRowX, 756);
+        // Row 6: Tarif & Daya
+        ctx.textAlign = 'left';
+        ctx.fillText(`Tarif: ${tarifVal}`, leftX, 704);
 
-    // Gambar icon tangan cursor persis di samping kanan teks
-    drawPointerCursor(ctx, startRowX + textWidth + 24, 756, 1.25);
+        ctx.textAlign = 'right';
+        ctx.fillText(`Daya: ${dayaVal}`, rightX, 704);
 
-    // Pembatas Dekoratif Bawah
-    drawDecorativeDivider(828);
+        // Row 7: "Silahkan Lanjutkan Pembayaran" + Vector Hand Cursor
+        const actionText = 'Silahkan Lanjutkan Pembayaran';
+        ctx.font = 'bold 35px "Liberation Sans", "DejaVu Sans", Arial, sans-serif';
+        const textWidth = ctx.measureText(actionText).width;
+        const handWidth = 36;
+        const totalRowWidth = textWidth + 14 + handWidth;
+        const startRowX = (width - totalRowWidth) / 2;
+
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#000000';
+        ctx.fillText(actionText, startRowX, 756);
+
+        // Gambar icon tangan cursor persis di samping kanan teks
+        drawPointerCursor(ctx, startRowX + textWidth + 24, 756, 1.25);
+
+        // Pembatas Dekoratif Bawah
+        drawDecorativeDivider(828);
+    }
 
     // 5. Footer Resmi
     const txDate = data.date ? new Date(data.date) : new Date();

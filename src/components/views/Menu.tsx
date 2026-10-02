@@ -17,20 +17,96 @@ export function Menu({ onNavigate }: MenuProps) {
 
   // Live Nota Model Preview State
   const [activeNotaTab, setActiveNotaTab] = useState<'tagihan-pasca' | 'konfirmasi' | 'royal-tidaklunas' | 'royal' | 'tagihan' | 'lunas' | 'angsuran'>('tagihan-pasca');
+  const [pascaVariant, setPascaVariant] = useState<'ditemukan' | 'tidak-ditemukan'>('ditemukan');
+  const [konfirmasiStatusTab, setKonfirmasiStatusTab] = useState<'pending' | 'sukses' | 'gagal-tujuan' | 'gagal-ip' | 'gagal-saldo' | 'gagal-cutoff' | 'gagal-refund'>('pending');
   const [royalCategory, setRoyalCategory] = useState<'game' | 'pln-token' | 'pln-pasca' | 'pulsa' | 'ewallet'>('pln-token');
   const [imageTimestamp, setImageTimestamp] = useState<number>(Date.now());
   const [isZoomed, setIsZoomed] = useState<boolean>(false);
   const [copiedText, setCopiedText] = useState<boolean>(false);
 
-  const tagihanPascaCaption = `E4 STORE\nCek Tagihan\n\nTagihan Ditemukan!\n\n----------------------------------------\nNama                         A*D* *A*A*U*D*N\nNomor                        234000182643\nLayanan                      Pln Pascabayar\n----------------------------------------\n\nTOTAL BAYAR    Lembar 1      Rp 119.283\nBulan 1 : 202607             Meter: 00007792 - 00007870\nTarif: R1M                   Daya: 900\n\nSilahkan Lanjutkan Pembayaran\n\n----------------------------------------\nTerima kasih telah berbelanja di E4 Store!\nCetak: 19/07/2026 16:59 WITA | Kode: #E4\nMinggu, Hari Kemerdekaan RI (29 hari lagi)`;
+  const tagihanPascaDitemukanCaption = `Tagihan Kak Samsul ditemukan!
+Rincian lengkapnya sudah Chuna lampirkan di gambar ya. Silakan lanjutkan pembayaran.
+Terima kasih telah berbelanja di E4 Store! 🐾
+Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💖`;
 
-  const konfirmasiCaption = `⏳ Kak Koi, pesanan sedang diproses sistem pusat E4 Store.
+  const tagihanPascaTidakDitemukanCaption = `❌ Yah, tagihan Kak Samsul tidak ditemukan.
+Pastikan ID Pelanggan / Nomor Meter sudah benar`;
+
+  const tagihanPascaCaption = pascaVariant === 'ditemukan'
+    ? tagihanPascaDitemukanCaption
+    : tagihanPascaTidakDitemukanCaption;
+
+  const konfirmasiPendingCaption = `⏳ Kak Koi, pesanan sedang diproses sistem pusat E4 Store.
 Akan update otomatis ya, Kak. Mohon ditunggu.
 
 📦 Produk: Free Fire 70 Diamond
-🎯 Tujuan: 1321 (Koi)
+🎯 Tujuan: 121 (Koi)
 
 Chuna siap bantu! 😊`;
+
+  const konfirmasiSuksesCaption = `🎉 Horee! Sukses, Kak Koi!
+
+Pesanan sudah diproses otomatis oleh E4 Store. 💪🔥
+
+Terima kasih telah berbelanja di E4 Store! 🐾
+Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💖`;
+
+  const konfirmasiGagalTujuanCaption = `❌ Aduh, Kak Koi, pesanan belum bisa diproses nih.
+
+📦 Produk: Free Fire 70 Diamond
+🎯 Tujuan: 121 (Koi)
+
+Sepertinya nomor tujuan / ID game / ID PLN yang dimasukkan kurang tepat ya, Kak. Coba dicek lagi, pastikan tidak ada angka yang tertukar atau kurang. Kalau sudah benar, silakan order ulang ya, Kak.
+
+Chuna siap bantu! 😊`;
+
+  const konfirmasiGagalIpCaption = `❌ Maaf ya Kak Koi, pesanan belum berhasil diproses.
+
+📦 Produk: Free Fire 70 Diamond
+🎯 Tujuan: 121 (Koi)
+
+Saat ini sedang ada perbaikan server dari pusat, jadi transaksi belum bisa dilanjutkan. Mohon tunggu sampai server kembali normal ya, Kak. Nanti bisa dicoba order ulang.
+
+Chuna siap bantu! 😊`;
+
+  const konfirmasiGagalSaldoCaption = `❌ Maaf ya Kak Koi, pesanan belum bisa diproses.
+
+📦 Produk: Free Fire 70 Diamond
+🎯 Tujuan: 121 (Koi)
+
+Produk ini sedang kosong di pusat, jadi belum bisa diproses saat ini. Silakan coba beberapa saat lagi atau pilih nominal lain ya, Kak.
+
+Chuna siap bantu! 😊`;
+
+  const konfirmasiGagalCutoffCaption = `❌ Maaf ya Kak Koi, pesanan belum bisa diproses.
+
+📦 Produk: Free Fire 70 Diamond
+🎯 Tujuan: 121 (Koi)
+
+Produk ini sedang tutup sementara dari pusat, jadi belum bisa diproses. Silakan dicoba lagi nanti ya, Kak. Nanti Chuna kabari kalau sudah buka.
+
+Chuna siap bantu! 😊`;
+
+  const konfirmasiGagalRefundCaption = `❌ Maaf ya Kak Koi, transaksi belum berhasil diproses.
+
+📌 Keterangan: Terjadi kendala teknis dari pusat
+📦 Produk: Free Fire 70 Diamond
+🎯 Tujuan: 121 (Koi)
+
+Kabar baiknya, dana Kakak sudah kami proses:
+✅ Saldo Rp 11.000 telah dikembalikan ke akun Kakak.
+
+Silakan coba lagi kapan saja, Kak.
+Chuna siap bantu! 😊💪`;
+
+  const konfirmasiCaption = 
+    konfirmasiStatusTab === 'pending' ? konfirmasiPendingCaption :
+    konfirmasiStatusTab === 'sukses' ? konfirmasiSuksesCaption :
+    konfirmasiStatusTab === 'gagal-tujuan' ? konfirmasiGagalTujuanCaption :
+    konfirmasiStatusTab === 'gagal-ip' ? konfirmasiGagalIpCaption :
+    konfirmasiStatusTab === 'gagal-saldo' ? konfirmasiGagalSaldoCaption :
+    konfirmasiStatusTab === 'gagal-cutoff' ? konfirmasiGagalCutoffCaption :
+    konfirmasiGagalRefundCaption;
 
   const royalGameCaption = `E4 STORE\nStruk Pembayaran\n\nStatus: SUKSES (LUNAS)\n\n----------------------------------------\nNama: Lio\nStatus: Lunas\nMetode: CASH\nItem Game: Magic Chess Go Go 5 Diamonds\n\nID Tujuan Game: 836351001\nOrder ID: PRE-1790198576914\nTanggal: 24/09/2026 05:23 WITA\n----------------------------------------\n\nSERIAL NUMBER / SN\n@41 . RefId: GTX-260924XD2H4IF01V\n\n----------------------------------------\nTOTAL BAYAR: Rp 3.000\n----------------------------------------\n\nTerima kasih telah berbelanja di E4 Store!\nCetak: 24/09/2026 05:23 WITA | Kode: #PRE-179\nKamis, 24 September 2026 - Hari Tani Nasional (Hari Ini)\nChuna - Asisten Imutmu siap bantu 24 jam!`;
 
@@ -50,29 +126,27 @@ Chuna siap bantu! 😊`;
 
   const royalTidakLunasEwalletCaption = `E4 STORE\nStruk Pembayaran\n\nStatus: SUKSES (TIDAK LUNAS)\n\n----------------------------------------\nNama                         Lio\nNomor Akun                   085822094851\nOrder ID                     PRE-1788868200773\nTanggal                      08/09/2026 19:50 WITA\nTop Up                       DANA 100.000\nStatus                       TIDAK LUNAS\n----------------------------------------\n\nSerial nomber / SN                   @41 . RefId: DANA-260928XD2H4IF01V\n\n----------------------------------------\nTOTAL BAYAR                  Rp 102.000\n----------------------------------------\n\nTerima kasih telah berbelanja di E4 Store!\nCetak: 08/09/2026 19:50 WITA | Kode: #PRE-17\nSelasa, Hari Raya Natal (108 hari lagi)\n\n----------------------------------------\nChuna - Asisten Imutmu siap bantu 24 jam!`;
 
-  const royalTidakLunasCaption = royalCategory === 'game'
-    ? royalTidakLunasGameCaption
-    : royalCategory === 'pulsa'
-    ? royalTidakLunasPulsaCaption
-    : royalCategory === 'ewallet'
-    ? royalTidakLunasEwalletCaption
-    : royalTidakLunasPlnCaption;
+  const royalLunasCaption = `✅ Transaksi Berhasil! Nota pembelian Kakak sudah LUNAS ya, Kak. Detail notanya ada di gambar. Terima kasih sudah belanja di E4 Store! 🥰`;
 
-  const royalCaption = royalCategory === 'pln-pasca'
-    ? royalPlnPascaCaption
-    : royalCategory === 'pln-token' 
-    ? royalPlnTokenCaption 
-    : royalCategory === 'pulsa' 
-    ? royalPulsaCaption 
-    : royalCategory === 'ewallet' 
-    ? royalEwalletCaption 
-    : royalGameCaption;
+  const royalBelumLunasCaption = `✅ Transaksi Berhasil! Nota pembelian Kakak sudah tercatat, tapi statusnya masih BELUM LUNAS ya, Kak. Detail notanya ada di gambar. Terima kasih sudah belanja di E4 Store! 🥰`;
+
+  const royalTidakLunasCaption = royalBelumLunasCaption;
+  const royalCaption = royalLunasCaption;
 
   const tagihanCaption = `E4 Store\nBUKTI CATATAN TAGIHAN\nStatus: BELUM LUNAS\n\n----------------------------------------\nCustomer: Padil\nTanggal: 27/08/2026\n----------------------------------------\n\nItem:\n- Free Fire 70 Diamond: Rp 11.000\n- Free Fire Level Up Pass - Level 15: Rp 1.000\n\nTOTAL UTANG: Rp 12.000\n----------------------------------------\n\n"Tolong segera diselesaikan ya kak, terima kasih"\n\n----------------------------------------\nNo. HP: 085822094851`;
 
-  const lunasCaption = `🎁 E4 STORE\nNOTA PEMBAYARAN LUNAS\nAtas Nama: Kak Reza\n\n========================================\nRINCIAN PRODUK\n========================================\nNama Produk                     Harga\nTelkomsel 100.000               Rp 103.000\n\nTotal Utang: Rp 103.000\n\n========================================\nTANGGAL TRANSAKSI\n========================================\nTANGGAL UTANG:                  TANGGAL BAYAR:\n17 September 2026               19 September 2026\n\n========================================\nRINCIAN PEMBAYARAN\n========================================\n• Total Utang:                  Rp 103.000\n• Dibayarkan:                   Rp 105.000\n• Kembalian:                    Rp 2.000\n\n========================================\nSTATUS LUNAS\n========================================\n\nTerima kasih sudah percaya sama kami.\nJangan lupa, Chuna - Asisten Imutmu siap bantu 24 jam!\nkalau ada yang mau ditanyain lagi ya, Kak.\n\nTerimakasih telah berbelanja di E4 Store!\nSemoga produknya bermanfaat dan kami tunggu kunjungan berikutnya!`;
+  const lunasCaption = `🎉 Horee! Lunas, Kak Reza!
 
-  const angsuranCaption = `🎁 E4 STORE\nNOTA PEMBAYARAN SEBAGIAN\nAtas Nama: Kak Reza\n\n========================================\nRINCIAN PRODUK\n========================================\nNama Produk                     Harga\nTelkomsel 10.000                Rp 10.000\n\nTotal Utang: Rp 10.000\n\n========================================\nTANGGAL TRANSAKSI\n========================================\nTANGGAL UTANG:                  TANGGAL BAYAR:\n17 September 2026               19 September 2026\n\n========================================\nRINCIAN PEMBAYARAN\n========================================\n• Total Utang:                  Rp 10.000\n• Dibayarkan:                   Rp 5.000\n• Sisa Utang:                   Rp 5.000\n\n========================================\nSTATUS BELUM LUNAS (Kurang Rp 5.000)\n========================================\n\nTerima kasih sudah percaya sama kami.\nJangan lupa, Chuna - Asisten Imutmu siap bantu 24 jam!\nkalau ada yang mau ditanyain lagi ya, Kak.\n\nTerimakasih telah berbelanja di E4 Store!\nSemoga produknya bermanfaat dan kami tunggu kunjungan berikutnya!`;
+Utang Rp 105.000 sudah dinyatakan LUNAS. Pembayaran tercatat Rp 105.000. Detail nota ada di gambar ya, Kak. 💪🔥
+
+Terima kasih belanja di E4 Store! 🐾
+Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💖`;
+
+  const angsuranCaption = `⏳ Kak Reza, pembayaran sebagian sudah diterima!
+
+Utang awal Rp 10.000. Sudah dibayar Rp 5.000. Sisa Rp 5.000 lagi ya, Kak. Rincian ada di gambar.
+
+Chuna tunggu pelunasannya! 😊💖`;
 
   const currentImageUrl = activeNotaTab === 'tagihan-pasca'
     ? `/api/demo-nota-cek-tagihan?t=${imageTimestamp}`
@@ -323,6 +397,35 @@ Chuna siap bantu! 😊`;
             </button>
           </div>
 
+          {/* Sub-selector khusus Model Cek Tagihan Pascabayar (Ditemukan vs Tidak Ditemukan) */}
+          {activeNotaTab === 'tagihan-pasca' && (
+            <div className="flex flex-wrap items-center gap-2 mb-5 p-2.5 bg-slate-900/90 border border-emerald-500/30 rounded-2xl text-xs">
+              <span className="text-emerald-300 font-bold px-2 flex items-center gap-1.5">
+                <CheckCircle2 size={14} className="text-emerald-400" /> Status Cek Tagihan:
+              </span>
+              <button
+                onClick={() => setPascaVariant('ditemukan')}
+                className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                  pascaVariant === 'ditemukan'
+                    ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
+                    : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                }`}
+              >
+                ✅ Tagihan Ditemukan
+              </button>
+              <button
+                onClick={() => setPascaVariant('tidak-ditemukan')}
+                className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                  pascaVariant === 'tidak-ditemukan'
+                    ? 'bg-red-500 text-white shadow-md shadow-red-500/20'
+                    : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                }`}
+              >
+                ❌ Tagihan Tidak Ditemukan
+              </button>
+            </div>
+          )}
+
           {/* Sub-selector khusus Model Struk Royal untuk menguji Kategori Produk */}
           {(activeNotaTab === 'royal' || activeNotaTab === 'royal-tidaklunas') && (
             <div className="flex flex-wrap items-center gap-2 mb-5 p-2.5 bg-slate-900/90 border border-amber-500/30 rounded-2xl text-xs">
@@ -382,43 +485,181 @@ Chuna siap bantu! 😊`;
             </div>
           )}
 
+          {/* Sub-selector for Konfirmasi Statuses */}
+          {activeNotaTab === 'konfirmasi' && (
+            <div className="flex flex-wrap items-center gap-2 p-3 bg-slate-900/80 border border-cyan-500/30 rounded-2xl mb-6 shadow-inner text-xs">
+              <span className="text-cyan-300 font-semibold px-2 flex items-center gap-1.5">
+                <Sparkles size={14} className="text-cyan-400" /> Siklus Status & Edit Caption:
+              </span>
+              <button
+                onClick={() => setKonfirmasiStatusTab('pending')}
+                className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                  konfirmasiStatusTab === 'pending'
+                    ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
+                    : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                }`}
+              >
+                ⏳ 1. Sedang Diproses (Awal Gambar + Caption)
+              </button>
+              <button
+                onClick={() => setKonfirmasiStatusTab('sukses')}
+                className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                  konfirmasiStatusTab === 'sukses'
+                    ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
+                    : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                }`}
+              >
+                ✅ 2. Edit Caption: Sukses
+              </button>
+              <button
+                onClick={() => setKonfirmasiStatusTab('gagal-tujuan')}
+                className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                  konfirmasiStatusTab === 'gagal-tujuan'
+                    ? 'bg-red-500 text-white shadow-md shadow-red-500/20'
+                    : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                }`}
+              >
+                ❌ 3. Gagal: Nomor/ID Salah
+              </button>
+              <button
+                onClick={() => setKonfirmasiStatusTab('gagal-ip')}
+                className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                  konfirmasiStatusTab === 'gagal-ip'
+                    ? 'bg-red-500 text-white shadow-md shadow-red-500/20'
+                    : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                }`}
+              >
+                ❌ 4. Gagal: Server / IP Berubah
+              </button>
+              <button
+                onClick={() => setKonfirmasiStatusTab('gagal-saldo')}
+                className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                  konfirmasiStatusTab === 'gagal-saldo'
+                    ? 'bg-red-500 text-white shadow-md shadow-red-500/20'
+                    : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                }`}
+              >
+                ❌ 5. Gagal: Saldo Kurang / Produk Kosong
+              </button>
+              <button
+                onClick={() => setKonfirmasiStatusTab('gagal-cutoff')}
+                className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                  konfirmasiStatusTab === 'gagal-cutoff'
+                    ? 'bg-red-500 text-white shadow-md shadow-red-500/20'
+                    : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                }`}
+              >
+                ❌ 6. Gagal: Cut Off / Tutup Sementara
+              </button>
+              <button
+                onClick={() => setKonfirmasiStatusTab('gagal-refund')}
+                className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                  konfirmasiStatusTab === 'gagal-refund'
+                    ? 'bg-red-500 text-white shadow-md shadow-red-500/20'
+                    : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                }`}
+              >
+                ❌ 7. Gagal: Info Refund Lengkap
+              </button>
+            </div>
+          )}
+
           {/* Main Visual Display Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            {/* Left: The Generated Image Card */}
-            <div className="lg:col-span-6 flex flex-col items-center">
-              <div 
-                onClick={() => setIsZoomed(true)}
-                className="relative group cursor-pointer w-full max-w-md rounded-2xl overflow-hidden border-2 border-amber-500/40 shadow-2xl bg-black transition-all hover:scale-[1.01] hover:border-amber-400"
-              >
-                <img
-                  src={currentImageUrl}
-                  alt="Preview Model Nota E4 Store"
-                  className="w-full h-auto aspect-square object-contain block bg-[#0a0a0c]"
-                  loading="eager"
-                />
-                
-                {/* Overlay hover hint */}
-                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 text-white font-semibold text-sm backdrop-blur-[2px]">
-                  <ZoomIn size={22} className="text-amber-400" /> Klik untuk memperbesar
-                </div>
+            {/* Left: The Generated Image Card / Pure Text Card */}
+            <div className="lg:col-span-6 flex flex-col items-center w-full">
+              {activeNotaTab === 'tagihan-pasca' && pascaVariant === 'tidak-ditemukan' ? (
+                <div className="w-full max-w-md rounded-2xl overflow-hidden border-2 border-red-500/40 shadow-2xl bg-gradient-to-b from-slate-900 to-slate-950 p-6 flex flex-col gap-4">
+                  {/* Badge */}
+                  <div className="flex items-center justify-between">
+                    <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-red-500/20 text-red-400 border border-red-500/40">
+                      ❌ TAGIHAN TIDAK DITEMUKAN
+                    </span>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700">
+                      Hanya Teks (Tanpa Gambar)
+                    </span>
+                  </div>
 
-                {/* Badge Status */}
-                <div className="absolute top-3 left-3">
-                  <span className={`px-3 py-1 rounded-full text-xs font-bold shadow-lg uppercase tracking-wider backdrop-blur-md ${
-                    activeNotaTab === 'royal'
-                      ? 'bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 border border-amber-300/60 shadow-amber-500/20'
-                      : activeNotaTab === 'lunas'
-                      ? 'bg-emerald-500/90 text-white border border-emerald-300/40'
-                      : 'bg-amber-500/90 text-slate-950 border border-amber-300/40'
-                  }`}>
-                    {activeNotaTab === 'royal' ? '👑 STRUK PEMBAYARAN: LUNAS' : activeNotaTab === 'lunas' ? '✓ STATUS: LUNAS' : '⚠️ STATUS: BELUM LUNAS'}
-                  </span>
+                  {/* Chat Preview Bubble */}
+                  <div className="bg-[#0b141a] border border-[#202c33] rounded-2xl p-4 shadow-inner relative">
+                    <div className="text-[11px] text-emerald-400 font-bold mb-1.5 flex items-center gap-1.5">
+                      <span>🤖 Chuna ~ E4 Store</span>
+                      <span className="text-slate-500 font-normal text-[10px]">• Pesan Otomatis</span>
+                    </div>
+                    <div className="bg-[#1f2c34] text-slate-100 p-3.5 rounded-2xl rounded-tl-sm text-sm font-medium whitespace-pre-wrap leading-relaxed border border-[#2a3942]">
+                      {tagihanPascaTidakDitemukanCaption}
+                    </div>
+                    <div className="text-right text-[10px] text-slate-400 mt-1">
+                      12:00 ✓✓
+                    </div>
+                  </div>
+
+                  {/* Explanatory notice */}
+                  <div className="bg-red-950/30 border border-red-500/20 rounded-xl p-3 text-xs text-red-300/90 flex items-start gap-2.5">
+                    <AlertCircle size={16} className="text-red-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-red-200">Hanya Kirim Pesan Teks (Tanpa Nota)</p>
+                      <p className="text-[11px] text-red-300/80 mt-0.5">
+                        Karena tagihan tidak ditemukan di sistem, bot <b>hanya mengirimkan pesan teks di atas</b> dan tidak menghasilkan/mengirim gambar nota.
+                      </p>
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <p className="text-slate-400 text-xs mt-3 flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                Gambar dibuat real-time dari render server (Canvas 1024x1024)
-              </p>
+              ) : (
+                <>
+                  <div 
+                    onClick={() => setIsZoomed(true)}
+                    className="relative group cursor-pointer w-full max-w-md rounded-2xl overflow-hidden border-2 border-amber-500/40 shadow-2xl bg-black transition-all hover:scale-[1.01] hover:border-amber-400"
+                  >
+                    <img
+                      src={currentImageUrl}
+                      alt="Preview Model Nota E4 Store"
+                      className="w-full h-auto aspect-square object-contain block bg-[#0a0a0c]"
+                      loading="eager"
+                    />
+                    
+                    {/* Overlay hover hint */}
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 text-white font-semibold text-sm backdrop-blur-[2px]">
+                      <ZoomIn size={22} className="text-amber-400" /> Klik untuk memperbesar
+                    </div>
+
+                    {/* Badge Status */}
+                    <div className="absolute top-3 left-3">
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold shadow-lg uppercase tracking-wider backdrop-blur-md ${
+                        activeNotaTab === 'royal'
+                          ? 'bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 border border-amber-300/60 shadow-amber-500/20'
+                          : activeNotaTab === 'lunas'
+                          ? 'bg-emerald-500/90 text-white border border-emerald-300/40'
+                          : 'bg-amber-500/90 text-slate-950 border border-amber-300/40'
+                      }`}>
+                        {activeNotaTab === 'royal' 
+                          ? '👑 STRUK PEMBAYARAN: LUNAS' 
+                          : activeNotaTab === 'royal-tidaklunas'
+                          ? '⚠️ STRUK: BELUM LUNAS'
+                          : activeNotaTab === 'tagihan-pasca'
+                          ? '🧾 CEK TAGIHAN: DITEMUKAN'
+                          : activeNotaTab === 'lunas' 
+                          ? '✓ STATUS: LUNAS' 
+                          : activeNotaTab === 'konfirmasi'
+                          ? (
+                              konfirmasiStatusTab === 'pending' ? '⏳ 1. SEDANG DIPROSES' :
+                              konfirmasiStatusTab === 'sukses' ? '✅ 2. EDIT CAPTION: SUKSES' :
+                              konfirmasiStatusTab === 'gagal-tujuan' ? '❌ 3. GAGAL: NOMOR/ID SALAH' :
+                              konfirmasiStatusTab === 'gagal-ip' ? '❌ 4. GAGAL: SERVER / IP BERUBAH' :
+                              konfirmasiStatusTab === 'gagal-saldo' ? '❌ 5. GAGAL: PRODUK KOSONG' :
+                              konfirmasiStatusTab === 'gagal-cutoff' ? '❌ 6. GAGAL: TUTUP SEMENTARA' :
+                              '❌ 7. GAGAL: REFUND LENGKAP'
+                            )
+                          : '⚠️ STATUS: BELUM LUNAS'}
+                      </span>
+                    </div>
+                  </div>
+                  <p className="text-slate-400 text-xs mt-3 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    Gambar dibuat real-time dari render server (Canvas 1024x1024)
+                  </p>
+                </>
+              )}
             </div>
 
             {/* Right: Explanations & Text Message Companion */}
