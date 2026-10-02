@@ -5017,125 +5017,11 @@ Chuna – E4 Store`;
     res.json({ success: true });
   });
 
-// Helper untuk menarik profil lengkap Telegram (Foto & Nama Profil)
-async function fetchTelegramUserProfile(tgIdOrUsername: string) {
-  if (!bot) return null;
-  const cleanId = String(tgIdOrUsername || '').replace(/^(ID:|@)/, '').trim();
-  if (!cleanId) return null;
-
-  let tgProfileName: string | null = null;
-  let tgPhotoUrl: string | null = null;
-
-  try {
-    const chat: any = await bot.telegram.getChat(cleanId).catch(() => null);
-    if (chat) {
-      const first = chat.first_name || '';
-      const last = chat.last_name || '';
-      tgProfileName = [first, last].filter(Boolean).join(' ') || (chat.username ? `@${chat.username}` : '');
-      if (chat.photo?.small_file_id || chat.photo?.big_file_id) {
-        const fId = chat.photo.big_file_id || chat.photo.small_file_id;
-        const link = await bot.telegram.getFileLink(fId).catch(() => null);
-        if (link && link.href) {
-          tgPhotoUrl = link.href;
-        }
-      }
-    }
-  } catch (e) {}
-
-  if (!tgPhotoUrl && /^\d+$/.test(cleanId)) {
-    try {
-      const photos = await bot.telegram.getUserProfilePhotos(Number(cleanId), 0, 1).catch(() => null);
-      if (photos && photos.total_count > 0 && photos.photos[0]?.length > 0) {
-        const sizeArr = photos.photos[0];
-        const fileId = sizeArr[sizeArr.length - 1].file_id;
-        const link = await bot.telegram.getFileLink(fileId).catch(() => null);
-        if (link && link.href) {
-          tgPhotoUrl = link.href;
-        }
-      }
-    } catch (e) {}
-  }
-
-  if (tgPhotoUrl && tgPhotoUrl.startsWith('http')) {
-    try {
-      const photosDir = path.join(process.cwd(), 'public', 'wa_photos');
-      if (!fs.existsSync(photosDir)) fs.mkdirSync(photosDir, { recursive: true });
-      const filename = `tg_${cleanId}_${Date.now()}.jpg`;
-      const filepath = path.join(photosDir, filename);
-      const resp = await fetch(tgPhotoUrl);
-      const arrayBuffer = await resp.arrayBuffer();
-      fs.writeFileSync(filepath, Buffer.from(arrayBuffer));
-      tgPhotoUrl = `/wa_photos/${filename}`;
-    } catch (e) {}
-  }
-
-  if (!tgProfileName && db.tgProfiles && db.tgProfiles[cleanId]) {
-    tgProfileName = db.tgProfiles[cleanId];
-  }
-  if (!tgPhotoUrl && db.tgProfilePhotos && db.tgProfilePhotos[cleanId]) {
-    tgPhotoUrl = db.tgProfilePhotos[cleanId];
-  }
-
-  if (tgProfileName) {
-    if (!db.tgProfiles) db.tgProfiles = {};
-    db.tgProfiles[cleanId] = tgProfileName;
-  }
-  if (tgPhotoUrl) {
-    if (!db.tgProfilePhotos) db.tgProfilePhotos = {};
-    db.tgProfilePhotos[cleanId] = tgPhotoUrl;
-  }
-
-  return {
-    cleanId,
-    tgProfileName: tgProfileName || null,
-    tgPhotoUrl: tgPhotoUrl || null
-  };
-}
-
-// Helper untuk menarik profil lengkap WhatsApp (Foto, Nama Profil, dan LID)
-async function fetchWaUserProfile(rawPhone: string) {
-  const cleanPhone = cleanWaPhone(rawPhone);
-  if (!cleanPhone || cleanPhone.length < 8) return null;
-
-  let photoUrl: string | null = (db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) || null;
-  let waProfileName: string | null = (db.waProfiles && db.waProfiles[cleanPhone]) || null;
-  let lid: string | null = (db.waLids && db.waLids[cleanPhone]) || null;
-
-  if (typeof waSocket !== 'undefined' && waSocket) {
-    const jid = `${cleanPhone}@s.whatsapp.net`;
-    try {
-      const onWa = await waSocket.onWhatsApp(jid).catch(() => null);
-      if (Array.isArray(onWa) && onWa.length > 0) {
-        if (onWa[0].lid) {
-          lid = onWa[0].lid;
-          saveWaLid(cleanPhone, lid);
-        }
-      }
-    } catch (e) {}
-
-    try {
-      const pic = await waSocket.profilePictureUrl(jid, 'image').catch(() => null);
-      if (pic) {
-        photoUrl = pic;
-        if (!db.waProfilePhotos) db.waProfilePhotos = {};
-        db.waProfilePhotos[cleanPhone] = pic;
-      }
-    } catch (e) {}
-  }
-
-  return {
-    cleanPhone,
-    photoUrl: photoUrl || null,
-    waProfileName: waProfileName || null,
-    lid: lid || null
-  };
-}
-
   app.get("/api/members/offline", (req, res) => {
-    const enriched = members.map(m => {
+    // Return all members, or just those added manually (without telegram ID)
+    const offlineMembers = members.filter(m => !m.telegram || !m.telegram.startsWith('ID:'));
+    const enriched = offlineMembers.map(m => {
       const cleanPhone = cleanWaPhone(m.whatsapp || '');
-      const cleanTg = String(m.telegram || '').replace(/^(ID:|@)/, '').trim();
-
       let photoUrl = m.photoUrl;
       if (!photoUrl && cleanPhone && db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) {
         photoUrl = db.waProfilePhotos[cleanPhone];
@@ -5144,26 +5030,10 @@ async function fetchWaUserProfile(rawPhone: string) {
       if (!lid && cleanPhone && db.waLids && db.waLids[cleanPhone]) {
         lid = db.waLids[cleanPhone];
       }
-      let waProfileName = m.waProfileName || null;
-      if (!waProfileName && cleanPhone && db.waProfiles && db.waProfiles[cleanPhone]) {
-        waProfileName = db.waProfiles[cleanPhone];
-      }
-
-      let tgPhotoUrl = m.tgPhotoUrl || null;
-      if (!tgPhotoUrl && cleanTg && db.tgProfilePhotos && db.tgProfilePhotos[cleanTg]) {
-        tgPhotoUrl = db.tgProfilePhotos[cleanTg];
-      }
-      let tgProfileName = m.tgProfileName || null;
-      if (!tgProfileName && cleanTg && db.tgProfiles && db.tgProfiles[cleanTg]) {
-        tgProfileName = db.tgProfiles[cleanTg];
-      }
-
       return {
         ...m,
         photoUrl: photoUrl || null,
-        tgPhotoUrl: tgPhotoUrl || null,
-        waProfileName: waProfileName || null,
-        tgProfileName: tgProfileName || null,
+        waProfileName: m.waProfileName || null,
         lid: lid || null
       };
     });
@@ -5411,107 +5281,16 @@ async function fetchWaUserProfile(rawPhone: string) {
     }
   });
 
-  // Endpoint untuk cek & tarik otomatis nomor Telegram (Foto & Nama Profil)
-  app.get("/api/tg/lookup/:query", async (req, res) => {
-    try {
-      const { query } = req.params;
-      const data = await fetchTelegramUserProfile(query);
-      if (data) {
-        writeDB(db);
-        return res.json({ success: true, ...data });
-      }
-      res.json({ success: false, error: 'Profil Telegram tidak ditemukan atau bot belum pernah di-start oleh user.' });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
-    }
-  });
-
-  // Tarik SEMUA data (Foto WA, Foto TG, LID WA, Nama WA, Nama TG) untuk 1 member
-  app.post("/api/members/:id/sync-all", async (req, res) => {
-    try {
-      const { id } = req.params;
-      const member = members.find(m => m.id === id);
-      if (!member) return res.status(404).json({ success: false, error: 'Member tidak ditemukan' });
-
-      let updated = false;
-
-      // 1. Tarik WhatsApp (Foto, Nama, LID)
-      if (member.whatsapp) {
-        const waData = await fetchWaUserProfile(member.whatsapp);
-        if (waData) {
-          if (waData.photoUrl) { member.photoUrl = waData.photoUrl; updated = true; }
-          if (waData.waProfileName) { member.waProfileName = waData.waProfileName; updated = true; }
-          if (waData.lid) { member.lid = waData.lid; updated = true; }
-        }
-      }
-
-      // 2. Tarik Telegram (Foto, Nama)
-      if (member.telegram) {
-        const tgData = await fetchTelegramUserProfile(member.telegram);
-        if (tgData) {
-          if (tgData.tgPhotoUrl) { member.tgPhotoUrl = tgData.tgPhotoUrl; updated = true; }
-          if (tgData.tgProfileName) { member.tgProfileName = tgData.tgProfileName; updated = true; }
-        }
-      }
-
-      if (updated) {
-        db.members = members;
-        writeDB(db);
-      }
-
-      res.json({ success: true, member });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
-    }
-  });
-
-  // Tarik massal semua profil untuk seluruh member
-  app.post("/api/members/sync-all-batch", async (req, res) => {
-    try {
-      let updatedCount = 0;
-      for (const member of members) {
-        let changed = false;
-        if (member.whatsapp) {
-          const waData = await fetchWaUserProfile(member.whatsapp);
-          if (waData) {
-            if (waData.photoUrl && member.photoUrl !== waData.photoUrl) { member.photoUrl = waData.photoUrl; changed = true; }
-            if (waData.waProfileName && member.waProfileName !== waData.waProfileName) { member.waProfileName = waData.waProfileName; changed = true; }
-            if (waData.lid && member.lid !== waData.lid) { member.lid = waData.lid; changed = true; }
-          }
-        }
-        if (member.telegram) {
-          const tgData = await fetchTelegramUserProfile(member.telegram);
-          if (tgData) {
-            if (tgData.tgPhotoUrl && member.tgPhotoUrl !== tgData.tgPhotoUrl) { member.tgPhotoUrl = tgData.tgPhotoUrl; changed = true; }
-            if (tgData.tgProfileName && member.tgProfileName !== tgData.tgProfileName) { member.tgProfileName = tgData.tgProfileName; changed = true; }
-          }
-        }
-        if (changed) updatedCount++;
-      }
-
-      if (updatedCount > 0) {
-        db.members = members;
-        writeDB(db);
-      }
-      res.json({ success: true, updatedCount });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
-    }
-  });
-
   app.post("/api/members/:id/update-profile", async (req, res) => {
     try {
       const { id } = req.params;
-      const { name, waProfileName, whatsapp, telegram, tgProfileName, tgPhotoUrl, type, lid } = req.body;
+      const { name, waProfileName, whatsapp, type, lid } = req.body;
       const member = members.find(m => m.id === id);
       if (!member) return res.status(404).json({ success: false, error: 'Member tidak ditemukan' });
 
       if (name) member.name = name;
       if (typeof waProfileName !== 'undefined') member.waProfileName = waProfileName;
-      if (typeof whatsapp !== 'undefined') member.whatsapp = whatsapp;
-      if (typeof telegram !== 'undefined') member.telegram = telegram;
-      if (typeof tgProfileName !== 'undefined') member.tgProfileName = tgProfileName;
-      if (typeof tgPhotoUrl !== 'undefined') member.tgPhotoUrl = tgPhotoUrl;
+      if (whatsapp) member.whatsapp = whatsapp;
       if (type) member.type = type;
       if (typeof lid !== 'undefined') {
         member.lid = lid ? String(lid).trim() : null;
@@ -5536,42 +5315,7 @@ async function fetchWaUserProfile(rawPhone: string) {
 
   app.get("/api/members", (req, res) => {
     const onlineMembers = members.filter(m => m.telegram && m.telegram.startsWith('ID:'));
-    const enriched = onlineMembers.map(m => {
-      const cleanPhone = cleanWaPhone(m.whatsapp || '');
-      const cleanTg = String(m.telegram || '').replace(/^(ID:|@)/, '').trim();
-
-      let photoUrl = m.photoUrl;
-      if (!photoUrl && cleanPhone && db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) {
-        photoUrl = db.waProfilePhotos[cleanPhone];
-      }
-      let lid = m.lid || null;
-      if (!lid && cleanPhone && db.waLids && db.waLids[cleanPhone]) {
-        lid = db.waLids[cleanPhone];
-      }
-      let waProfileName = m.waProfileName || null;
-      if (!waProfileName && cleanPhone && db.waProfiles && db.waProfiles[cleanPhone]) {
-        waProfileName = db.waProfiles[cleanPhone];
-      }
-
-      let tgPhotoUrl = m.tgPhotoUrl || null;
-      if (!tgPhotoUrl && cleanTg && db.tgProfilePhotos && db.tgProfilePhotos[cleanTg]) {
-        tgPhotoUrl = db.tgProfilePhotos[cleanTg];
-      }
-      let tgProfileName = m.tgProfileName || null;
-      if (!tgProfileName && cleanTg && db.tgProfiles && db.tgProfiles[cleanTg]) {
-        tgProfileName = db.tgProfiles[cleanTg];
-      }
-
-      return {
-        ...m,
-        photoUrl: photoUrl || null,
-        tgPhotoUrl: tgPhotoUrl || null,
-        waProfileName: waProfileName || null,
-        tgProfileName: tgProfileName || null,
-        lid: lid || null
-      };
-    });
-    res.json({ success: true, members: enriched });
+    res.json({ success: true, members: onlineMembers });
   });
 
   app.get("/api/topup-requests", (req, res) => {
