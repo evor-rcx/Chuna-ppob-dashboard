@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { PageContainer } from '../PageContainer';
 
 export function MemberOffline({ onBack }: { onBack: () => void }) {
@@ -9,8 +9,6 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
     waProfileName: string;
     whatsapp: string;
     telegram: string;
-    tgProfileName: string;
-    tgPhotoUrl: string;
     photoUrl: string;
     type: string;
     lid: string;
@@ -19,15 +17,12 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
     waProfileName: '',
     whatsapp: '',
     telegram: '',
-    tgProfileName: '',
-    tgPhotoUrl: '',
     photoUrl: '',
     type: 'Biasa',
     lid: ''
   });
 
   const [loadingSync, setLoadingSync] = useState<string | null>(null);
-  const [loadingSpecific, setLoadingSpecific] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState<boolean>(false);
   const [loadingLookup, setLoadingLookup] = useState<boolean>(false);
   const [loadingBatchSync, setLoadingBatchSync] = useState<boolean>(false);
@@ -38,10 +33,9 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
     waProfileName: string;
     whatsapp: string;
     telegram: string;
-    tgProfileName: string;
     type: string;
     lid: string;
-  }>({ name: '', waProfileName: '', whatsapp: '', telegram: '', tgProfileName: '', type: 'Biasa', lid: '' });
+  }>({ name: '', waProfileName: '', whatsapp: '', telegram: '', type: 'Biasa', lid: '' });
 
   const fetchMembers = () => {
     fetch("/api/members/offline")
@@ -61,15 +55,13 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
       waProfileName: m.waProfileName === '-' ? '' : (m.waProfileName || ''),
       whatsapp: m.whatsapp || '',
       telegram: m.telegram || '',
-      tgProfileName: m.tgProfileName || '',
-      tgPhotoUrl: m.tgPhotoUrl || '',
       photoUrl: m.photoUrl || '',
       type: m.type || 'Biasa',
       lid: m.lid || ''
     });
   };
 
-  // 1 & 4 & 3: Tarik Otomatis Profil WhatsApp (Foto, Nama, dan LID)
+  // Tarik Otomatis Profil WhatsApp (Foto, Nama, dan LID)
   const handleLookupWa = async (phone: string, target: 'new' | 'edit') => {
     const clean = (phone || '').replace(/\D/g, '');
     if (!clean || clean.length < 8) {
@@ -120,62 +112,12 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
     }
   };
 
-  // 2 & 5: Tarik Otomatis Profil Telegram (Foto & Nama Profil)
-  const handleLookupTg = async (query: string, target: 'new' | 'edit') => {
-    const clean = (query || '').replace(/^(ID:|@)/, '').trim();
-    if (!clean) {
-      alert("⚠️ Masukkan ID Telegram atau username terlebih dahulu (contoh: 123456789).");
-      return;
-    }
-    setLoadingLookup(true);
-    try {
-      const res = await fetch(`/api/tg/lookup/${encodeURIComponent(clean)}`);
-      const data = await res.json();
-      if (data.success) {
-        const formattedTgId = /^\d+$/.test(data.cleanId) ? `ID:${data.cleanId}` : `@${data.cleanId}`;
-        if (target === 'new') {
-          setNewMemberForm(prev => ({
-            ...prev,
-            telegram: formattedTgId,
-            tgProfileName: data.tgProfileName || prev.tgProfileName || ''
-          }));
-        } else {
-          setEditForm(prev => ({
-            ...prev,
-            telegram: formattedTgId,
-            tgProfileName: data.tgProfileName || prev.tgProfileName || '',
-            tgPhotoUrl: data.tgPhotoUrl || prev.tgPhotoUrl || ''
-          }));
-          if (selectedMember) {
-            setSelectedMember((prev: any) => ({
-              ...prev,
-              telegram: formattedTgId,
-              tgProfileName: data.tgProfileName || prev?.tgProfileName,
-              tgPhotoUrl: data.tgPhotoUrl || prev?.tgPhotoUrl
-            }));
-          }
-        }
-
-        let msg = `✅ Berhasil menarik data Telegram!\n`;
-        if (data.tgProfileName) msg += `👤 Nama TG: ${data.tgProfileName}\n`;
-        if (data.tgPhotoUrl) msg += `🖼️ Foto TG: Ditemukan & Tersimpan\n`;
-        alert(msg);
-      } else {
-        alert(data.error || "Gagal menarik data dari Telegram.");
-      }
-    } catch (e) {
-      alert("Gagal menghubungi server Telegram.");
-    } finally {
-      setLoadingLookup(false);
-    }
-  };
-
-  // TARIK SEMUA PROFIL LENGKAP UNTUK 1 MEMBER (Foto WA, Foto TG, LID WA, Nama WA, Nama TG)
+  // TARIK SEMUA PROFIL LENGKAP UNTUK 1 MEMBER (Foto WA, Nama WA, LID WA)
   const handleSyncAll = async (memberId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     setLoadingSync(memberId);
     try {
-      const res = await fetch(`/api/members/${memberId}/sync-all`, { method: 'POST' });
+      const res = await fetch(`/api/members/${memberId}/sync-photo`, { method: 'POST' });
       const data = await res.json();
       if (data.success && data.member) {
         setMembers(prev => prev.map(m => m.id === memberId ? data.member : m));
@@ -186,14 +128,12 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
             waProfileName: data.member.waProfileName || '',
             whatsapp: data.member.whatsapp || '',
             telegram: data.member.telegram || '',
-            tgProfileName: data.member.tgProfileName || '',
-            tgPhotoUrl: data.member.tgPhotoUrl || '',
             photoUrl: data.member.photoUrl || '',
             type: data.member.type || 'Biasa',
             lid: data.member.lid || ''
           });
         }
-        alert("✅ Berhasil menarik semua profil:\n1. Foto Profile WhatsApp\n2. Foto Profile Telegram\n3. LID WhatsApp\n4. Nama Profile WhatsApp\n5. Nama Profile Telegram");
+        alert("✅ Berhasil menarik profil WhatsApp:\n1. Foto Profile WhatsApp\n2. LID WhatsApp\n3. Nama Profile WhatsApp");
       } else {
         alert(data.error || "Gagal menarik profil member.");
       }
@@ -211,7 +151,7 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
       const res = await fetch("/api/members/sync-all-batch", { method: 'POST' });
       const data = await res.json();
       if (data.success) {
-        alert(`✅ Sukses menarik otomatis semua profil WhatsApp & Telegram! (${data.updatedCount || 0} member diperbarui)`);
+        alert(`✅ Sukses menarik otomatis semua profil WhatsApp! (${data.updatedCount || 0} member diperbarui)`);
         fetchMembers();
       } else {
         alert(data.error || "Gagal sinkronisasi massal.");
@@ -241,8 +181,6 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
           waProfileName: editForm.waProfileName || '-',
           whatsapp: editForm.whatsapp,
           telegram: editForm.telegram,
-          tgProfileName: editForm.tgProfileName,
-          tgPhotoUrl: editForm.tgPhotoUrl,
           photoUrl: editForm.photoUrl,
           type: editForm.type,
           lid: editForm.lid || null
@@ -275,7 +213,7 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
         alert("✅ Member offline berhasil didaftarkan!");
         setMembers(prev => [data.member, ...prev]);
         setIsAddingMember(false);
-        setNewMemberForm({ name: '', waProfileName: '', whatsapp: '', telegram: '', tgProfileName: '', type: 'Biasa', lid: '' });
+        setNewMemberForm({ name: '', waProfileName: '', whatsapp: '', telegram: '', type: 'Biasa', lid: '' });
       } else {
         alert(data.error || "Gagal menambah member");
       }
@@ -285,36 +223,36 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
   };
 
   return (
-    <PageContainer title="Daftar Member & Penarik Profil WhatsApp & Telegram" onBack={onBack}>
+    <PageContainer title="Daftar Member & Penarik Profil WhatsApp" onBack={onBack}>
       {/* TOOLBAR ATAS */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div>
           <p className="text-xs text-slate-400">
-            💡 Sistem otomatis menarik: <span className="text-emerald-400 font-semibold">Foto Profil WA/TG</span>, <span className="text-sky-400 font-semibold">Nama Profil WA/TG</span>, dan <span className="text-amber-400 font-semibold">LID WhatsApp</span> untuk nota & stiker transaksi.
+            💡 Sistem otomatis menarik: <span className="text-emerald-400 font-semibold">Foto Profil WA</span>, <span className="text-emerald-300 font-semibold">Nama Profil WA</span>, dan <span className="text-amber-400 font-semibold">LID WhatsApp</span> untuk nota & stiker transaksi.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
           <button
             onClick={handleSyncAllBatch}
             disabled={loadingBatchSync}
-            className="px-3.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-xs text-white font-semibold transition-colors flex items-center gap-1.5 shadow-md shadow-sky-950/40 cursor-pointer disabled:opacity-50"
-            title="Tarik otomatis Foto, Nama, dan LID (WA & Telegram) untuk semua member sekaligus"
+            className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs text-white font-semibold transition-colors flex items-center gap-1.5 shadow-md shadow-emerald-950/40 cursor-pointer disabled:opacity-50"
+            title="Tarik otomatis Foto, Nama, dan LID WhatsApp untuk semua member sekaligus"
           >
             {loadingBatchSync ? (
               <>
                 <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                <span>Menarik Semua Profil...</span>
+                <span>Menarik Semua Profil WA...</span>
               </>
             ) : (
               <>
-                <span>⚡ Tarik Semua Profil (WA & Telegram)</span>
+                <span>⚡ Tarik Semua Profil WA</span>
               </>
             )}
           </button>
 
           <button
             onClick={() => setIsAddingMember(true)}
-            className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs text-white font-semibold transition-colors flex items-center gap-1.5 shadow-md shadow-emerald-950/40 cursor-pointer"
+            className="px-3.5 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-500 text-xs text-white font-semibold transition-colors flex items-center gap-1.5 shadow-md shadow-teal-950/40 cursor-pointer"
           >
             ➕ Tambah Member
           </button>
@@ -333,21 +271,18 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
         <table className="w-full text-left border-t border-slate-800/50">
           <thead>
             <tr className="text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-800/50 bg-slate-800/20">
-              <th className="px-6 py-3 font-semibold">ID Member</th>
-              <th className="px-6 py-3 font-semibold text-center w-36">Foto Profil (WA & TG)</th>
+              <th className="px-6 py-3 font-semibold">ID Registrasi</th>
+              <th className="px-6 py-3 font-semibold text-center w-28">Foto Profil WA</th>
               <th className="px-6 py-3 font-semibold">Nama Member</th>
               <th className="px-6 py-3 font-semibold">Profil WhatsApp</th>
-              <th className="px-6 py-3 font-semibold">Profil Telegram</th>
               <th className="px-6 py-3 font-semibold">Kontak & LID WA</th>
-              <th className="px-6 py-3 font-semibold text-right">Aksi Tarik Cepat</th>
+              <th className="px-6 py-3 font-semibold text-right">Aksi Tarik Profil</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/30">
             {members.map((m) => {
               const hasWaPhoto = Boolean(m.photoUrl);
-              const hasTgPhoto = Boolean(m.tgPhotoUrl);
               const waName = m.waProfileName && m.waProfileName !== '-' ? m.waProfileName : null;
-              const tgName = m.tgProfileName && m.tgProfileName !== '-' ? m.tgProfileName : null;
 
               return (
                 <tr 
@@ -360,44 +295,24 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
                     {m.id}
                   </td>
 
-                  {/* KOLOM 2: FOTO PROFIL WHATSAPP & TELEGRAM */}
+                  {/* KOLOM 2: FOTO PROFIL WHATSAPP */}
                   <td className="px-6 py-4 text-sm text-center">
-                    <div className="flex items-center justify-center gap-2">
-                      {/* Foto WA */}
+                    <div className="flex items-center justify-center">
                       <div className="relative group/wa" title={hasWaPhoto ? "Foto Profil WhatsApp" : "Foto WhatsApp Belum Ada"}>
                         {hasWaPhoto ? (
                           <img 
                             src={m.photoUrl} 
                             alt={m.name} 
-                            className="w-9 h-9 rounded-full object-cover ring-2 ring-emerald-500/80 shadow-sm" 
+                            className="w-10 h-10 rounded-full object-cover ring-2 ring-emerald-500/80 shadow-sm" 
                             onError={(e) => { (e.target as any).style.display = 'none'; }}
                           />
                         ) : (
-                          <div className="w-9 h-9 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-slate-400">
+                          <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-slate-400">
                             WA
                           </div>
                         )}
                         <span className="absolute -bottom-1 -right-1 px-1 rounded-full text-[9px] bg-emerald-600 text-white font-bold">
                           WA
-                        </span>
-                      </div>
-
-                      {/* Foto TG */}
-                      <div className="relative group/tg" title={hasTgPhoto ? "Foto Profil Telegram" : "Foto Telegram Belum Ada"}>
-                        {hasTgPhoto ? (
-                          <img 
-                            src={m.tgPhotoUrl} 
-                            alt={m.name} 
-                            className="w-9 h-9 rounded-full object-cover ring-2 ring-sky-500/80 shadow-sm" 
-                            onError={(e) => { (e.target as any).style.display = 'none'; }}
-                          />
-                        ) : (
-                          <div className="w-9 h-9 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-slate-400">
-                            TG
-                          </div>
-                        )}
-                        <span className="absolute -bottom-1 -right-1 px-1 rounded-full text-[9px] bg-sky-600 text-white font-bold">
-                          TG
                         </span>
                       </div>
                     </div>
@@ -419,18 +334,7 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
                     )}
                   </td>
 
-                  {/* KOLOM 5: NAMA PROFIL TELEGRAM */}
-                  <td className="px-6 py-4 text-sm">
-                    {tgName ? (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-sky-500/10 text-sky-400 border border-sky-500/20 text-xs font-medium">
-                        ✈️ {tgName}
-                      </span>
-                    ) : (
-                      <span className="text-slate-500 italic text-xs">{m.telegram || '-'}</span>
-                    )}
-                  </td>
-
-                  {/* KOLOM 6: NOMOR WHATSAPP & LID */}
+                  {/* KOLOM 5: NOMOR WHATSAPP & LID */}
                   <td className="px-6 py-4 text-xs font-mono">
                     <div className="text-slate-300 font-semibold">{m.whatsapp || '-'}</div>
                     <div className="mt-1">
@@ -444,23 +348,23 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
                     </div>
                   </td>
 
-                  {/* KOLOM 7: AKSI TARIK CEPAT */}
+                  {/* KOLOM 6: AKSI TARIK CEPAT */}
                   <td className="px-6 py-4 text-sm text-right">
                     <button
                       type="button"
                       disabled={loadingSync === m.id}
                       onClick={(e) => handleSyncAll(m.id, e)}
-                      className="px-3 py-1.5 rounded-lg bg-sky-500/15 hover:bg-sky-500/30 border border-sky-500/30 text-sky-300 text-xs font-semibold transition-colors inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                      title="Tarik otomatis foto profil WA/TG, nama profil WA/TG, dan LID"
+                      className="px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 text-xs font-semibold transition-colors inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      title="Tarik otomatis foto profil WA, nama profil WA, dan LID"
                     >
                       {loadingSync === m.id ? (
                         <>
-                          <div className="w-3 h-3 border-2 border-sky-400 border-t-transparent rounded-full animate-spin"></div>
+                          <div className="w-3 h-3 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin"></div>
                           <span>Menarik...</span>
                         </>
                       ) : (
                         <>
-                          <span>⚡ Tarik Lengkap</span>
+                          <span>⚡ Tarik Profil WA</span>
                         </>
                       )}
                     </button>
@@ -471,7 +375,7 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
 
             {members.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-6 py-12 text-center text-slate-500 text-sm">
+                <td colSpan={6} className="px-6 py-12 text-center text-slate-500 text-sm">
                   Belum ada data member. Klik tombol "➕ Tambah Member" di atas untuk menambahkan.
                 </td>
               </tr>
@@ -486,7 +390,7 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-lg w-full shadow-2xl relative my-8">
             <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-5">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
-                ⚙️ Profil & Penarik Data (WA & Telegram)
+                ⚙️ Profil & Penarik Data WhatsApp
               </h3>
               <button 
                 type="button"
@@ -497,19 +401,18 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
               </button>
             </div>
 
-            {/* KARTU FOTO PROFIL WHATSAPP & TELEGRAM */}
-            <div className="grid grid-cols-2 gap-3 mb-5 p-3 rounded-2xl bg-slate-800/50 border border-slate-700/60">
-              {/* Box Foto WA */}
-              <div className="flex flex-col items-center text-center p-2 rounded-xl bg-slate-900/60 border border-emerald-500/20">
+            {/* KARTU FOTO PROFIL WHATSAPP */}
+            <div className="mb-5 p-3 rounded-2xl bg-slate-800/50 border border-slate-700/60">
+              <div className="flex flex-col items-center text-center p-3 rounded-xl bg-slate-900/60 border border-emerald-500/20">
                 <div className="relative mb-2">
                   {selectedMember.photoUrl ? (
                     <img 
                       src={selectedMember.photoUrl} 
                       alt="WA Photo" 
-                      className="w-14 h-14 rounded-full object-cover ring-2 ring-emerald-500 shadow" 
+                      className="w-16 h-16 rounded-full object-cover ring-2 ring-emerald-500 shadow" 
                     />
                   ) : (
-                    <div className="w-14 h-14 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center font-bold text-slate-400 text-xs">
+                    <div className="w-16 h-16 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center font-bold text-slate-400 text-xs">
                       No WA Photo
                     </div>
                   )}
@@ -517,63 +420,34 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
                     WA
                   </span>
                 </div>
-                <span className="text-[11px] font-bold text-emerald-400 mb-1">Foto Profil WhatsApp</span>
+                <span className="text-xs font-bold text-emerald-400 mb-1.5">Foto Profil WhatsApp</span>
                 <button
                   type="button"
                   disabled={loadingLookup}
                   onClick={() => handleLookupWa(editForm.whatsapp, 'edit')}
-                  className="px-2 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-[10px] font-semibold cursor-pointer disabled:opacity-50"
+                  className="px-3 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-semibold cursor-pointer disabled:opacity-50"
                 >
                   🔄 Tarik Foto WA
                 </button>
               </div>
-
-              {/* Box Foto Telegram */}
-              <div className="flex flex-col items-center text-center p-2 rounded-xl bg-slate-900/60 border border-sky-500/20">
-                <div className="relative mb-2">
-                  {selectedMember.tgPhotoUrl ? (
-                    <img 
-                      src={selectedMember.tgPhotoUrl} 
-                      alt="TG Photo" 
-                      className="w-14 h-14 rounded-full object-cover ring-2 ring-sky-500 shadow" 
-                    />
-                  ) : (
-                    <div className="w-14 h-14 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center font-bold text-slate-400 text-xs">
-                      No TG Photo
-                    </div>
-                  )}
-                  <span className="absolute -bottom-1 -right-1 px-1.5 py-0.5 rounded-full text-[9px] bg-sky-600 text-white font-bold">
-                    TG
-                  </span>
-                </div>
-                <span className="text-[11px] font-bold text-sky-400 mb-1">Foto Profil Telegram</span>
-                <button
-                  type="button"
-                  disabled={loadingLookup}
-                  onClick={() => handleLookupTg(editForm.telegram, 'edit')}
-                  className="px-2 py-1 rounded bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 text-[10px] font-semibold cursor-pointer disabled:opacity-50"
-                >
-                  🔄 Tarik Foto TG
-                </button>
-              </div>
             </div>
 
-            {/* TOMBOL UTAMA: TARIK SEMUA PROFIL LENGKAP */}
+            {/* TOMBOL UTAMA: TARIK SEMUA PROFIL WHATSAPP */}
             <div className="mb-5">
               <button
                 type="button"
                 disabled={loadingSync === selectedMember.id}
                 onClick={() => handleSyncAll(selectedMember.id)}
-                className="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-sky-600 hover:from-emerald-500 hover:to-sky-500 text-white font-bold text-xs shadow-lg shadow-sky-950/40 flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-50"
+                className="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-lg shadow-emerald-950/40 flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-50"
               >
                 {loadingSync === selectedMember.id ? (
                   <>
                     <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    <span>Menarik Semua Profil (WA & TG)...</span>
+                    <span>Menarik Semua Profil WhatsApp...</span>
                   </>
                 ) : (
                   <>
-                    <span>⚡ Tarik Lengkap Sekaligus (Foto WA/TG, Nama WA/TG, LID)</span>
+                    <span>⚡ Tarik Lengkap Profil WA (Foto, Nama, LID)</span>
                   </>
                 )}
               </button>
@@ -595,11 +469,11 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
                 />
               </div>
 
-              {/* 4. Menarik Nama Profil WhatsApp */}
+              {/* Menarik Nama Profil WhatsApp */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-xs font-semibold text-emerald-400">
-                    4. Nama Profil WhatsApp (Stiker & Nota)
+                    Nama Profil WhatsApp (Stiker & Nota)
                   </label>
                   <button
                     type="button"
@@ -616,30 +490,6 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
                   onChange={(e) => setEditForm({ ...editForm, waProfileName: e.target.value })}
                   placeholder="Misal: Sar Tika"
                   className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-white text-sm focus:outline-hidden focus:border-emerald-500"
-                />
-              </div>
-
-              {/* 5. Menarik Nama Profil Telegram */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-semibold text-sky-400">
-                    5. Nama Profil Telegram
-                  </label>
-                  <button
-                    type="button"
-                    disabled={loadingLookup}
-                    onClick={() => handleLookupTg(editForm.telegram, 'edit')}
-                    className="text-[11px] text-sky-400 hover:text-sky-300 font-semibold cursor-pointer disabled:opacity-50"
-                  >
-                    ⚡ Tarik Nama TG
-                  </button>
-                </div>
-                <input 
-                  type="text"
-                  value={editForm.tgProfileName}
-                  onChange={(e) => setEditForm({ ...editForm, tgProfileName: e.target.value })}
-                  placeholder="Misal: Reza Firmansyah (@reza)"
-                  className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-white text-sm focus:outline-hidden focus:border-sky-500"
                 />
               </div>
 
@@ -667,35 +517,11 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
                 />
               </div>
 
-              {/* ID Telegram */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-semibold text-slate-300">
-                    ID / Username Telegram
-                  </label>
-                  <button
-                    type="button"
-                    disabled={loadingLookup}
-                    onClick={() => handleLookupTg(editForm.telegram, 'edit')}
-                    className="text-[11px] text-sky-400 hover:text-sky-300 font-semibold cursor-pointer disabled:opacity-50"
-                  >
-                    ⚡ Tarik Profil & Foto TG
-                  </button>
-                </div>
-                <input 
-                  type="text"
-                  value={editForm.telegram}
-                  onChange={(e) => setEditForm({ ...editForm, telegram: e.target.value })}
-                  placeholder="Misal: ID:123456789 atau @username"
-                  className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-white text-sm focus:outline-hidden focus:border-sky-500"
-                />
-              </div>
-
-              {/* 3. Menarik LID WhatsApp */}
+              {/* Menarik LID WhatsApp */}
               <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-700/70">
                 <div className="flex items-center justify-between mb-1.5">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-slate-200">🆔 3. LID WhatsApp</span>
+                    <span className="text-xs font-bold text-slate-200">🆔 LID WhatsApp</span>
                     <span className="px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/30 text-[10px] font-semibold">
                       Auto-Detect
                     </span>
@@ -847,30 +673,6 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
                 />
               </div>
 
-              {/* ID Telegram */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-semibold text-slate-300">
-                    ID Telegram (Opsional)
-                  </label>
-                  <button
-                    type="button"
-                    disabled={loadingLookup}
-                    onClick={() => handleLookupTg(newMemberForm.telegram, 'new')}
-                    className="text-xs text-sky-400 hover:text-sky-300 flex items-center gap-1 font-semibold transition-colors cursor-pointer disabled:opacity-50"
-                  >
-                    ⚡ Tarik dari TG
-                  </button>
-                </div>
-                <input 
-                  type="text"
-                  value={newMemberForm.telegram}
-                  onChange={(e) => setNewMemberForm({ ...newMemberForm, telegram: e.target.value })}
-                  placeholder="Misal: 123456789 atau @username"
-                  className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-white text-sm focus:outline-hidden focus:border-sky-500"
-                />
-              </div>
-
               {/* Nama Profil WhatsApp */}
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
@@ -882,20 +684,6 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
                   onChange={(e) => setNewMemberForm({ ...newMemberForm, waProfileName: e.target.value })}
                   placeholder="Misal: Sar Tika"
                   className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-white text-sm focus:outline-hidden focus:border-emerald-500"
-                />
-              </div>
-
-              {/* Nama Profil Telegram */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Nama Profil Telegram (Otomatis dari TG)
-                </label>
-                <input 
-                  type="text"
-                  value={newMemberForm.tgProfileName}
-                  onChange={(e) => setNewMemberForm({ ...newMemberForm, tgProfileName: e.target.value })}
-                  placeholder="Misal: Reza Firmansyah"
-                  className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-white text-sm focus:outline-hidden focus:border-sky-500"
                 />
               </div>
 

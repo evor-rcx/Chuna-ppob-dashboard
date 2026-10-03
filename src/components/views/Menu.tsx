@@ -16,10 +16,13 @@ export function Menu({ onNavigate }: MenuProps) {
   const [errorMessage, setErrorMessage] = useState('');
 
   // Live Nota Model Preview State
-  const [activeNotaTab, setActiveNotaTab] = useState<'tagihan-pasca' | 'konfirmasi' | 'royal-tidaklunas' | 'royal' | 'tagihan' | 'lunas' | 'angsuran'>('tagihan-pasca');
+  const [activeNotaTab, setActiveNotaTab] = useState<'tagihan-pasca' | 'konfirmasi' | 'royal-tidaklunas' | 'royal' | 'tagihan' | 'lunas' | 'angsuran' | 'price-list'>('tagihan-pasca');
   const [pascaVariant, setPascaVariant] = useState<'ditemukan' | 'tidak-ditemukan'>('ditemukan');
   const [konfirmasiStatusTab, setKonfirmasiStatusTab] = useState<'pending' | 'sukses' | 'gagal-tujuan' | 'gagal-ip' | 'gagal-saldo' | 'gagal-cutoff' | 'gagal-refund-saldo' | 'gagal-refund-cash' | 'gagal-refund-utang'>('pending');
   const [royalCategory, setRoyalCategory] = useState<'game' | 'pln-token' | 'pln-pasca' | 'pulsa' | 'ewallet'>('pln-token');
+  const [priceListBrand, setPriceListBrand] = useState<'FREE FIRE' | 'MOBILE LEGENDS' | 'DANA' | 'PLN'>('FREE FIRE');
+  const [priceListType, setPriceListType] = useState<'owner' | 'vip' | 'biasa'>('owner');
+  const [priceListPage, setPriceListPage] = useState<number>(0);
   const [imageTimestamp, setImageTimestamp] = useState<number>(Date.now());
   const [isZoomed, setIsZoomed] = useState<boolean>(false);
   const [copiedText, setCopiedText] = useState<boolean>(false);
@@ -174,10 +177,20 @@ Utang awal Rp 10.000. Sudah dibayar Rp 5.000. Sisa Rp 5.000 lagi ya, Kak. Rincia
 
 Chuna tunggu pelunasannya! 😊💖`;
 
+  const priceListCaption = `🏷️ DAFTAR HARGA RESMI E4 STORE
+Produk: ${priceListBrand}
+Tipe: ${priceListType === 'owner' ? 'Harga Jual Owner (Termurah)' : priceListType === 'vip' ? 'Member VIP' : 'Pelanggan Biasa'}
+Status: Normal • Proses Instant • 24 Jam
+
+Harga sewaktu-waktu dapat berubah mengikuti sistem pusat Digiflazz.
+Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
+
   const currentImageUrl = activeNotaTab === 'tagihan-pasca'
     ? `/api/demo-nota-cek-tagihan?t=${imageTimestamp}`
     : activeNotaTab === 'konfirmasi'
     ? `/api/demo-nota-konfirmasi?t=${imageTimestamp}`
+    : activeNotaTab === 'price-list'
+    ? `/api/demo-price-list-image?brand=${encodeURIComponent(priceListBrand)}&type=${priceListType}&page=${priceListPage}&t=${imageTimestamp}`
     : activeNotaTab === 'royal'
     ? `/api/demo-nota-royal?category=${royalCategory}&t=${imageTimestamp}`
     : activeNotaTab === 'royal-tidaklunas'
@@ -192,6 +205,8 @@ Chuna tunggu pelunasannya! 😊💖`;
     ? tagihanPascaCaption
     : activeNotaTab === 'konfirmasi'
     ? konfirmasiCaption
+    : activeNotaTab === 'price-list'
+    ? priceListCaption
     : activeNotaTab === 'royal'
     ? royalCaption
     : activeNotaTab === 'royal-tidaklunas'
@@ -421,7 +436,141 @@ Chuna tunggu pelunasannya! 😊💖`;
               <AlertCircle size={16} />
               Model Angsuran: Sisa Utang (Picsart Chuna)
             </button>
+            <button
+              onClick={() => setActiveNotaTab('price-list')}
+              className={`flex-1 sm:flex-none px-4 py-2.5 rounded-xl font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                activeNotaTab === 'price-list'
+                  ? 'bg-gradient-to-r from-orange-600 via-amber-600 to-yellow-500 text-slate-950 font-bold shadow-lg shadow-orange-950/40 border border-orange-400/50'
+                  : 'bg-slate-800/60 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-700/60'
+              }`}
+            >
+              <Sparkles size={16} className="text-orange-400" />
+              Model Poster: List Harga (Game/E-Money)
+            </button>
           </div>
+
+          {/* Sub-selector khusus Model Poster List Harga Produk */}
+          {activeNotaTab === 'price-list' && (
+            <div className="flex flex-col gap-2.5 mb-5 p-3.5 bg-slate-900/90 border border-orange-500/30 rounded-2xl text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-orange-300 font-bold px-1 flex items-center gap-1.5">
+                  <Sparkles size={14} className="text-orange-400" /> Pilihan Brand Produk:
+                </span>
+                <button
+                  onClick={() => { setPriceListBrand('FREE FIRE'); setPriceListPage(0); }}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                    priceListBrand === 'FREE FIRE'
+                      ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-md shadow-orange-500/30'
+                      : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                  }`}
+                >
+                  🔥 Free Fire
+                </button>
+                <button
+                  onClick={() => { setPriceListBrand('MOBILE LEGENDS'); setPriceListPage(0); }}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                    priceListBrand === 'MOBILE LEGENDS'
+                      ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-500/30'
+                      : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                  }`}
+                >
+                  ⚔️ Mobile Legends
+                </button>
+                <button
+                  onClick={() => { setPriceListBrand('DANA'); setPriceListPage(0); }}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                    priceListBrand === 'DANA'
+                      ? 'bg-blue-500 text-white shadow-md shadow-blue-500/30'
+                      : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                  }`}
+                >
+                  💳 E-Money DANA
+                </button>
+                <button
+                  onClick={() => { setPriceListBrand('PLN'); setPriceListPage(0); }}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                    priceListBrand === 'PLN'
+                      ? 'bg-yellow-500 text-slate-950 shadow-md shadow-yellow-500/30 font-bold'
+                      : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                  }`}
+                >
+                  ⚡ Token PLN
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800">
+                <span className="text-amber-300 font-bold px-1 flex items-center gap-1.5">
+                  <Crown size={14} className="text-amber-400" /> Tipe Tarif Harga:
+                </span>
+                <button
+                  onClick={() => setPriceListType('owner')}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                    priceListType === 'owner'
+                      ? 'bg-amber-400 text-slate-950 shadow-md shadow-amber-400/30'
+                      : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                  }`}
+                >
+                  💼 Harga Jual Owner (Termurah)
+                </button>
+                <button
+                  onClick={() => setPriceListType('vip')}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                    priceListType === 'vip'
+                      ? 'bg-purple-500 text-white shadow-md shadow-purple-500/30'
+                      : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                  }`}
+                >
+                  👑 Harga Member VIP
+                </button>
+                <button
+                  onClick={() => setPriceListType('biasa')}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                    priceListType === 'biasa'
+                      ? 'bg-sky-500 text-white shadow-md shadow-sky-500/30'
+                      : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                  }`}
+                >
+                  👤 Harga Pelanggan Biasa
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800">
+                <span className="text-orange-300 font-bold px-1 flex items-center gap-1.5">
+                  📑 Halaman Poster (Multi-Part):
+                </span>
+                <button
+                  onClick={() => setPriceListPage(0)}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                    priceListPage === 0
+                      ? 'bg-orange-500 text-white shadow-md shadow-orange-500/30'
+                      : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                  }`}
+                >
+                  📄 Part 1 (Item 1-12)
+                </button>
+                <button
+                  onClick={() => setPriceListPage(1)}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                    priceListPage === 1
+                      ? 'bg-orange-500 text-white shadow-md shadow-orange-500/30'
+                      : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                  }`}
+                >
+                  📄 Part 2 (Kelanjutan)
+                </button>
+                <button
+                  onClick={() => setPriceListPage(2)}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                    priceListPage === 2
+                      ? 'bg-orange-500 text-white shadow-md shadow-orange-500/30'
+                      : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                  }`}
+                >
+                  📄 Part 3 (Kelanjutan)
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Sub-selector khusus Model Cek Tagihan Pascabayar (Ditemukan vs Tidak Ditemukan) */}
           {activeNotaTab === 'tagihan-pasca' && (

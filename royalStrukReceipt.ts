@@ -614,6 +614,7 @@ export async function generateRoyalTidakLunasReceipt(data: RoyalStrukData): Prom
 
     // Kolom Kanan (Right Aligned)
     ctx.textAlign = 'right';
+    const statusLower = (data.status || '').toLowerCase();
     const isStatusGagal = statusLower.includes('gagal') || statusLower.includes('fail');
     const displayStatusLabel = isStatusGagal ? 'Status: GAGAL' : 'Status: TIDAK LUNAS';
 

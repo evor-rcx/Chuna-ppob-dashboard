@@ -31,6 +31,8 @@ import { generateOrderConfirmationSticker } from "./stickerConfirmation";
 import { generateEmeraldConfirmationImage } from "./emeraldConfirmationReceipt";
 import { generateKonfirmasiReceipt, formatKonfirmasiMessage, formatKonfirmasiSuccessCaption, formatKonfirmasiFailedCaption } from "./konfirmasiReceipt";
 import { generatePascabayarTagihanReceipt, formatPascabayarTagihanMessage, formatPascabayarNotFoundMessage } from "./pascabayarTagihanReceipt";
+import { DEFAULT_PREPAID_PRODUCTS, DEFAULT_PASCA_PRODUCTS } from "./defaultDigiflazzProducts";
+import { generatePriceListImage, generatePriceListImages } from "./priceListReceipt";
 
 import path from 'path';
 
@@ -60,6 +62,17 @@ function isTelegramMatch(telegram, userId, username) {
     const idPrefixed = `id:${idStr}`;
     const un = username ? (username.startsWith('@') ? username.toLowerCase() : `@${username.toLowerCase()}`) : null;
     return parts.includes(idStr) || parts.includes(idPrefixed) || (un ? parts.includes(un) : false);
+}
+
+function getOwnerMenuKeyboard() {
+    return [
+        [{ text: "📒 Cek Utang Member" }],
+        [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
+        [{ text: "👤 List Harga Biasa" }, { text: "👑 List Harga VIP" }],
+        [{ text: "💼 List Harga Owner" }, { text: "💳 Saldo Pusat" }],
+        [{ text: "⚙️ Pengaturan" }, { text: "📢 Pengumuman WA" }],
+        [{ text: "🧹 Bersihkan Sampah" }, { text: "📥 Fitur Download" }]
+    ];
 }
 
 
@@ -5971,8 +5984,9 @@ async function generateKodeBayar(nohp: string, pkg: any, provider: string): Prom
     }
 }
 async function getDigiflazzProducts(type: "prepaid" | "pasca") {
+  const fallbackList = type === "pasca" ? DEFAULT_PASCA_PRODUCTS : DEFAULT_PREPAID_PRODUCTS;
   if (!digiflazzUsername || !digiflazzApiKey) {
-    throw new Error("Digiflazz belum dikonfigurasi");
+    return fallbackList;
   }
 
   const cacheKey = type;
@@ -5980,32 +5994,41 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca") {
     return productsCache[cacheKey].data;
   }
 
-  let cmd = "prepaid";
-  if (type === "pasca") cmd = "pasca";
-  let signText = digiflazzUsername + digiflazzApiKey + "pricelist";
-  const sign = crypto.createHash("md5").update(signText).digest("hex");
+  try {
+    let cmd = "prepaid";
+    if (type === "pasca") cmd = "pasca";
+    let signText = digiflazzUsername + digiflazzApiKey + "pricelist";
+    const sign = crypto.createHash("md5").update(signText).digest("hex");
 
-  const response = await fetch("https://api.digiflazz.com/v1/price-list", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      cmd: cmd,
-      username: digiflazzUsername,
-      sign: sign
-    })
-  });
-  
-  const data = await response.json();
-  if (data.data && Array.isArray(data.data)) {
-    productsCache[cacheKey].data = data.data;
-    productsCache[cacheKey].timestamp = Date.now();
-    return data.data;
-  } else {
-    if (productsCache[cacheKey].data) {
-        console.warn("Digiflazz pricelist error, using stale cache:", data.data?.message);
-        return productsCache[cacheKey].data; // Fallback to stale cache
+    const response = await fetch("https://api.digiflazz.com/v1/price-list", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        cmd: cmd,
+        username: digiflazzUsername,
+        sign: sign
+      })
+    });
+    
+    const data = await response.json();
+    if (data.data && Array.isArray(data.data) && data.data.length > 0) {
+      productsCache[cacheKey].data = data.data;
+      productsCache[cacheKey].timestamp = Date.now();
+      return data.data;
+    } else {
+      if (productsCache[cacheKey].data) {
+          console.warn("Digiflazz pricelist error, using stale cache:", data.data?.message);
+          return productsCache[cacheKey].data; // Fallback to stale cache
+      }
+      console.warn("Digiflazz pricelist error, using fallback catalog:", data.data?.message || data.message);
+      return fallbackList;
     }
-    throw new Error(data.data?.message || data.message || "Gagal mengambil produk");
+  } catch (err: any) {
+    console.warn("Digiflazz fetch error, using fallback catalog:", err.message);
+    if (productsCache[cacheKey]?.data) {
+      return productsCache[cacheKey].data;
+    }
+    return fallbackList;
   }
 }
 
@@ -6045,13 +6068,6 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca") {
   });
 
   app.get("/api/digiflazz/products", async (req, res) => {
-
-    if (!digiflazzUsername || !digiflazzApiKey) {
-      return res.status(400).json({ success: false, error: "Digiflazz belum dikonfigurasi" });
-    }
-    
-    
-    
     try {
       const type = req.query.type as string || "prepaid";
       const products = await getDigiflazzProducts(type as "prepaid" | "pasca");
@@ -6059,13 +6075,21 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca") {
         ...p,
         fee_biasa: getProductFee(p.buyer_sku_code).biasa,
         fee_vip: getProductFee(p.buyer_sku_code).vip,
-        fee_owner: getProductFee(p.buyer_sku_code).owner, owner_fixed: getProductFee(p.buyer_sku_code).owner_fixed
+        fee_owner: getProductFee(p.buyer_sku_code).owner, 
+        owner_fixed: getProductFee(p.buyer_sku_code).owner_fixed
       }));
       res.json({ success: true, data: mapped });
     } catch (err: any) {
-      res.status(400).json({ success: false, error: err.message });
+      const fallbackList = req.query.type === "pasca" ? DEFAULT_PASCA_PRODUCTS : DEFAULT_PREPAID_PRODUCTS;
+      const mapped = fallbackList.map((p: any) => ({
+        ...p,
+        fee_biasa: getProductFee(p.buyer_sku_code).biasa,
+        fee_vip: getProductFee(p.buyer_sku_code).vip,
+        fee_owner: getProductFee(p.buyer_sku_code).owner, 
+        owner_fixed: getProductFee(p.buyer_sku_code).owner_fixed
+      }));
+      res.json({ success: true, data: mapped });
     }
-
   });
 
   // --- Telegram Bot API Routes ---
@@ -6488,19 +6512,13 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
             
             await ctx.reply(`⏳ Transaksi Sedang Diproses (Network Error)Pesananmu sedang dikonfirmasi oleh sistem pusat meski terjadi gangguan koneksi.Mohon tunggu update otomatis dari Chuna atau hubungi Admin.Pesan Error: ${e.message}`);
         }
-        
 
         delete userStates[ctx.from?.id || 0];
         const isOwner = db.owners.includes(ctx.from?.id);
         if (isOwner) {
             await ctx.reply("Silakan pilih menu selanjutnya:", {
                 reply_markup: {
-                    keyboard: [
-                        [{ text: "📒 Cek Utang Member" }],
-                        [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
-                        [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
-                        [{ text: "📢 Pengumuman WA" }, { text: "📥 Fitur Download" }]
-                    ],
+                    keyboard: getOwnerMenuKeyboard(),
                     resize_keyboard: true
                 }
             });
@@ -6988,13 +7006,7 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
              `━━━━━━━━━━━━━━━━━━━━━\n   👑  E4 STORE  👑\n   OFFICIAL MANAGEMENT PANEL\n━━━━━━━━━━━━━━━━━━━━━\n\nSelamat datang, Administrator.\nSemua fitur resmi telah siap dioperasikan.\n\nMau kelola apa hari ini?`,
              {
                reply_markup: {
-                 keyboard: [
-                   [{ text: "📒 Cek Utang Member" }],
-                      [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
-                      [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
-                      [{ text: "🧹 Bersihkan Sampah" }, { text: "📢 Pengumuman WA" }],
-                      [{ text: "📥 Fitur Download" }]
-                 ],
+                 keyboard: getOwnerMenuKeyboard(),
                  resize_keyboard: true
                }
              }
@@ -7557,13 +7569,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
           delete userStates[ctx.from.id];
           await ctx.reply(`━━━━━━━━━━━━━━━━━━━━━\n   👑  E4 STORE  👑\n   OFFICIAL MANAGEMENT PANEL\n━━━━━━━━━━━━━━━━━━━━━\n\nSelamat datang, Administrator.\nSemua fitur resmi telah siap dioperasikan.\n\nMau kelola apa hari ini?`, {
               reply_markup: {
-                  keyboard: [
-                      [{ text: "📒 Cek Utang Member" }],
-                      [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
-                      [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
-                      [{ text: "🧹 Bersihkan Sampah" }, { text: "📢 Pengumuman WA" }],
-                      [{ text: "📥 Fitur Download" }]
-                  ],
+                  keyboard: getOwnerMenuKeyboard(),
                   resize_keyboard: true
               }
           });
@@ -7665,6 +7671,268 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
           });
       });
 
+
+      
+      // =========================================================================
+      // --- FITUR POSTER GAMBAR LIST HARGA PRODUK (CANVAS SESUAI GAMBAR 2) ---
+      // =========================================================================
+      bot.hears(["🏷️ List Harga Produk", "🏷️ List Harga", "List Harga", "/listharga"], async (ctx) => {
+        if (!db.owners.includes(ctx.from?.id || 0)) return;
+        delete userStates[ctx.from.id];
+        await ctx.reply(
+          `🏷️ *MENU LIST HARGA PRODUK E4 STORE*\n━━━━━━━━━━━━━━━━━━━━━\nSilakan pilih tipe harga yang ingin dicetak ke dalam poster gambar:\n\n1️⃣ 👤 *List Harga Biasa* (Harga modal + Fee Biasa)\n2️⃣ 👑 *List Harga VIP* (Harga khusus Member VIP)\n3️⃣ 💼 *List Harga Jual Owner* (Harga patokan jual Owner / Termurah)\n\n_Pilih salah satu tombol di bawah:_`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              keyboard: [
+                [{ text: "👤 List Harga Biasa" }, { text: "👑 List Harga VIP" }],
+                [{ text: "💼 List Harga Owner" }],
+                [{ text: "🔙 Kembali ke Menu Owner" }]
+              ],
+              resize_keyboard: true
+            }
+          }
+        );
+      });
+
+      bot.hears(["👤 List Harga Biasa", "👑 List Harga VIP", "💼 List Harga Owner", "💼 List Harga Jual Owner"], async (ctx) => {
+        if (!db.owners.includes(ctx.from?.id || 0)) return;
+        const text = ctx.message.text;
+        let priceType: 'biasa' | 'vip' | 'owner' = 'owner';
+        let labelType = 'Harga Jual Owner';
+        if (text.includes("Biasa")) {
+          priceType = 'biasa';
+          labelType = 'Harga Pelanggan Biasa';
+        } else if (text.includes("VIP")) {
+          priceType = 'vip';
+          labelType = 'Harga Member VIP';
+        }
+
+        userStates[ctx.from.id] = { step: 'PRICE_LIST_CATEGORY', data: { priceType, labelType } };
+
+        await ctx.reply(
+          `📂 *PILIH KATEGORI PRODUK*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe Harga Terpilih: *${labelType}*\n\nSilakan pilih kategori produk yang ingin dicetak gambarnya:`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              keyboard: [
+                [{ text: "🎮 Games" }, { text: "💳 E-Money" }],
+                [{ text: "📱 Pulsa" }, { text: "⚡ Token PLN" }],
+                [{ text: "🏷️ Ganti Tipe Harga" }, { text: "🔙 Kembali ke Menu Owner" }]
+              ],
+              resize_keyboard: true
+            }
+          }
+        );
+      });
+
+      bot.hears("🏷️ Ganti Tipe Harga", async (ctx) => {
+        if (!db.owners.includes(ctx.from?.id || 0)) return;
+        await ctx.reply("Silakan pilih tipe harga yang ingin dicetak:", {
+          reply_markup: {
+            keyboard: [
+              [{ text: "👤 List Harga Biasa" }, { text: "👑 List Harga VIP" }],
+              [{ text: "💼 List Harga Owner" }],
+              [{ text: "🔙 Kembali ke Menu Owner" }]
+            ],
+            resize_keyboard: true
+          }
+        });
+      });
+
+      bot.hears("🎮 Games", async (ctx) => {
+        if (!db.owners.includes(ctx.from?.id || 0)) return;
+        const state = userStates[ctx.from.id];
+        const priceType = state?.data?.priceType || 'owner';
+        const labelType = state?.data?.labelType || 'Harga Jual Owner';
+        userStates[ctx.from.id] = { step: 'PRICE_LIST_BRAND', data: { priceType, labelType, category: 'Games' } };
+
+        await ctx.reply(
+          `🎮 *PILIH GAME*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe: *${labelType}*\n\nSilakan pilih game yang ingin dicetak list harganya:`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              keyboard: [
+                [{ text: "🔥 Free Fire" }, { text: "⚔️ Mobile Legends" }],
+                [{ text: "🪂 PUBG Mobile" }, { text: "⚡ Genshin Impact" }],
+                [{ text: "🧱 Roblox" }, { text: "🎯 Valorant" }],
+                [{ text: "🔙 Kembali ke Kategori" }, { text: "🔙 Kembali ke Menu Owner" }]
+              ],
+              resize_keyboard: true
+            }
+          }
+        );
+      });
+
+      bot.hears("💳 E-Money", async (ctx) => {
+        if (!db.owners.includes(ctx.from?.id || 0)) return;
+        const state = userStates[ctx.from.id];
+        const priceType = state?.data?.priceType || 'owner';
+        const labelType = state?.data?.labelType || 'Harga Jual Owner';
+        userStates[ctx.from.id] = { step: 'PRICE_LIST_BRAND', data: { priceType, labelType, category: 'E-Money' } };
+
+        await ctx.reply(
+          `💳 *PILIH E-MONEY*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe: *${labelType}*\n\nSilakan pilih e-wallet yang ingin dicetak list harganya:`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              keyboard: [
+                [{ text: "DANA" }, { text: "GoPay" }],
+                [{ text: "OVO" }, { text: "ShopeePay" }],
+                [{ text: "🔙 Kembali ke Kategori" }, { text: "🔙 Kembali ke Menu Owner" }]
+              ],
+              resize_keyboard: true
+            }
+          }
+        );
+      });
+
+      bot.hears("📱 Pulsa", async (ctx) => {
+        if (!db.owners.includes(ctx.from?.id || 0)) return;
+        const state = userStates[ctx.from.id];
+        const priceType = state?.data?.priceType || 'owner';
+        const labelType = state?.data?.labelType || 'Harga Jual Owner';
+        userStates[ctx.from.id] = { step: 'PRICE_LIST_BRAND', data: { priceType, labelType, category: 'Pulsa' } };
+
+        await ctx.reply(
+          `📱 *PILIH OPERATOR PULSA*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe: *${labelType}*\n\nSilakan pilih operator yang ingin dicetak list harganya:`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              keyboard: [
+                [{ text: "Telkomsel" }, { text: "Indosat" }],
+                [{ text: "XL" }, { text: "Axis" }],
+                [{ text: "Tri" }],
+                [{ text: "🔙 Kembali ke Kategori" }, { text: "🔙 Kembali ke Menu Owner" }]
+              ],
+              resize_keyboard: true
+            }
+          }
+        );
+      });
+
+      bot.hears("🔙 Kembali ke Kategori", async (ctx) => {
+        if (!db.owners.includes(ctx.from?.id || 0)) return;
+        const state = userStates[ctx.from.id];
+        const labelType = state?.data?.labelType || 'Harga Jual Owner';
+        await ctx.reply(
+          `📂 *PILIH KATEGORI PRODUK*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe Harga Terpilih: *${labelType}*\n\nSilakan pilih kategori:`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              keyboard: [
+                [{ text: "🎮 Games" }, { text: "💳 E-Money" }],
+                [{ text: "📱 Pulsa" }, { text: "⚡ Token PLN" }],
+                [{ text: "🏷️ Ganti Tipe Harga" }, { text: "🔙 Kembali ke Menu Owner" }]
+              ],
+              resize_keyboard: true
+            }
+          }
+        );
+      });
+
+      async function generateAndSendPriceList(ctx: any, rawBrandText: string) {
+        if (!db.owners.includes(ctx.from?.id || 0)) return;
+        const state = userStates[ctx.from?.id || 0];
+        const priceType: 'biasa' | 'vip' | 'owner' = state?.data?.priceType || 'owner';
+        const labelType: string = state?.data?.labelType || 'Harga Jual Owner';
+
+        let targetBrand = rawBrandText.replace(/^[^\w\s]+/gi, '').trim().toUpperCase();
+        if (targetBrand.includes('FREE FIRE')) targetBrand = 'FREE FIRE';
+        else if (targetBrand.includes('MOBILE LEGEND')) targetBrand = 'MOBILE LEGENDS';
+        else if (targetBrand.includes('PUBG')) targetBrand = 'PUBG MOBILE';
+        else if (targetBrand.includes('GENSHIN')) targetBrand = 'GENSHIN IMPACT';
+        else if (targetBrand.includes('ROBLOX')) targetBrand = 'ROBLOX';
+        else if (targetBrand.includes('VALORANT')) targetBrand = 'VALORANT';
+        else if (targetBrand.includes('DANA')) targetBrand = 'DANA';
+        else if (targetBrand.includes('GOPAY')) targetBrand = 'GOPAY';
+        else if (targetBrand.includes('OVO')) targetBrand = 'OVO';
+        else if (targetBrand.includes('SHOPEEPAY') || targetBrand.includes('SHOPEE')) targetBrand = 'SHOPEEPAY';
+        else if (targetBrand.includes('TELKOMSEL')) targetBrand = 'TELKOMSEL';
+        else if (targetBrand.includes('INDOSAT')) targetBrand = 'INDOSAT';
+        else if (targetBrand.includes('XL')) targetBrand = 'XL';
+        else if (targetBrand.includes('AXIS')) targetBrand = 'AXIS';
+        else if (targetBrand.includes('TRI')) targetBrand = 'TRI';
+        else if (targetBrand.includes('PLN')) targetBrand = 'PLN';
+
+        await ctx.reply(`🎨 *Sedang merender gambar poster List Harga ${targetBrand}...*\n_Mengambil tarif ${labelType}..._`, { parse_mode: 'Markdown' });
+
+        try {
+          const products = await getDigiflazzProducts('prepaid');
+          let brandProds = products.filter((p: any) => (p.brand || '').toUpperCase().trim() === targetBrand);
+          if (brandProds.length === 0) {
+            brandProds = products.filter((p: any) => (p.brand || '').toUpperCase().includes(targetBrand));
+          }
+          if (brandProds.length === 0) {
+            return ctx.reply(`⚠️ Tidak ditemukan produk untuk brand *${targetBrand}*.`);
+          }
+
+          const mapped = brandProds.map((p: any) => {
+            const fee = getProductFee(p.buyer_sku_code);
+            let calculatedPrice = Number(p.price);
+            if (priceType === 'biasa') {
+              calculatedPrice += (fee.biasa || 0);
+            } else if (priceType === 'vip') {
+              calculatedPrice += (fee.vip || 0);
+            } else {
+              calculatedPrice = fee.owner_fixed !== undefined && fee.owner_fixed !== 0 ? fee.owner_fixed : (calculatedPrice + (fee.owner || 0));
+            }
+            return {
+              buyer_sku_code: p.buyer_sku_code,
+              product_name: p.product_name,
+              brand: p.brand,
+              price: calculatedPrice,
+              category: p.category
+            };
+          });
+
+          const buffers = await generatePriceListImages({
+            brand: targetBrand,
+            priceType,
+            products: mapped,
+            category: state?.data?.category || brandProds[0]?.category || 'Games'
+          }, 12);
+
+          const totalPages = buffers.length;
+          for (let i = 0; i < totalPages; i++) {
+            const startIdx = i * 12 + 1;
+            const endIdx = Math.min((i + 1) * 12, mapped.length);
+            const partHeader = totalPages > 1 ? ` (Halaman ${i + 1}/${totalPages})` : '';
+            const rangeText = totalPages > 1 
+              ? `📦 *Item:* ${startIdx} - ${endIdx} dari ${mapped.length} item\n`
+              : `📦 *Total Produk:* ${mapped.length} item\n`;
+
+            await ctx.replyWithPhoto(
+              { source: buffers[i] },
+              {
+                caption: `✅ *POSTER DAFTAR HARGA: ${targetBrand}${partHeader}*\n━━━━━━━━━━━━━━━━━━━━━\n👑 *Tipe Harga:* ${labelType}\n${rangeText}✨ *Desain:* Resmi E4 Store (Format Story 9:16)\n\n_Harga otomatis sesuai dengan konfigurasi di Web Dashboard!_${totalPages > 1 && i < totalPages - 1 ? '\n\n⏳ _Mengirim halaman kelanjutan berikutnya..._' : ''}`,
+                parse_mode: 'Markdown'
+              }
+            );
+          }
+        } catch (err: any) {
+          console.error("Gagal generate gambar list harga:", err);
+          await ctx.reply(`❌ Gagal membuat gambar list harga: ${err.message}`);
+        }
+      }
+
+      bot.hears(["🔥 Free Fire", "Free Fire", "free fire", "ff"], async (ctx) => generateAndSendPriceList(ctx, "FREE FIRE"));
+      bot.hears(["⚔️ Mobile Legends", "Mobile Legends", "mobile legends", "ml"], async (ctx) => generateAndSendPriceList(ctx, "MOBILE LEGENDS"));
+      bot.hears(["🪂 PUBG Mobile", "PUBG Mobile", "pubg"], async (ctx) => generateAndSendPriceList(ctx, "PUBG MOBILE"));
+      bot.hears(["⚡ Genshin Impact", "Genshin Impact", "genshin"], async (ctx) => generateAndSendPriceList(ctx, "GENSHIN IMPACT"));
+      bot.hears(["🧱 Roblox", "Roblox", "roblox"], async (ctx) => generateAndSendPriceList(ctx, "ROBLOX"));
+      bot.hears(["🎯 Valorant", "Valorant", "valorant"], async (ctx) => generateAndSendPriceList(ctx, "VALORANT"));
+      bot.hears(["DANA", "dana"], async (ctx) => generateAndSendPriceList(ctx, "DANA"));
+      bot.hears(["GoPay", "gopay"], async (ctx) => generateAndSendPriceList(ctx, "GOPAY"));
+      bot.hears(["OVO", "ovo"], async (ctx) => generateAndSendPriceList(ctx, "OVO"));
+      bot.hears(["ShopeePay", "shopeepay"], async (ctx) => generateAndSendPriceList(ctx, "SHOPEEPAY"));
+      bot.hears(["Telkomsel", "telkomsel"], async (ctx) => generateAndSendPriceList(ctx, "TELKOMSEL"));
+      bot.hears(["Indosat", "indosat"], async (ctx) => generateAndSendPriceList(ctx, "INDOSAT"));
+      bot.hears(["XL", "xl"], async (ctx) => generateAndSendPriceList(ctx, "XL"));
+      bot.hears(["Axis", "axis"], async (ctx) => generateAndSendPriceList(ctx, "AXIS"));
+      bot.hears(["Tri", "tri"], async (ctx) => generateAndSendPriceList(ctx, "TRI"));
+      bot.hears(["Smartfren", "smartfren"], async (ctx) => generateAndSendPriceList(ctx, "SMARTFREN"));
+      bot.hears(["⚡ Token PLN", "Token PLN", "PLN", "pln"], async (ctx) => generateAndSendPriceList(ctx, "PLN"));
 
       bot.hears("👑 List Member", async (ctx) => {
         if (!db.owners.includes(ctx.from.id)) return;
@@ -8629,7 +8897,32 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
         if (text.startsWith('/')) { return next(); }
         if (text === "🔙 Kembali") { return next(); }
         
-        const ownerMenu = ["📒 Cek Utang Member", "📝 Tambah Member", "👑 List Member", "💳 Saldo Pusat", "⚙️ Pengaturan", "📢 Pengumuman WA", "📸 Buat Story WA", "🧹 Bersihkan Sampah", "👑 Owner WA"];
+        const ownerMenu = [
+          "📒 Cek Utang Member", 
+          "📝 Tambah Member", 
+          "👑 List Member", 
+          "💳 Saldo Pusat", 
+          "⚙️ Pengaturan", 
+          "📢 Pengumuman WA", 
+          "📸 Buat Story WA", 
+          "🧹 Bersihkan Sampah", 
+          "👑 Owner WA",
+          "👤 List Harga Biasa",
+          "👑 List Harga VIP",
+          "💼 List Harga Owner",
+          "💼 List Harga Jual Owner",
+          "🏷️ List Harga Produk",
+          "🏷️ List Harga",
+          "🔙 Kembali ke Menu Owner",
+          "🔙 Kembali ke Kategori",
+          "🏷️ Ganti Tipe Harga",
+          "🎮 Games",
+          "💳 E-Money",
+          "📱 Pulsa",
+          "⚡ Token PLN",
+          "📶 Paket Data",
+          "🎟️ Voucher Digital"
+        ];
         if (ownerMenu.includes(text) && db.owners.includes(userId)) {
            delete userStates[userId];
            return next(); 
@@ -8638,6 +8931,13 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
         const state = userStates[userId];
         if (state) {
             switch (state.step) {
+                case 'PRICE_LIST_BRAND': {
+                  if (text === '🔙 Kembali ke Kategori' || text === '🔙 Kembali ke Menu Owner' || text === '🏷️ Ganti Tipe Harga') {
+                    return next();
+                  }
+                  await generateAndSendPriceList(ctx, text);
+                  return;
+                }
 
                 case 'TOPUP_SELECT_AMOUNT':
                 case 'TOPUP_INPUT_CUSTOM_AMOUNT': {
@@ -11080,6 +11380,61 @@ E4 Store`,
   });
 
   // Route demo langsung untuk gambar Konfirmasi Pembelian Customer (Picsart_26-09-28_21-18-20-870.png)
+  
+  // Route demo & preview untuk gambar List Harga Produk (Poster E4 Store)
+  app.get(["/api/demo-price-list-image", "/api/price-list-image"], async (req, res) => {
+    try {
+      const brand = (req.query.brand as string) || "FREE FIRE";
+      const priceType = ((req.query.type as string) || "owner") as 'biasa' | 'vip' | 'owner';
+      const products = await getDigiflazzProducts("prepaid");
+      const brandUpper = brand.toUpperCase().trim();
+      let filtered = products.filter((p: any) => (p.brand || "").toUpperCase().trim() === brandUpper);
+      if (filtered.length === 0) {
+        filtered = products.filter((p: any) => (p.brand || "").toUpperCase().includes(brandUpper));
+      }
+      if (filtered.length === 0) {
+        filtered = products.filter((p: any) => (p.brand || "").toUpperCase().includes("FREE FIRE"));
+      }
+      const mapped = filtered.map((p: any) => {
+        const fee = getProductFee(p.buyer_sku_code);
+        let calculatedPrice = Number(p.price);
+        if (priceType === 'biasa') {
+          calculatedPrice += (fee.biasa || 0);
+        } else if (priceType === 'vip') {
+          calculatedPrice += (fee.vip || 0);
+        } else {
+          calculatedPrice = fee.owner_fixed !== undefined && fee.owner_fixed !== 0 ? fee.owner_fixed : (calculatedPrice + (fee.owner || 0));
+        }
+        return {
+          buyer_sku_code: p.buyer_sku_code,
+          product_name: p.product_name,
+          brand: p.brand,
+          price: calculatedPrice,
+          category: p.category
+        };
+      });
+
+      const pageIndex = req.query.page ? Math.max(0, parseInt(req.query.page as string, 10)) : 0;
+      const buffers = await generatePriceListImages({
+        brand: brandUpper,
+        priceType,
+        products: mapped,
+        category: (filtered[0]?.category) || "Games"
+      }, 12);
+
+      const totalPages = buffers.length;
+      const chosenBuffer = buffers[pageIndex] || buffers[0];
+
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('X-Total-Pages', totalPages.toString());
+      res.setHeader('X-Current-Page', (pageIndex + 1).toString());
+      res.send(chosenBuffer);
+    } catch (e: any) {
+      res.status(500).send("Error: " + e.message);
+    }
+  });
+
   app.get("/api/demo-nota-konfirmasi", async (req, res) => {
     try {
         let waPhotoUrl: string | null = null;

@@ -422,7 +422,7 @@ export function Saldo({ onBack }: { onBack: () => void }) {
           <table className="w-full text-left">
             <thead>
               <tr className="text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-800/50 bg-slate-800/20">
-                <th className="px-6 py-3 font-semibold">ID Member</th>
+                <th className="px-6 py-3 font-semibold">ID Registrasi</th>
                 <th className="px-6 py-3 font-semibold">Username</th>
                 <th className="px-6 py-3 font-semibold text-center">Tipe Member</th>
                 <th className="px-6 py-3 font-semibold">Nomor WhatsApp</th>
