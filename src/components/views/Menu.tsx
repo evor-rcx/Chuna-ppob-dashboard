@@ -1,6 +1,6 @@
-import { BarChart3, ShoppingCart, FileText, Settings, Bot, Wallet, Users, Store, Lock, ShieldAlert, Sparkles, CheckCircle2, AlertCircle, RefreshCw, ZoomIn, Copy, Check, Crown } from 'lucide-react';
+import { BarChart3, ShoppingCart, FileText, Settings, Bot, Wallet, Users, Store, Lock, ShieldAlert, Sparkles, CheckCircle2, AlertCircle, RefreshCw, ZoomIn, Copy, Check, Crown, Search, Layers } from 'lucide-react';
 import { Page } from '../../types';
-import { ReactNode, useState } from 'react';
+import { ReactNode, useState, useEffect } from 'react';
 
 interface MenuProps {
   onNavigate: (page: Page) => void;
@@ -16,16 +16,35 @@ export function Menu({ onNavigate }: MenuProps) {
   const [errorMessage, setErrorMessage] = useState('');
 
   // Live Nota Model Preview State
-  const [activeNotaTab, setActiveNotaTab] = useState<'tagihan-pasca' | 'konfirmasi' | 'royal-tidaklunas' | 'royal' | 'tagihan' | 'lunas' | 'angsuran' | 'price-list'>('tagihan-pasca');
+  const [activeNotaTab, setActiveNotaTab] = useState<'price-list' | 'tagihan-pasca' | 'konfirmasi' | 'royal-tidaklunas' | 'royal' | 'tagihan' | 'lunas' | 'angsuran'>('price-list');
   const [pascaVariant, setPascaVariant] = useState<'ditemukan' | 'tidak-ditemukan'>('ditemukan');
   const [konfirmasiStatusTab, setKonfirmasiStatusTab] = useState<'pending' | 'sukses' | 'gagal-tujuan' | 'gagal-ip' | 'gagal-saldo' | 'gagal-cutoff' | 'gagal-refund-saldo' | 'gagal-refund-cash' | 'gagal-refund-utang'>('pending');
   const [royalCategory, setRoyalCategory] = useState<'game' | 'pln-token' | 'pln-pasca' | 'pulsa' | 'ewallet'>('pln-token');
-  const [priceListBrand, setPriceListBrand] = useState<'FREE FIRE' | 'MOBILE LEGENDS' | 'DANA' | 'PLN'>('FREE FIRE');
+  const [priceListCategory, setPriceListCategory] = useState<string>('Games');
+  const [priceListBrand, setPriceListBrand] = useState<string>('FREE FIRE');
   const [priceListType, setPriceListType] = useState<'owner' | 'vip' | 'biasa'>('owner');
   const [priceListPage, setPriceListPage] = useState<number>(0);
+  const [priceListTotalPages, setPriceListTotalPages] = useState<number>(1);
+  const [priceListTotalProducts, setPriceListTotalProducts] = useState<number>(12);
+  const [customBrandSearch, setCustomBrandSearch] = useState<string>('');
   const [imageTimestamp, setImageTimestamp] = useState<number>(Date.now());
   const [isZoomed, setIsZoomed] = useState<boolean>(false);
   const [copiedText, setCopiedText] = useState<boolean>(false);
+
+  useEffect(() => {
+    fetch(`/api/price-list-meta?brand=${encodeURIComponent(priceListBrand)}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.success) {
+          setPriceListTotalPages(data.totalPages || 1);
+          setPriceListTotalProducts(data.totalProducts || 0);
+          if (priceListPage >= (data.totalPages || 1)) {
+            setPriceListPage(0);
+          }
+        }
+      })
+      .catch(() => {});
+  }, [priceListBrand]);
 
   const tagihanPascaDitemukanCaption = `Tagihan Kak Samsul ditemukan!
 Rincian lengkapnya sudah Chuna lampirkan di gambar ya. Silakan lanjutkan pembayaran.
@@ -347,6 +366,13 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
               >
                 <RefreshCw size={14} /> Refresh
               </button>
+              <button
+                onClick={() => setIsZoomed(true)}
+                className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 rounded-xl text-xs font-medium transition-colors flex items-center gap-1.5 border border-amber-500/30 cursor-pointer"
+                title="Perbesar gambar nota"
+              >
+                <ZoomIn size={14} /> Perbesar
+              </button>
             </div>
           </div>
 
@@ -444,54 +470,158 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
 
           {/* Sub-selector khusus Model Poster List Harga Produk */}
           {activeNotaTab === 'price-list' && (
-            <div className="flex flex-col gap-2.5 mb-5 p-3.5 bg-slate-900/90 border border-orange-500/30 rounded-2xl text-xs">
+            <div className="flex flex-col gap-3 mb-6 p-4 bg-slate-900/90 border border-orange-500/40 rounded-2xl text-xs shadow-xl">
+              {/* 1. Kategori Produk */}
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-orange-300 font-bold px-1 flex items-center gap-1.5">
-                  <Sparkles size={14} className="text-orange-400" /> Pilihan Brand Produk:
+                  <Layers size={14} className="text-orange-400" /> Kategori Produk:
                 </span>
-                <button
-                  onClick={() => { setPriceListBrand('FREE FIRE'); setPriceListPage(0); }}
-                  className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
-                    priceListBrand === 'FREE FIRE'
-                      ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-md shadow-orange-500/30'
-                      : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
-                  }`}
-                >
-                  🔥 Free Fire
-                </button>
-                <button
-                  onClick={() => { setPriceListBrand('MOBILE LEGENDS'); setPriceListPage(0); }}
-                  className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
-                    priceListBrand === 'MOBILE LEGENDS'
-                      ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-500/30'
-                      : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
-                  }`}
-                >
-                  ⚔️ Mobile Legends
-                </button>
-                <button
-                  onClick={() => { setPriceListBrand('DANA'); setPriceListPage(0); }}
-                  className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
-                    priceListBrand === 'DANA'
-                      ? 'bg-blue-500 text-white shadow-md shadow-blue-500/30'
-                      : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
-                  }`}
-                >
-                  💳 E-Money DANA
-                </button>
-                <button
-                  onClick={() => { setPriceListBrand('PLN'); setPriceListPage(0); }}
-                  className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
-                    priceListBrand === 'PLN'
-                      ? 'bg-yellow-500 text-slate-950 shadow-md shadow-yellow-500/30 font-bold'
-                      : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
-                  }`}
-                >
-                  ⚡ Token PLN
-                </button>
+                {[
+                  { id: 'Games', label: '🎮 Games' },
+                  { id: 'E-Money', label: '💳 E-Money' },
+                  { id: 'Pulsa', label: '📱 Pulsa' },
+                  { id: 'PLN', label: '⚡ Token PLN' }
+                ].map((cat) => (
+                  <button
+                    key={cat.id}
+                    onClick={() => {
+                      setPriceListCategory(cat.id);
+                      setPriceListPage(0);
+                      if (cat.id === 'Games') setPriceListBrand('FREE FIRE');
+                      else if (cat.id === 'E-Money') setPriceListBrand('DANA');
+                      else if (cat.id === 'Pulsa') setPriceListBrand('TELKOMSEL');
+                      else if (cat.id === 'PLN') setPriceListBrand('PLN');
+                    }}
+                    className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                      priceListCategory === cat.id
+                        ? 'bg-gradient-to-r from-orange-600 to-amber-600 text-white shadow-md shadow-orange-600/30 border border-orange-400/40'
+                        : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700'
+                    }`}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800">
+              {/* 2. Brand / Game Produk Sesuai Kategori */}
+              <div className="flex flex-wrap items-center gap-2 pt-2.5 border-t border-slate-800">
+                <span className="text-orange-300 font-bold px-1 flex items-center gap-1.5">
+                  <Sparkles size={14} className="text-orange-400" /> Pilih Brand ({priceListCategory}):
+                </span>
+
+                {priceListCategory === 'Games' && (
+                  <>
+                    {[
+                      { id: 'FREE FIRE', label: '🔥 Free Fire' },
+                      { id: 'MOBILE LEGENDS', label: '⚔️ Mobile Legends' },
+                      { id: 'PUBG MOBILE', label: '🪂 PUBG Mobile' },
+                      { id: 'GENSHIN IMPACT', label: '⚡ Genshin' },
+                      { id: 'ROBLOX', label: '🧱 Roblox' },
+                      { id: 'VALORANT', label: '🎯 Valorant' }
+                    ].map((b) => (
+                      <button
+                        key={b.id}
+                        onClick={() => { setPriceListBrand(b.id); setPriceListPage(0); }}
+                        className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                          priceListBrand === b.id
+                            ? 'bg-orange-500 text-white shadow-md shadow-orange-500/30'
+                            : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                        }`}
+                      >
+                        {b.label}
+                      </button>
+                    ))}
+                  </>
+                )}
+
+                {priceListCategory === 'E-Money' && (
+                  <>
+                    {[
+                      { id: 'DANA', label: '💳 DANA' },
+                      { id: 'GOPAY', label: '🟢 GoPay' },
+                      { id: 'OVO', label: '🟣 OVO' },
+                      { id: 'SHOPEEPAY', label: '🟠 ShopeePay' }
+                    ].map((b) => (
+                      <button
+                        key={b.id}
+                        onClick={() => { setPriceListBrand(b.id); setPriceListPage(0); }}
+                        className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                          priceListBrand === b.id
+                            ? 'bg-blue-500 text-white shadow-md shadow-blue-500/30'
+                            : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                        }`}
+                      >
+                        {b.label}
+                      </button>
+                    ))}
+                  </>
+                )}
+
+                {priceListCategory === 'Pulsa' && (
+                  <>
+                    {[
+                      { id: 'TELKOMSEL', label: '🔴 Telkomsel' },
+                      { id: 'INDOSAT', label: '🟡 Indosat' },
+                      { id: 'XL', label: '🔵 XL' },
+                      { id: 'AXIS', label: '🟣 Axis' },
+                      { id: 'TRI', label: '🟠 Tri' },
+                      { id: 'SMARTFREN', label: '🔴 Smartfren' }
+                    ].map((b) => (
+                      <button
+                        key={b.id}
+                        onClick={() => { setPriceListBrand(b.id); setPriceListPage(0); }}
+                        className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                          priceListBrand === b.id
+                            ? 'bg-red-500 text-white shadow-md shadow-red-500/30'
+                            : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                        }`}
+                      >
+                        {b.label}
+                      </button>
+                    ))}
+                  </>
+                )}
+
+                {priceListCategory === 'PLN' && (
+                  <button
+                    onClick={() => { setPriceListBrand('PLN'); setPriceListPage(0); }}
+                    className="px-3 py-1.5 rounded-xl font-bold bg-yellow-500 text-slate-950 shadow-md shadow-yellow-500/30"
+                  >
+                    ⚡ Token PLN
+                  </button>
+                )}
+
+                {/* Input manual pencarian brand Digiflazz */}
+                <div className="flex items-center gap-1.5 ml-auto">
+                  <input
+                    type="text"
+                    placeholder="Ketik brand lain..."
+                    value={customBrandSearch}
+                    onChange={(e) => setCustomBrandSearch(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && customBrandSearch.trim()) {
+                        setPriceListBrand(customBrandSearch.trim().toUpperCase());
+                        setPriceListPage(0);
+                      }
+                    }}
+                    className="px-2.5 py-1 bg-slate-950 border border-slate-700 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 w-36"
+                  />
+                  <button
+                    onClick={() => {
+                      if (customBrandSearch.trim()) {
+                        setPriceListBrand(customBrandSearch.trim().toUpperCase());
+                        setPriceListPage(0);
+                      }
+                    }}
+                    className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs font-semibold cursor-pointer border border-slate-700"
+                  >
+                    <Search size={12} />
+                  </button>
+                </div>
+              </div>
+
+              {/* 3. Tipe Tarif Harga */}
+              <div className="flex flex-wrap items-center gap-2 pt-2.5 border-t border-slate-800">
                 <span className="text-amber-300 font-bold px-1 flex items-center gap-1.5">
                   <Crown size={14} className="text-amber-400" /> Tipe Tarif Harga:
                 </span>
@@ -527,40 +657,27 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
                 </button>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800">
+              {/* 4. Halaman Poster (Multi-Part jika ada kelebihan) */}
+              <div className="flex flex-wrap items-center gap-2 pt-2.5 border-t border-slate-800">
                 <span className="text-orange-300 font-bold px-1 flex items-center gap-1.5">
                   📑 Halaman Poster (Multi-Part):
                 </span>
-                <button
-                  onClick={() => setPriceListPage(0)}
-                  className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
-                    priceListPage === 0
-                      ? 'bg-orange-500 text-white shadow-md shadow-orange-500/30'
-                      : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
-                  }`}
-                >
-                  📄 Part 1 (Item 1-12)
-                </button>
-                <button
-                  onClick={() => setPriceListPage(1)}
-                  className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
-                    priceListPage === 1
-                      ? 'bg-orange-500 text-white shadow-md shadow-orange-500/30'
-                      : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
-                  }`}
-                >
-                  📄 Part 2 (Kelanjutan)
-                </button>
-                <button
-                  onClick={() => setPriceListPage(2)}
-                  className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
-                    priceListPage === 2
-                      ? 'bg-orange-500 text-white shadow-md shadow-orange-500/30'
-                      : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
-                  }`}
-                >
-                  📄 Part 3 (Kelanjutan)
-                </button>
+                {Array.from({ length: priceListTotalPages }).map((_, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => setPriceListPage(idx)}
+                    className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                      priceListPage === idx
+                        ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-md shadow-orange-500/30'
+                        : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                    }`}
+                  >
+                    📄 Part {idx + 1} {priceListTotalPages > 1 ? `(Item ${idx * 12 + 1}-${Math.min((idx + 1) * 12, priceListTotalProducts)})` : `(Semua ${priceListTotalProducts} Item)`}
+                  </button>
+                ))}
+                <span className="text-[11px] text-slate-400 ml-1">
+                  • Total {priceListTotalProducts} produk terdaftar ({priceListTotalPages} poster)
+                </span>
               </div>
             </div>
           )}
@@ -797,12 +914,12 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
                 <>
                   <div 
                     onClick={() => setIsZoomed(true)}
-                    className="relative group cursor-pointer w-full max-w-md rounded-2xl overflow-hidden border-2 border-amber-500/40 shadow-2xl bg-black transition-all hover:scale-[1.01] hover:border-amber-400"
+                    className={`relative group cursor-pointer w-full ${activeNotaTab === 'price-list' ? 'max-w-xs' : 'max-w-md'} rounded-2xl overflow-hidden border-2 ${activeNotaTab === 'price-list' ? 'border-orange-500/50 hover:border-orange-400' : 'border-amber-500/40 hover:border-amber-400'} shadow-2xl bg-black transition-all hover:scale-[1.01]`}
                   >
                     <img
                       src={currentImageUrl}
                       alt="Preview Model Nota E4 Store"
-                      className="w-full h-auto aspect-square object-contain block bg-[#0a0a0c]"
+                      className={`w-full h-auto ${activeNotaTab === 'price-list' ? 'aspect-[9/16] max-h-[660px]' : 'aspect-square'} object-contain block bg-[#0a0a0c]`}
                       loading="eager"
                     />
                     
@@ -814,13 +931,17 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
                     {/* Badge Status */}
                     <div className="absolute top-3 left-3">
                       <span className={`px-3 py-1 rounded-full text-xs font-bold shadow-lg uppercase tracking-wider backdrop-blur-md ${
-                        activeNotaTab === 'royal'
+                        activeNotaTab === 'price-list'
+                          ? 'bg-gradient-to-r from-orange-600 to-amber-500 text-white border border-orange-300/60 shadow-orange-500/30'
+                          : activeNotaTab === 'royal'
                           ? 'bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 border border-amber-300/60 shadow-amber-500/20'
                           : activeNotaTab === 'lunas'
                           ? 'bg-emerald-500/90 text-white border border-emerald-300/40'
                           : 'bg-amber-500/90 text-slate-950 border border-amber-300/40'
                       }`}>
-                        {activeNotaTab === 'royal' 
+                        {activeNotaTab === 'price-list'
+                          ? `🏷️ POSTER: ${priceListBrand} ${priceListTotalPages > 1 ? `(PART ${priceListPage + 1}/${priceListTotalPages})` : ''}`
+                          : activeNotaTab === 'royal' 
                           ? '👑 STRUK PEMBAYARAN: LUNAS' 
                           : activeNotaTab === 'royal-tidaklunas'
                           ? '⚠️ STRUK: BELUM LUNAS'
@@ -846,7 +967,9 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
                   </div>
                   <p className="text-slate-400 text-xs mt-3 flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                    Gambar dibuat real-time dari render server (Canvas 1024x1024)
+                    {activeNotaTab === 'price-list'
+                      ? `Poster Story 9:16 resmi E4 Store • Canvas 1080x1920 HD (${priceListTotalProducts} Produk terdaftar)`
+                      : 'Gambar dibuat real-time dari render server (Canvas 1024x1024)'}
                   </p>
                 </>
               )}
@@ -855,29 +978,55 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
             {/* Right: Explanations & Text Message Companion */}
             <div className="lg:col-span-6 flex flex-col gap-4">
               {/* Feature Points Box */}
-              <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-3">
-                <h4 className="text-sm font-bold text-amber-300 flex items-center gap-2">
-                  <Sparkles size={16} /> Fitur & Struktur Model Nota:
-                </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs text-slate-300">
-                  <div className="p-2.5 bg-slate-900/80 rounded-xl border border-slate-800">
-                    <p className="font-semibold text-white">🔘 Lingkaran Foto Profil</p>
-                    <p className="text-slate-400 text-[11px] mt-0.5">Otomatis mengambil foto profil WhatsApp pelanggan.</p>
-                  </div>
-                  <div className="p-2.5 bg-slate-900/80 rounded-xl border border-slate-800">
-                    <p className="font-semibold text-white">🧮 Perhitungan Sisa / Lunas</p>
-                    <p className="text-slate-400 text-[11px] mt-0.5">Jika pembayaran kurang, otomatis menampilkan Sisa Utang (Bukan Lunas).</p>
-                  </div>
-                  <div className="p-2.5 bg-slate-900/80 rounded-xl border border-slate-800">
-                    <p className="font-semibold text-white">👧 Karakter 3D Chuna</p>
-                    <p className="text-slate-400 text-[11px] mt-0.5">Karakter resmi Chuna E4 Store di sebelah kanan nota.</p>
-                  </div>
-                  <div className="p-2.5 bg-slate-900/80 rounded-xl border border-slate-800">
-                    <p className="font-semibold text-white">👑 Tema Luxury Gold</p>
-                    <p className="text-slate-400 text-[11px] mt-0.5">Latar charcoal hitam dengan ukiran bingkai emas mewah.</p>
+              {activeNotaTab === 'price-list' ? (
+                <div className="bg-slate-950/70 border border-orange-500/30 rounded-2xl p-4 space-y-3">
+                  <h4 className="text-sm font-bold text-orange-400 flex items-center gap-2">
+                    <Sparkles size={16} /> Keunggulan Poster List Harga (Sesuai Gambar 2):
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs text-slate-300">
+                    <div className="p-2.5 bg-slate-900/80 rounded-xl border border-slate-800">
+                      <p className="font-semibold text-white">📱 Format Story 9:16 (1080x1920)</p>
+                      <p className="text-slate-400 text-[11px] mt-0.5">Proporsi pas untuk status WhatsApp & Instagram Story tanpa terpotong.</p>
+                    </div>
+                    <div className="p-2.5 bg-slate-900/80 rounded-xl border border-slate-800">
+                      <p className="font-semibold text-white">📑 Multi-Part Otomatis</p>
+                      <p className="text-slate-400 text-[11px] mt-0.5">Jika produk melebihi 12 item, otomatis dibagi ke Part 1, Part 2, dst. agar rapi dan tidak berdesakan.</p>
+                    </div>
+                    <div className="p-2.5 bg-slate-900/80 rounded-xl border border-slate-800">
+                      <p className="font-semibold text-white">🔶 Ikon Diamond & Angka Emas</p>
+                      <p className="text-slate-400 text-[11px] mt-0.5">Persis Gambar 2: ikon diamond oranye, nama item rapi, nominal kuning keemasan cerah.</p>
+                    </div>
+                    <div className="p-2.5 bg-slate-900/80 rounded-xl border border-slate-800">
+                      <p className="font-semibold text-white">🔄 Sinkron Katalog Server</p>
+                      <p className="text-slate-400 text-[11px] mt-0.5">Harga modal, margin keuntungan (Owner, VIP, Biasa), dan produk baru otomatis terhubung.</p>
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-3">
+                  <h4 className="text-sm font-bold text-amber-300 flex items-center gap-2">
+                    <Sparkles size={16} /> Fitur & Struktur Model Nota:
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs text-slate-300">
+                    <div className="p-2.5 bg-slate-900/80 rounded-xl border border-slate-800">
+                      <p className="font-semibold text-white">🔘 Lingkaran Foto Profil</p>
+                      <p className="text-slate-400 text-[11px] mt-0.5">Otomatis mengambil foto profil WhatsApp pelanggan.</p>
+                    </div>
+                    <div className="p-2.5 bg-slate-900/80 rounded-xl border border-slate-800">
+                      <p className="font-semibold text-white">🧮 Perhitungan Sisa / Lunas</p>
+                      <p className="text-slate-400 text-[11px] mt-0.5">Jika pembayaran kurang, otomatis menampilkan Sisa Utang (Bukan Lunas).</p>
+                    </div>
+                    <div className="p-2.5 bg-slate-900/80 rounded-xl border border-slate-800">
+                      <p className="font-semibold text-white">👧 Karakter 3D Chuna</p>
+                      <p className="text-slate-400 text-[11px] mt-0.5">Karakter resmi Chuna E4 Store di sebelah kanan nota.</p>
+                    </div>
+                    <div className="p-2.5 bg-slate-900/80 rounded-xl border border-slate-800">
+                      <p className="font-semibold text-white">👑 Tema Luxury Gold</p>
+                      <p className="text-slate-400 text-[11px] mt-0.5">Latar charcoal hitam dengan ukiran bingkai emas mewah.</p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Text Message Companion Box */}
               <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col">
@@ -922,7 +1071,9 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
             <div className="w-full flex items-center justify-between pb-3 border-b border-slate-800 mb-3">
               <h4 className="font-bold text-white text-base flex items-center gap-2">
                 <Sparkles size={18} className="text-amber-400" />
-                Model Nota: {activeNotaTab === 'royal' ? 'Struk Pembayaran Royal (Lio)' : activeNotaTab === 'tagihan' ? 'Bukti Catatan Tagihan (Cyber Neon Padil)' : activeNotaTab === 'lunas' ? 'Lunas Total (Kak Reza)' : 'Angsuran / Belum Lunas'}
+                {activeNotaTab === 'price-list' 
+                  ? `Poster List Harga: ${priceListBrand} (Part ${priceListPage + 1}/${priceListTotalPages})`
+                  : `Model Nota: ${activeNotaTab === 'royal' ? 'Struk Pembayaran Royal (Lio)' : activeNotaTab === 'tagihan' ? 'Bukti Catatan Tagihan (Cyber Neon Padil)' : activeNotaTab === 'lunas' ? 'Lunas Total (Kak Reza)' : 'Angsuran / Belum Lunas'}`}
               </h4>
               <button 
                 onClick={() => setIsZoomed(false)} 
@@ -934,14 +1085,14 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
             <img
               src={currentImageUrl}
               alt="Zoomed Nota"
-              className="w-full h-auto aspect-square object-contain rounded-2xl border border-slate-800 bg-black"
+              className={`w-full h-auto ${activeNotaTab === 'price-list' ? 'aspect-[9/16] max-h-[82vh]' : 'aspect-square max-h-[75vh]'} object-contain rounded-2xl border border-slate-800 bg-black`}
             />
             <div className="w-full flex items-center justify-between mt-3 text-xs text-slate-400">
-              <span>Resolusi asli: 1024 x 1024 Pixel PNG</span>
+              <span>Resolusi asli: {activeNotaTab === 'price-list' ? '1080 x 1920 Pixel PNG (Format Story 9:16)' : '1024 x 1024 Pixel PNG'}</span>
               <a
                 href={currentImageUrl}
-                download={`nota_${activeNotaTab}.png`}
-                className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg transition-colors flex items-center gap-1.5"
+                download={activeNotaTab === 'price-list' ? `List_Harga_${priceListBrand}_Part${priceListPage + 1}.png` : `nota_${activeNotaTab}.png`}
+                className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
               >
                 Download Gambar
               </a>

@@ -11579,6 +11579,70 @@ E4 Store`,
     }
   });
 
+  // Metadata endpoint to know exact total products and total parts (pages) per brand
+  app.get("/api/price-list-meta", async (req, res) => {
+    try {
+      const brand = (req.query.brand as string) || "FREE FIRE";
+      const products = await getDigiflazzProducts("prepaid");
+      const brandUpper = brand.toUpperCase().trim();
+      let filtered = products.filter((p: any) => (p.brand || "").toUpperCase().trim() === brandUpper);
+      if (filtered.length === 0) {
+        filtered = products.filter((p: any) => (p.brand || "").toUpperCase().includes(brandUpper));
+      }
+      if (filtered.length === 0) {
+        filtered = products.filter((p: any) => (p.product_name || "").toUpperCase().includes(brandUpper));
+      }
+      const activeOnly = filtered.filter((p: any) => p.buyer_product_status !== false && p.seller_product_status !== false);
+      const finalProds = activeOnly.length > 0 ? activeOnly : filtered;
+      const totalPages = Math.max(1, Math.ceil(finalProds.length / 12));
+      res.json({
+        success: true,
+        brand: brandUpper,
+        totalProducts: finalProds.length,
+        totalPages,
+        category: finalProds[0]?.category || "Games"
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // Categories and brand map endpoint for live dashboard
+  app.get("/api/price-list-categories", async (req, res) => {
+    try {
+      const products = await getDigiflazzProducts("prepaid");
+      const categoryMap: Record<string, string[]> = {
+        "Games": ["FREE FIRE", "MOBILE LEGENDS", "PUBG MOBILE", "GENSHIN IMPACT", "ROBLOX", "VALORANT"],
+        "E-Money": ["DANA", "GOPAY", "OVO", "SHOPEEPAY"],
+        "Pulsa": ["TELKOMSEL", "INDOSAT", "XL", "AXIS", "TRI", "SMARTFREN"],
+        "PLN": ["PLN"]
+      };
+
+      products.forEach((p: any) => {
+        const cat = (p.category || "").trim();
+        const br = (p.brand || "").trim().toUpperCase();
+        if (cat && br) {
+          let targetGroup = "Lainnya";
+          const catLower = cat.toLowerCase();
+          if (catLower.includes("game")) targetGroup = "Games";
+          else if (catLower.includes("e-money") || catLower.includes("wallet") || catLower.includes("uang")) targetGroup = "E-Money";
+          else if (catLower.includes("pulsa")) targetGroup = "Pulsa";
+          else if (catLower.includes("pln") || catLower.includes("listrik")) targetGroup = "PLN";
+          else targetGroup = cat;
+
+          if (!categoryMap[targetGroup]) categoryMap[targetGroup] = [];
+          if (!categoryMap[targetGroup].includes(br)) {
+            categoryMap[targetGroup].push(br);
+          }
+        }
+      });
+
+      res.json({ success: true, categories: categoryMap });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
   app.get("/api/demo-nota-konfirmasi", async (req, res) => {
     try {
         let waPhotoUrl: string | null = null;
