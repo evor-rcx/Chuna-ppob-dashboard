@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { PageContainer } from '../PageContainer';
 import { 
   ArrowLeft, 
@@ -19,7 +19,9 @@ import {
   CheckCircle2,
   Tv,
   Receipt,
-  Ticket
+  Ticket,
+  Upload,
+  Download
 } from 'lucide-react';
 
 interface ProdukProps {
@@ -339,16 +341,27 @@ export function Produk({ onBack }: { onBack: () => void }) {
         };
       });
       
+      // Simpan bulk fee
       const res = await fetch('/api/digiflazz/products/fee/bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fees: bulkFees })
       });
       const data = await res.json();
+
+      // Sinkronkan juga seluruh katalog produk ke database lokal agar poster list harga otomatis ikut terupdate!
+      if (products.length > 0) {
+        await fetch('/api/digiflazz/products/save-catalog', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type, products })
+        });
+      }
+
       if (!data.success) {
         alert(data.error || 'Gagal menyimpan bulk fee');
       } else {
-        setSavedSuccessMsg(`Berhasil menyimpan ${bulkFees.length} produk!`);
+        setSavedSuccessMsg(`Berhasil menyimpan ${bulkFees.length} produk & sinkron ke poster list harga!`);
         setTimeout(() => setSavedSuccessMsg(''), 4000);
       }
     } catch (err) {
@@ -356,6 +369,46 @@ export function Produk({ onBack }: { onBack: () => void }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleExportJSON = () => {
+    window.open(`/api/digiflazz/products/export-catalog?type=${type}`, '_blank');
+  };
+
+  const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const json = JSON.parse(event.target?.result as string);
+        if (!Array.isArray(json)) {
+          alert('Format file JSON tidak valid (harus berupa array produk).');
+          return;
+        }
+        setLoading(true);
+        const res = await fetch('/api/digiflazz/products/save-catalog', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type, products: json })
+        });
+        const d = await res.json();
+        if (d.success) {
+          alert(`✅ Berhasil mengimpor ${json.length} produk dari file! Seluruh poster dan menu telah tersinkron.`);
+          fetchProducts();
+        } else {
+          alert(d.error || 'Gagal menyimpan produk impor');
+        }
+      } catch (err: any) {
+        alert('Gagal membaca file JSON: ' + err.message);
+      } finally {
+        setLoading(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    };
+    reader.readAsText(file);
   };
 
   // Helper for category icon
@@ -416,23 +469,46 @@ export function Produk({ onBack }: { onBack: () => void }) {
             </button>
           </div>
 
-          {/* Quick Action: Refresh & Save All */}
-          <div className="flex items-center gap-2.5">
+          {/* Quick Action: Refresh, Export, Import, & Save All */}
+          <div className="flex flex-wrap items-center gap-2">
             <button 
               onClick={fetchProducts}
               disabled={loading}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3.5 py-2 rounded-xl text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer border border-slate-700"
+              className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer border border-slate-700"
               title="Refresh Produk dari Server"
             >
-              <RefreshCw size={15} className={loading ? "animate-spin text-sky-400" : ""} />
+              <RefreshCw size={14} className={loading ? "animate-spin text-sky-400" : ""} /> Refresh
             </button>
+
+            <button 
+              onClick={handleExportJSON}
+              disabled={loading}
+              className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-3 py-2 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer border border-slate-700"
+              title="Unduh / Cadangkan Data Produk ke File JSON"
+            >
+              <Download size={14} className="text-amber-400" /> Ekspor JSON
+            </button>
+
+            <label 
+              className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-3 py-2 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer border border-slate-700"
+              title="Unggah File JSON Produk dari STB ke AI Studio"
+            >
+              <Upload size={14} className="text-emerald-400" /> Impor JSON
+              <input 
+                ref={fileInputRef}
+                type="file" 
+                accept=".json" 
+                onChange={handleImportJSON} 
+                className="hidden" 
+              />
+            </label>
 
             <button 
               onClick={handleSaveAll}
               disabled={loading}
-              className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold px-5 py-2 rounded-xl text-sm transition-all flex items-center gap-2 shadow-lg shadow-emerald-500/20 cursor-pointer"
+              className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs sm:text-sm transition-all flex items-center gap-2 shadow-lg shadow-emerald-500/20 cursor-pointer"
             >
-              <Save size={16} /> Simpan Semua ({displayedProducts.length})
+              <Save size={15} /> Simpan Semua ({displayedProducts.length})
             </button>
           </div>
         </div>

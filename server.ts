@@ -68,9 +68,9 @@ function getOwnerMenuKeyboard() {
     return [
         [{ text: "📒 Cek Utang Member" }],
         [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
-        [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
-        [{ text: "📢 Pengumuman WA" }, { text: "📥 Fitur Download" }],
-        [{ text: "🧹 Bersihkan Sampah" }]
+        [{ text: "🏷️ List Harga Produk" }, { text: "💳 Saldo Pusat" }],
+        [{ text: "⚙️ Pengaturan" }, { text: "📢 Pengumuman WA" }],
+        [{ text: "🧹 Bersihkan Sampah" }, { text: "📥 Fitur Download" }]
     ];
 }
 
@@ -5988,7 +5988,10 @@ let pendingDigiflazzFetch: Record<string, Promise<any> | null> = {
 };
 
 async function getDigiflazzProducts(type: "prepaid" | "pasca", forceRefresh: boolean = false) {
-  const fallbackList = type === "pasca" ? DEFAULT_PASCA_PRODUCTS : DEFAULT_PREPAID_PRODUCTS;
+  const fallbackList = type === "pasca" 
+    ? (db.savedPascaProducts && db.savedPascaProducts.length > 0 ? db.savedPascaProducts : DEFAULT_PASCA_PRODUCTS)
+    : (db.savedPrepaidProducts && db.savedPrepaidProducts.length > 0 ? db.savedPrepaidProducts : DEFAULT_PREPAID_PRODUCTS);
+
   if (!digiflazzUsername || !digiflazzApiKey) {
     return fallbackList;
   }
@@ -6025,6 +6028,12 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca", forceRefresh: boo
       if (data.data && Array.isArray(data.data) && data.data.length > 0) {
         productsCache[cacheKey].data = data.data;
         productsCache[cacheKey].timestamp = Date.now();
+        if (type === "pasca") {
+          db.savedPascaProducts = data.data;
+        } else {
+          db.savedPrepaidProducts = data.data;
+        }
+        writeDB(db);
         return data.data;
       } else {
         // Jika kena limit atau error dari Digiflazz, tetap gunakan cache yang ada agar bot tidak down
@@ -6081,6 +6090,44 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca", forceRefresh: boo
       res.json({ success: true, message: "Bulk fee berhasil disimpan" });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Endpoint untuk menyimpan katalog produk dari halaman Kelola Produk ke database lokal
+  app.post("/api/digiflazz/products/save-catalog", express.json({ limit: "25mb" }), async (req, res) => {
+    try {
+      const { type, products } = req.body;
+      if (!products || !Array.isArray(products)) {
+        return res.status(400).json({ success: false, error: "Products array diperlukan" });
+      }
+      if (type === "pasca") {
+        db.savedPascaProducts = products;
+        productsCache.pasca.data = products;
+        productsCache.pasca.timestamp = Date.now();
+      } else {
+        db.savedPrepaidProducts = products;
+        productsCache.prepaid.data = products;
+        productsCache.prepaid.timestamp = Date.now();
+      }
+      writeDB(db);
+      res.json({ success: true, count: products.length, message: `Katalog ${products.length} produk berhasil disimpan ke database lokal!` });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // Endpoint untuk mengekspor katalog produk saat ini ke format JSON (bisa diunduh)
+  app.get("/api/digiflazz/products/export-catalog", (req, res) => {
+    try {
+      const type = (req.query.type as string) || "prepaid";
+      const prods = type === "pasca" 
+        ? (db.savedPascaProducts || DEFAULT_PASCA_PRODUCTS)
+        : (db.savedPrepaidProducts || DEFAULT_PREPAID_PRODUCTS);
+      res.setHeader("Content-Disposition", `attachment; filename=produk_${type}_e4store.json`);
+      res.setHeader("Content-Type", "application/json");
+      res.send(JSON.stringify(prods, null, 2));
+    } catch (e: any) {
+      res.status(500).send("Gagal ekspor: " + e.message);
     }
   });
 
