@@ -7735,7 +7735,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
       // --- FITUR POSTER GAMBAR LIST HARGA PRODUK (CANVAS SESUAI GAMBAR 2) ---
       // =========================================================================
       let lastManualSyncTime = 0;
-      bot.hears(["🔄 Sinkron Digiflazz", "🔄 Refresh Digiflazz", "/syncproducts"], async (ctx) => {
+      bot.hears(["🔄 Sinkron Digiflazz", "🔄 Refresh Digiflazz", "🔄 Sinkron", "Sinkron", "Singron", "/syncproducts"], async (ctx) => {
         if (!db.owners.includes(ctx.from?.id || 0)) return;
         const now = Date.now();
         // Cooldown 60 detik untuk mencegah spam dan rate-limit Digiflazz
@@ -7765,13 +7765,11 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
         userStates[ctx.from.id] = { step: 'PRICE_LIST_CATEGORY', data: { priceType, labelType } };
 
         await ctx.reply(
-          `🏷️ *POSTER LIST HARGA: ${labelType.toUpperCase()}*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe Terpilih: *${labelType}*\n\nSilakan pilih kategori di bawah, atau langsung *ketik nama game/brand* di chat (contoh: Free Fire, ML, DANA, Telkomsel):`,
+          `🏷️ *POSTER LIST HARGA: ${labelType.toUpperCase()}*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe Terpilih: *${labelType}*\n\nSilakan pilih menu di bawah, atau langsung *ketik nama game/brand* di chat (contoh: Free Fire, ML, DANA, Telkomsel):`,
           {
             parse_mode: 'Markdown',
             reply_markup: {
               keyboard: [
-                [{ text: "🎮 Games" }, { text: "💳 E-Money" }],
-                [{ text: "📱 Pulsa" }, { text: "⚡ Token PLN" }],
                 [{ text: "📦 Kategori Lainnya (Digiflazz)" }, { text: "🔄 Sinkron Digiflazz" }],
                 [{ text: "🏷️ Ganti Tipe Harga" }, { text: "🔙 Kembali ke Menu Owner" }]
               ],
@@ -7962,7 +7960,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
         );
       });
 
-      bot.hears("📦 Kategori Lainnya (Digiflazz)", async (ctx) => {
+      bot.hears(["📦 Kategori Lainnya (Digiflazz)", "📦 Kategori Lainnya", "Kategori Lainnya", "Kategori Lain", "kategori lainnya"], async (ctx) => {
         if (!db.owners.includes(ctx.from?.id || 0)) return;
         const state = userStates[ctx.from.id];
         const priceType = state?.data?.priceType || 'owner';
