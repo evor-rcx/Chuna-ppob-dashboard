@@ -637,59 +637,6 @@ export const DEFAULT_PREPAID_PRODUCTS: DigiflazzProduct[] = [
     desc: "Welkin Moon 30 Days Instant"
   },
 
-  // --- GAMES: ROBLOX ---
-  {
-    buyer_sku_code: "ROBLOX80",
-    product_name: "Roblox 80 Robux",
-    category: "Games",
-    brand: "ROBLOX",
-    type: "Umum",
-    seller_name: "Roblox Corporation",
-    price: 15000,
-    buyer_product_status: true,
-    seller_product_status: true,
-    unlimited_stock: true,
-    stock: 9999,
-    multi: true,
-    start_cut_off: "23:55",
-    end_cut_off: "00:05",
-    desc: "Roblox 80 Robux Direct"
-  },
-  {
-    buyer_sku_code: "ROBLOX160",
-    product_name: "Roblox 160 Robux",
-    category: "Games",
-    brand: "ROBLOX",
-    type: "Umum",
-    seller_name: "Roblox Corporation",
-    price: 30000,
-    buyer_product_status: true,
-    seller_product_status: true,
-    unlimited_stock: true,
-    stock: 9999,
-    multi: true,
-    start_cut_off: "23:55",
-    end_cut_off: "00:05",
-    desc: "Roblox 160 Robux Direct"
-  },
-  {
-    buyer_sku_code: "ROBLOX400",
-    product_name: "Roblox 400 Robux",
-    category: "Games",
-    brand: "ROBLOX",
-    type: "Umum",
-    seller_name: "Roblox Corporation",
-    price: 75000,
-    buyer_product_status: true,
-    seller_product_status: true,
-    unlimited_stock: true,
-    stock: 9999,
-    multi: true,
-    start_cut_off: "23:55",
-    end_cut_off: "00:05",
-    desc: "Roblox 400 Robux Direct"
-  },
-
   // --- E-MONEY: DANA ---
   {
     buyer_sku_code: "DANA10",

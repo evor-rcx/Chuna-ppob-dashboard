@@ -7695,7 +7695,116 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
         );
       });
 
-      bot.hears(["👤 List Harga Biasa", "👑 List Harga VIP", "💼 List Harga Owner", "💼 List Harga Jual Owner"], async (ctx) => {
+      async function showPriceListCategories(ctx: any, priceType: 'biasa' | 'vip' | 'owner', labelType: string) {
+        if (!db.owners.includes(ctx.from?.id || 0)) return;
+        userStates[ctx.from.id] = { step: 'PRICE_LIST_CATEGORY', data: { priceType, labelType } };
+
+        try {
+          const products = await getDigiflazzProducts('prepaid');
+          const rawCategories: string[] = Array.from(new Set<string>(products.map((p: any) => String(p.category || '').trim()).filter(Boolean))).sort();
+
+          const getCategoryIcon = (cat: string) => {
+            const u = cat.toUpperCase();
+            if (u.includes('GAME')) return '🎮';
+            if (u.includes('MONEY') || u.includes('WALLET') || u.includes('E-MONEY')) return '💳';
+            if (u.includes('PULSA')) return '📱';
+            if (u.includes('PLN') || u.includes('LISTRIK') || u.includes('TOKEN')) return '⚡';
+            if (u.includes('DATA') || u.includes('PAKET') || u.includes('INTERNET')) return '📶';
+            if (u.includes('VOUCHER')) return '🎟️';
+            if (u.includes('STREAMING') || u.includes('TV')) return '📺';
+            return '📦';
+          };
+
+          const keyboard: any[][] = [];
+          for (let i = 0; i < rawCategories.length; i += 2) {
+            const row = [{ text: `${getCategoryIcon(rawCategories[i])} ${rawCategories[i]}` }];
+            if (rawCategories[i + 1]) {
+              row.push({ text: `${getCategoryIcon(rawCategories[i + 1])} ${rawCategories[i + 1]}` });
+            }
+            keyboard.push(row);
+          }
+          keyboard.push([{ text: "🏷️ Ganti Tipe Harga" }, { text: "🔙 Kembali ke Menu Owner" }]);
+
+          await ctx.reply(
+            `📂 *PILIH KATEGORI PRODUK*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe Harga Terpilih: *${labelType}*\n📊 Sumber Data: *Sesuai Kelola Produk Digiflazz*\n\nSilakan pilih kategori produk yang ingin dicetak gambarnya:`,
+            {
+              parse_mode: 'Markdown',
+              reply_markup: {
+                keyboard,
+                resize_keyboard: true
+              }
+            }
+          );
+        } catch (e: any) {
+          await ctx.reply("❌ Gagal memuat kategori produk dari Digiflazz: " + e.message);
+        }
+      }
+
+      async function showPriceListBrands(ctx: any, rawCategoryText: string) {
+        if (!db.owners.includes(ctx.from?.id || 0)) return;
+        const state = userStates[ctx.from?.id || 0];
+        const priceType: 'biasa' | 'vip' | 'owner' = state?.data?.priceType || 'owner';
+        const labelType: string = state?.data?.labelType || 'Harga Jual Owner';
+
+        const cleanCat = rawCategoryText.replace(/^[^\w\s]+/gi, '').trim().toUpperCase();
+
+        try {
+          const products = await getDigiflazzProducts('prepaid');
+          let catProducts = products.filter((p: any) => (p.category || '').toUpperCase().trim() === cleanCat);
+          if (catProducts.length === 0) {
+            catProducts = products.filter((p: any) => (p.category || '').toUpperCase().includes(cleanCat) || cleanCat.includes((p.category || '').toUpperCase()));
+          }
+          if (catProducts.length === 0) {
+            catProducts = products;
+          }
+
+          const rawBrands: string[] = Array.from(new Set<string>(catProducts.map((p: any) => String(p.brand || '').trim()).filter(Boolean))).sort();
+
+          if (rawBrands.length === 0) {
+            return ctx.reply(`⚠️ Tidak ditemukan produk untuk kategori *${rawCategoryText}* di akun Digiflazz.`);
+          }
+
+          userStates[ctx.from.id] = { step: 'PRICE_LIST_BRAND', data: { priceType, labelType, category: cleanCat } };
+
+          const getBrandIcon = (b: string) => {
+            const u = b.toUpperCase();
+            if (u.includes('FREE FIRE')) return '🔥';
+            if (u.includes('MOBILE LEGEND')) return '⚔️';
+            if (u.includes('PUBG')) return '🪂';
+            if (u.includes('GENSHIN')) return '⚡';
+            if (u.includes('VALORANT')) return '🎯';
+            if (u.includes('DANA') || u.includes('GOPAY') || u.includes('OVO') || u.includes('SHOPEE') || u.includes('LINKAJA')) return '💳';
+            if (u.includes('TELKOMSEL') || u.includes('INDOSAT') || u.includes('XL') || u.includes('AXIS') || u.includes('TRI') || u.includes('SMARTFREN')) return '📱';
+            if (u.includes('PLN')) return '⚡';
+            return '🏷️';
+          };
+
+          const keyboard: any[][] = [];
+          for (let i = 0; i < rawBrands.length; i += 2) {
+            const row = [{ text: `${getBrandIcon(rawBrands[i])} ${rawBrands[i]}` }];
+            if (rawBrands[i + 1]) {
+              row.push({ text: `${getBrandIcon(rawBrands[i + 1])} ${rawBrands[i + 1]}` });
+            }
+            keyboard.push(row);
+          }
+          keyboard.push([{ text: "🔙 Kembali ke Kategori" }, { text: "🔙 Kembali ke Menu Owner" }]);
+
+          await ctx.reply(
+            `📦 *PILIH PRODUK / BRAND (${cleanCat})*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe: *${labelType}*\n📊 Terhubung Akun Digiflazz: *${rawBrands.length} Brand Aktif*\n\nSilakan pilih brand yang ingin dicetak list harganya:`,
+            {
+              parse_mode: 'Markdown',
+              reply_markup: {
+                keyboard,
+                resize_keyboard: true
+              }
+            }
+          );
+        } catch (e: any) {
+          await ctx.reply("❌ Gagal memuat daftar brand: " + e.message);
+        }
+      }
+
+      bot.hears(["👤 List Harga Biasa", "👑 List Harga VIP", "💼 List Harga Owner", "💼 List Harga Jual Owner", "🏷️ List Harga Produk", "🏷️ List Harga"], async (ctx) => {
         if (!db.owners.includes(ctx.from?.id || 0)) return;
         const text = ctx.message.text;
         let priceType: 'biasa' | 'vip' | 'owner' = 'owner';
@@ -7708,22 +7817,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
           labelType = 'Harga Member VIP';
         }
 
-        userStates[ctx.from.id] = { step: 'PRICE_LIST_CATEGORY', data: { priceType, labelType } };
-
-        await ctx.reply(
-          `📂 *PILIH KATEGORI PRODUK*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe Harga Terpilih: *${labelType}*\n\nSilakan pilih kategori produk yang ingin dicetak gambarnya:`,
-          {
-            parse_mode: 'Markdown',
-            reply_markup: {
-              keyboard: [
-                [{ text: "🎮 Games" }, { text: "💳 E-Money" }],
-                [{ text: "📱 Pulsa" }, { text: "⚡ Token PLN" }],
-                [{ text: "🏷️ Ganti Tipe Harga" }, { text: "🔙 Kembali ke Menu Owner" }]
-              ],
-              resize_keyboard: true
-            }
-          }
-        );
+        await showPriceListCategories(ctx, priceType, labelType);
       });
 
       bot.hears("🏷️ Ganti Tipe Harga", async (ctx) => {
@@ -7740,95 +7834,12 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
         });
       });
 
-      bot.hears("🎮 Games", async (ctx) => {
-        if (!db.owners.includes(ctx.from?.id || 0)) return;
-        const state = userStates[ctx.from.id];
-        const priceType = state?.data?.priceType || 'owner';
-        const labelType = state?.data?.labelType || 'Harga Jual Owner';
-        userStates[ctx.from.id] = { step: 'PRICE_LIST_BRAND', data: { priceType, labelType, category: 'Games' } };
-
-        await ctx.reply(
-          `🎮 *PILIH GAME*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe: *${labelType}*\n\nSilakan pilih game yang ingin dicetak list harganya:`,
-          {
-            parse_mode: 'Markdown',
-            reply_markup: {
-              keyboard: [
-                [{ text: "🔥 Free Fire" }, { text: "⚔️ Mobile Legends" }],
-                [{ text: "🪂 PUBG Mobile" }, { text: "⚡ Genshin Impact" }],
-                [{ text: "🧱 Roblox" }, { text: "🎯 Valorant" }],
-                [{ text: "🔙 Kembali ke Kategori" }, { text: "🔙 Kembali ke Menu Owner" }]
-              ],
-              resize_keyboard: true
-            }
-          }
-        );
-      });
-
-      bot.hears("💳 E-Money", async (ctx) => {
-        if (!db.owners.includes(ctx.from?.id || 0)) return;
-        const state = userStates[ctx.from.id];
-        const priceType = state?.data?.priceType || 'owner';
-        const labelType = state?.data?.labelType || 'Harga Jual Owner';
-        userStates[ctx.from.id] = { step: 'PRICE_LIST_BRAND', data: { priceType, labelType, category: 'E-Money' } };
-
-        await ctx.reply(
-          `💳 *PILIH E-MONEY*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe: *${labelType}*\n\nSilakan pilih e-wallet yang ingin dicetak list harganya:`,
-          {
-            parse_mode: 'Markdown',
-            reply_markup: {
-              keyboard: [
-                [{ text: "DANA" }, { text: "GoPay" }],
-                [{ text: "OVO" }, { text: "ShopeePay" }],
-                [{ text: "🔙 Kembali ke Kategori" }, { text: "🔙 Kembali ke Menu Owner" }]
-              ],
-              resize_keyboard: true
-            }
-          }
-        );
-      });
-
-      bot.hears("📱 Pulsa", async (ctx) => {
-        if (!db.owners.includes(ctx.from?.id || 0)) return;
-        const state = userStates[ctx.from.id];
-        const priceType = state?.data?.priceType || 'owner';
-        const labelType = state?.data?.labelType || 'Harga Jual Owner';
-        userStates[ctx.from.id] = { step: 'PRICE_LIST_BRAND', data: { priceType, labelType, category: 'Pulsa' } };
-
-        await ctx.reply(
-          `📱 *PILIH OPERATOR PULSA*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe: *${labelType}*\n\nSilakan pilih operator yang ingin dicetak list harganya:`,
-          {
-            parse_mode: 'Markdown',
-            reply_markup: {
-              keyboard: [
-                [{ text: "Telkomsel" }, { text: "Indosat" }],
-                [{ text: "XL" }, { text: "Axis" }],
-                [{ text: "Tri" }],
-                [{ text: "🔙 Kembali ke Kategori" }, { text: "🔙 Kembali ke Menu Owner" }]
-              ],
-              resize_keyboard: true
-            }
-          }
-        );
-      });
-
       bot.hears("🔙 Kembali ke Kategori", async (ctx) => {
         if (!db.owners.includes(ctx.from?.id || 0)) return;
         const state = userStates[ctx.from.id];
+        const priceType = state?.data?.priceType || 'owner';
         const labelType = state?.data?.labelType || 'Harga Jual Owner';
-        await ctx.reply(
-          `📂 *PILIH KATEGORI PRODUK*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe Harga Terpilih: *${labelType}*\n\nSilakan pilih kategori:`,
-          {
-            parse_mode: 'Markdown',
-            reply_markup: {
-              keyboard: [
-                [{ text: "🎮 Games" }, { text: "💳 E-Money" }],
-                [{ text: "📱 Pulsa" }, { text: "⚡ Token PLN" }],
-                [{ text: "🏷️ Ganti Tipe Harga" }, { text: "🔙 Kembali ke Menu Owner" }]
-              ],
-              resize_keyboard: true
-            }
-          }
-        );
+        await showPriceListCategories(ctx, priceType, labelType);
       });
 
       async function generateAndSendPriceList(ctx: any, rawBrandText: string) {
@@ -7842,7 +7853,6 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
         else if (targetBrand.includes('MOBILE LEGEND')) targetBrand = 'MOBILE LEGENDS';
         else if (targetBrand.includes('PUBG')) targetBrand = 'PUBG MOBILE';
         else if (targetBrand.includes('GENSHIN')) targetBrand = 'GENSHIN IMPACT';
-        else if (targetBrand.includes('ROBLOX')) targetBrand = 'ROBLOX';
         else if (targetBrand.includes('VALORANT')) targetBrand = 'VALORANT';
         else if (targetBrand.includes('DANA')) targetBrand = 'DANA';
         else if (targetBrand.includes('GOPAY')) targetBrand = 'GOPAY';
@@ -7855,16 +7865,19 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
         else if (targetBrand.includes('TRI')) targetBrand = 'TRI';
         else if (targetBrand.includes('PLN')) targetBrand = 'PLN';
 
-        await ctx.reply(`🎨 *Sedang merender gambar poster List Harga ${targetBrand}...*\n_Mengambil tarif ${labelType}..._`, { parse_mode: 'Markdown' });
+        await ctx.reply(`🎨 *Sedang merender gambar poster List Harga ${targetBrand}...*\n_Mengambil tarif ${labelType} sesuai Kelola Produk Digiflazz..._`, { parse_mode: 'Markdown' });
 
         try {
           const products = await getDigiflazzProducts('prepaid');
           let brandProds = products.filter((p: any) => (p.brand || '').toUpperCase().trim() === targetBrand);
           if (brandProds.length === 0) {
-            brandProds = products.filter((p: any) => (p.brand || '').toUpperCase().includes(targetBrand));
+            brandProds = products.filter((p: any) => (p.brand || '').toUpperCase().includes(targetBrand) || targetBrand.includes((p.brand || '').toUpperCase().trim()));
           }
           if (brandProds.length === 0) {
-            return ctx.reply(`⚠️ Tidak ditemukan produk untuk brand *${targetBrand}*.`);
+            brandProds = products.filter((p: any) => (p.product_name || '').toUpperCase().includes(targetBrand));
+          }
+          if (brandProds.length === 0) {
+            return ctx.reply(`⚠️ Tidak ditemukan produk untuk brand *${targetBrand}* di akun Digiflazz / Kelola Produk Anda.\n\nPastikan produk ini aktif di akun Digiflazz Anda.`);
           }
 
           const mapped = brandProds.map((p: any) => {
@@ -7920,7 +7933,6 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
       bot.hears(["⚔️ Mobile Legends", "Mobile Legends", "mobile legends", "ml"], async (ctx) => generateAndSendPriceList(ctx, "MOBILE LEGENDS"));
       bot.hears(["🪂 PUBG Mobile", "PUBG Mobile", "pubg"], async (ctx) => generateAndSendPriceList(ctx, "PUBG MOBILE"));
       bot.hears(["⚡ Genshin Impact", "Genshin Impact", "genshin"], async (ctx) => generateAndSendPriceList(ctx, "GENSHIN IMPACT"));
-      bot.hears(["🧱 Roblox", "Roblox", "roblox"], async (ctx) => generateAndSendPriceList(ctx, "ROBLOX"));
       bot.hears(["🎯 Valorant", "Valorant", "valorant"], async (ctx) => generateAndSendPriceList(ctx, "VALORANT"));
       bot.hears(["DANA", "dana"], async (ctx) => generateAndSendPriceList(ctx, "DANA"));
       bot.hears(["GoPay", "gopay"], async (ctx) => generateAndSendPriceList(ctx, "GOPAY"));
@@ -8923,21 +8935,31 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
           "📶 Paket Data",
           "🎟️ Voucher Digital"
         ];
+        const state = userStates[userId];
+        if (state?.step === 'PRICE_LIST_CATEGORY' && db.owners.includes(userId)) {
+          if (text === '🔙 Kembali ke Menu Owner' || text === '🏷️ Ganti Tipe Harga') {
+            delete userStates[userId];
+            return next();
+          }
+          await showPriceListBrands(ctx, text);
+          return;
+        }
+
+        if (state?.step === 'PRICE_LIST_BRAND' && db.owners.includes(userId)) {
+          if (text === '🔙 Kembali ke Kategori' || text === '🔙 Kembali ke Menu Owner' || text === '🏷️ Ganti Tipe Harga') {
+            return next();
+          }
+          await generateAndSendPriceList(ctx, text);
+          return;
+        }
+
         if (ownerMenu.includes(text) && db.owners.includes(userId)) {
            delete userStates[userId];
            return next(); 
         }
 
-        const state = userStates[userId];
         if (state) {
             switch (state.step) {
-                case 'PRICE_LIST_BRAND': {
-                  if (text === '🔙 Kembali ke Kategori' || text === '🔙 Kembali ke Menu Owner' || text === '🏷️ Ganti Tipe Harga') {
-                    return next();
-                  }
-                  await generateAndSendPriceList(ctx, text);
-                  return;
-                }
 
                 case 'TOPUP_SELECT_AMOUNT':
                 case 'TOPUP_INPUT_CUSTOM_AMOUNT': {
