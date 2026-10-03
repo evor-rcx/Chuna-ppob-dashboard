@@ -68,10 +68,9 @@ function getOwnerMenuKeyboard() {
     return [
         [{ text: "📒 Cek Utang Member" }],
         [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
-        [{ text: "👤 List Harga Biasa" }, { text: "👑 List Harga VIP" }],
-        [{ text: "💼 List Harga Owner" }, { text: "💳 Saldo Pusat" }],
-        [{ text: "⚙️ Pengaturan" }, { text: "📢 Pengumuman WA" }],
-        [{ text: "🧹 Bersihkan Sampah" }, { text: "📥 Fitur Download" }]
+        [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
+        [{ text: "📢 Pengumuman WA" }, { text: "📥 Fitur Download" }],
+        [{ text: "🧹 Bersihkan Sampah" }]
     ];
 }
 

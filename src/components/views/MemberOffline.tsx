@@ -251,6 +251,13 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
           </button>
 
           <button
+            onClick={() => setIsAddingMember(true)}
+            className="px-3.5 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-500 text-xs text-white font-semibold transition-colors flex items-center gap-1.5 shadow-md shadow-teal-950/40 cursor-pointer"
+          >
+            ➕ Tambah Member
+          </button>
+
+          <button
             onClick={fetchMembers}
             className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 transition-colors flex items-center gap-1.5 cursor-pointer"
           >
