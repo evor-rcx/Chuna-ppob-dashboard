@@ -13,6 +13,7 @@ export interface GeneratePriceListOptions {
   priceType: 'biasa' | 'vip' | 'owner';
   products: PriceListItem[];
   customTitle?: string;
+  customStoreName?: string;
   category?: string;
   page?: number;
   maxPerPage?: number;
@@ -25,19 +26,31 @@ export interface GeneratePriceListOptions {
  */
 function cleanProductName(rawName: string, brand: string): string {
   let name = (rawName || '').trim();
-  const bUpper = brand.toUpperCase().trim();
+  const bUpper = (brand || '').toUpperCase().trim();
   
-  // Remove brand prefix if present
-  if (name.toUpperCase().startsWith(bUpper)) {
+  // Remove full brand prefix if present
+  if (bUpper && name.toUpperCase().startsWith(bUpper)) {
     name = name.substring(bUpper.length).trim();
   }
+  
+  // Remove common brand abbreviations
+  if (bUpper === 'FREE FIRE' || bUpper.includes('FREE FIRE')) {
+    name = name.replace(/^FF\s*[-:]?\s*/i, '').trim();
+  } else if (bUpper.includes('MOBILE LEGEND')) {
+    name = name.replace(/^(ML|MLBB)\s*[-:]?\s*/i, '').trim();
+  } else if (bUpper.includes('PUBG')) {
+    name = name.replace(/^PUBG\s*[-:]?\s*/i, '').trim();
+  } else if (bUpper.includes('GENSHIN')) {
+    name = name.replace(/^GI\s*[-:]?\s*/i, '').trim();
+  }
+
   // Remove leading punctuation like "-", ":", "/"
   name = name.replace(/^[\s\-_:\/]+/, '').trim();
 
   // If name became empty, fallback to rawName
   if (!name) name = rawName;
 
-  // Clean common noise
+  // Clean common extra noise like "(Fast)", "(Instant)" if desired, but keep clean
   name = name.replace(/\s+/g, ' ');
 
   // Capitalize appropriately
@@ -179,7 +192,7 @@ export async function generatePriceListImage(
   // --- 4. SUBTITLE ---
   let subtitleText = 'DAFTAR HARGA TERMURAH';
   if (priceType === 'biasa') {
-    subtitleText = 'DAFTAR HARGA MEMBER BIASA';
+    subtitleText = 'DAFTAR HARGA TERMURAH';
   } else if (priceType === 'vip') {
     subtitleText = 'DAFTAR HARGA MEMBER VIP';
   } else if (priceType === 'owner') {
@@ -206,9 +219,11 @@ export async function generatePriceListImage(
   const cardY = 368;
   const cardWidth = width - 120; // 960px
   
-  // In Image 2, card extends down to about 1690px
-  const cardMaxHeight = 1320;
-  const cardContentHeight = Math.min(cardMaxHeight, Math.max(760, 96 + (sorted.length * 76) + 30));
+  // Calculate dynamic row spacing to fill canvas nicely like Image 2
+  const numItems = Math.max(1, sorted.length);
+  const rowHeight = numItems <= 12 ? Math.min(94, Math.max(76, Math.floor(1140 / numItems))) : 76;
+  const itemCardHeight = Math.min(78, rowHeight - 14);
+  const cardContentHeight = Math.min(1330, Math.max(500, 100 + (numItems * rowHeight) + 16));
 
   // Draw Card Container
   ctx.fillStyle = '#0F1828';
@@ -239,9 +254,7 @@ export async function generatePriceListImage(
   ctx.stroke();
 
   // --- 7. PRODUCT ITEM ROWS ---
-  let currentY = cardY + 98;
-  const rowHeight = 76;
-  const itemCardHeight = 64;
+  let currentY = cardY + 96;
 
   sorted.forEach((p, idx) => {
     const itemCardX = cardX + 22;
@@ -256,9 +269,9 @@ export async function generatePriceListImage(
     const cleanName = cleanProductName(p.product_name, brand);
 
     // 🔸 Orange Diamond Icon on the left
-    const iconCenterX = itemCardX + 34;
+    const iconCenterX = itemCardX + 36;
     const iconCenterY = currentY + itemCardHeight / 2;
-    const diamondSize = 10;
+    const diamondSize = 11;
 
     ctx.fillStyle = '#EA580C';
     ctx.beginPath();
@@ -270,7 +283,7 @@ export async function generatePriceListImage(
     ctx.fill();
 
     // Product Name Text
-    ctx.font = 'bold 25px Arial, sans-serif';
+    ctx.font = 'bold 27px Arial, sans-serif';
     ctx.fillStyle = '#FFFFFF';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
@@ -288,13 +301,13 @@ export async function generatePriceListImage(
 
     // Price Text: "Rp " in gray, number in bold gold/yellow
     const priceStr = Math.round(Number(p.price)).toLocaleString('id-ID');
-    ctx.font = 'bold 28px Arial, sans-serif';
+    ctx.font = 'bold 31px Arial, sans-serif';
     ctx.fillStyle = '#FBBF24'; // Yellow gold
     ctx.textAlign = 'right';
     ctx.fillText(priceStr, itemCardX + itemCardWidth - 28, iconCenterY);
 
     const priceNumWidth = ctx.measureText(priceStr).width;
-    ctx.font = 'bold 20px Arial, sans-serif';
+    ctx.font = 'bold 22px Arial, sans-serif';
     ctx.fillStyle = '#8E9CAE';
     ctx.fillText('Rp ', itemCardX + itemCardWidth - 28 - priceNumWidth, iconCenterY);
 
@@ -303,21 +316,21 @@ export async function generatePriceListImage(
 
   // --- 8. FOOTER SECTION ---
   // Notice Text
-  const noticeY = Math.max(cardY + cardContentHeight + 36, 1740);
+  const noticeY = Math.min(cardY + cardContentHeight + 36, 1720);
   ctx.font = 'bold 20px Arial, sans-serif';
   ctx.fillStyle = '#64748B'; // Muted
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   ctx.fillText('HARGA SEWAKTU-WAKTU DAPAT BERUBAH', width / 2, noticeY);
 
-  // E4 STORE Orange Pill Badge
-  const footerBadgeText = 'E4 STORE';
+  // E4 STORE Orange Pill Badge (matching Image 2)
+  const footerBadgeText = options.customStoreName || 'E4 STORE';
   ctx.font = 'bold 38px Arial, sans-serif';
   const fBadgeTextWidth = ctx.measureText(footerBadgeText).width;
-  const fBadgeWidth = fBadgeTextWidth + 88;
+  const fBadgeWidth = Math.max(220, fBadgeTextWidth + 88);
   const fBadgeHeight = 68;
   const fBadgeX = (width - fBadgeWidth) / 2;
-  const fBadgeY = noticeY + 44;
+  const fBadgeY = Math.min(noticeY + 44, 1776);
 
   ctx.fillStyle = '#EA580C'; // Orange
   drawRoundedRect(ctx, fBadgeX, fBadgeY, fBadgeWidth, fBadgeHeight, 34);
@@ -326,7 +339,7 @@ export async function generatePriceListImage(
   ctx.fillStyle = '#1E3A8A'; // Deep blue text as in Image 2
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(footerBadgeText, width / 2, fBadgeY + fBadgeHeight / 2);
+  ctx.fillText(footerBadgeText, width / 2, fBadgeY + fBadgeHeight / 2 + 1);
 
   return canvas.toBuffer('image/png');
 }

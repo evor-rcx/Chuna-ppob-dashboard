@@ -5983,53 +5983,71 @@ async function generateKodeBayar(nohp: string, pkg: any, provider: string): Prom
         return null;
     }
 }
-async function getDigiflazzProducts(type: "prepaid" | "pasca") {
+let pendingDigiflazzFetch: Record<string, Promise<any> | null> = {
+  prepaid: null,
+  pasca: null
+};
+
+async function getDigiflazzProducts(type: "prepaid" | "pasca", forceRefresh: boolean = false) {
   const fallbackList = type === "pasca" ? DEFAULT_PASCA_PRODUCTS : DEFAULT_PREPAID_PRODUCTS;
   if (!digiflazzUsername || !digiflazzApiKey) {
     return fallbackList;
   }
 
   const cacheKey = type;
-  if (productsCache[cacheKey].data && (Date.now() - productsCache[cacheKey].timestamp < CACHE_TTL)) {
+  // Anti-Rate-Limit: Jika cache masih dalam masa TTL dan bukan force refresh, gunakan memori cache (0 request ke Digiflazz)
+  if (!forceRefresh && productsCache[cacheKey].data && (Date.now() - productsCache[cacheKey].timestamp < CACHE_TTL)) {
     return productsCache[cacheKey].data;
   }
 
-  try {
-    let cmd = "prepaid";
-    if (type === "pasca") cmd = "pasca";
-    let signText = digiflazzUsername + digiflazzApiKey + "pricelist";
-    const sign = crypto.createHash("md5").update(signText).digest("hex");
-
-    const response = await fetch("https://api.digiflazz.com/v1/price-list", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        cmd: cmd,
-        username: digiflazzUsername,
-        sign: sign
-      })
-    });
-    
-    const data = await response.json();
-    if (data.data && Array.isArray(data.data) && data.data.length > 0) {
-      productsCache[cacheKey].data = data.data;
-      productsCache[cacheKey].timestamp = Date.now();
-      return data.data;
-    } else {
-      if (productsCache[cacheKey].data) {
-          console.warn("Digiflazz pricelist error, using stale cache:", data.data?.message);
-          return productsCache[cacheKey].data; // Fallback to stale cache
-      }
-      console.warn("Digiflazz pricelist error, using fallback catalog:", data.data?.message || data.message);
-      return fallbackList;
-    }
-  } catch (err: any) {
-    console.warn("Digiflazz fetch error, using fallback catalog:", err.message);
-    if (productsCache[cacheKey]?.data) {
-      return productsCache[cacheKey].data;
-    }
-    return fallbackList;
+  // Anti-Rate-Limit: Request Coalescing (jika ada request sedang berjalan, jangan buat request baru)
+  if (pendingDigiflazzFetch[cacheKey]) {
+    return pendingDigiflazzFetch[cacheKey];
   }
+
+  pendingDigiflazzFetch[cacheKey] = (async () => {
+    try {
+      let cmd = "prepaid";
+      if (type === "pasca") cmd = "pasca";
+      let signText = digiflazzUsername + digiflazzApiKey + "pricelist";
+      const sign = crypto.createHash("md5").update(signText).digest("hex");
+
+      const response = await fetch("https://api.digiflazz.com/v1/price-list", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cmd: cmd,
+          username: digiflazzUsername,
+          sign: sign
+        })
+      });
+      
+      const data = await response.json();
+      if (data.data && Array.isArray(data.data) && data.data.length > 0) {
+        productsCache[cacheKey].data = data.data;
+        productsCache[cacheKey].timestamp = Date.now();
+        return data.data;
+      } else {
+        // Jika kena limit atau error dari Digiflazz, tetap gunakan cache yang ada agar bot tidak down
+        if (productsCache[cacheKey].data) {
+            console.warn("Digiflazz pricelist rate limit / error, menggunakan cache aman:", data.data?.message || data.message);
+            return productsCache[cacheKey].data;
+        }
+        console.warn("Digiflazz pricelist error, menggunakan katalog fallback:", data.data?.message || data.message);
+        return fallbackList;
+      }
+    } catch (err: any) {
+      console.warn("Digiflazz fetch error, menggunakan cache aman:", err.message);
+      if (productsCache[cacheKey]?.data) {
+        return productsCache[cacheKey].data;
+      }
+      return fallbackList;
+    } finally {
+      pendingDigiflazzFetch[cacheKey] = null;
+    }
+  })();
+
+  return pendingDigiflazzFetch[cacheKey];
 }
 
 
@@ -6902,12 +6920,7 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
         if (isOwner) {
             await ctx.reply("Silakan pilih menu selanjutnya:", {
                 reply_markup: {
-                    keyboard: [
-                        [{ text: "📒 Cek Utang Member" }],
-                        [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
-                        [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
-                        [{ text: "📢 Pengumuman WA" }, { text: "📥 Fitur Download" }]
-                    ],
+                    keyboard: getOwnerMenuKeyboard(),
                     resize_keyboard: true
                 }
             });
@@ -7097,8 +7110,7 @@ Kirim linknya sekarang ya! 🥰`);
           [{ text: "📥 Fitur Download" }]
         ];
         if (isOwner) {
-          kb.push([{ text: "👑 List Member" }, { text: "📒 Cek Utang Member" }]);
-          kb.push([{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }]);
+          return getOwnerMenuKeyboard();
         }
         return kb;
       }
@@ -7676,6 +7688,53 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
       // =========================================================================
       // --- FITUR POSTER GAMBAR LIST HARGA PRODUK (CANVAS SESUAI GAMBAR 2) ---
       // =========================================================================
+      let lastManualSyncTime = 0;
+      bot.hears(["🔄 Sinkron Digiflazz", "🔄 Refresh Digiflazz", "/syncproducts"], async (ctx) => {
+        if (!db.owners.includes(ctx.from?.id || 0)) return;
+        const now = Date.now();
+        // Cooldown 60 detik untuk mencegah spam dan rate-limit Digiflazz
+        if (now - lastManualSyncTime < 60000) {
+          const sisaDetik = Math.ceil((60000 - (now - lastManualSyncTime)) / 1000);
+          return ctx.reply(`⏳ *Anti Rate-Limit Aktif!*\nData Digiflazz baru saja disinkronkan. Mohon tunggu *${sisaDetik} detik* lagi sebelum melakukan sinkronisasi ulang agar IP server tidak terkena limit oleh Digiflazz.`, { parse_mode: 'Markdown' });
+        }
+
+        lastManualSyncTime = now;
+        await ctx.reply("🔄 *Sedang mengambil data produk terbaru dari server Digiflazz...*", { parse_mode: 'Markdown' });
+        try {
+          const prods = await getDigiflazzProducts('prepaid', true);
+          await ctx.reply(`✅ *Sinkronisasi Digiflazz Berhasil!*\n━━━━━━━━━━━━━━━━━━━━━\n📦 Total Produk Terdeteksi: *${prods.length} produk*\n🕒 Waktu: *${new Date().toLocaleTimeString('id-ID')}*\n\nSemua produk baru atau produk yang dihapus di Digiflazz sudah otomatis tersinkron ke poster list harga!`, { parse_mode: 'Markdown' });
+        } catch (e: any) {
+          await ctx.reply(`❌ Gagal sinkronisasi Digiflazz: ${e.message}`);
+        }
+      });
+
+      async function showPriceListCategoryMenu(ctx: any, priceType: 'biasa' | 'vip' | 'owner') {
+        let labelType = 'Harga Jual Owner';
+        if (priceType === 'biasa') {
+          labelType = 'Harga Member Biasa';
+        } else if (priceType === 'vip') {
+          labelType = 'Harga Member VIP';
+        }
+
+        userStates[ctx.from.id] = { step: 'PRICE_LIST_CATEGORY', data: { priceType, labelType } };
+
+        await ctx.reply(
+          `🏷️ *POSTER LIST HARGA: ${labelType.toUpperCase()}*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe Terpilih: *${labelType}*\n\nSilakan pilih kategori di bawah, atau langsung *ketik nama game/brand* di chat (contoh: Free Fire, ML, DANA, Telkomsel):`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              keyboard: [
+                [{ text: "🎮 Games" }, { text: "💳 E-Money" }],
+                [{ text: "📱 Pulsa" }, { text: "⚡ Token PLN" }],
+                [{ text: "📦 Kategori Lainnya (Digiflazz)" }, { text: "🔄 Sinkron Digiflazz" }],
+                [{ text: "🏷️ Ganti Tipe Harga" }, { text: "🔙 Kembali ke Menu Owner" }]
+              ],
+              resize_keyboard: true
+            }
+          }
+        );
+      }
+
       bot.hears(["🏷️ List Harga Produk", "🏷️ List Harga", "List Harga", "/listharga"], async (ctx) => {
         if (!db.owners.includes(ctx.from?.id || 0)) return;
         delete userStates[ctx.from.id];
@@ -7695,129 +7754,19 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
         );
       });
 
-      async function showPriceListCategories(ctx: any, priceType: 'biasa' | 'vip' | 'owner', labelType: string) {
+      bot.hears(["👤 List Harga Biasa", "List Harga Biasa", "/listhargabiasa"], async (ctx) => {
         if (!db.owners.includes(ctx.from?.id || 0)) return;
-        userStates[ctx.from.id] = { step: 'PRICE_LIST_CATEGORY', data: { priceType, labelType } };
+        await showPriceListCategoryMenu(ctx, 'biasa');
+      });
 
-        try {
-          const products = await getDigiflazzProducts('prepaid');
-          const rawCategories: string[] = Array.from(new Set<string>(products.map((p: any) => String(p.category || '').trim()).filter(Boolean))).sort();
-
-          const getCategoryIcon = (cat: string) => {
-            const u = cat.toUpperCase();
-            if (u.includes('GAME')) return '🎮';
-            if (u.includes('MONEY') || u.includes('WALLET') || u.includes('E-MONEY')) return '💳';
-            if (u.includes('PULSA')) return '📱';
-            if (u.includes('PLN') || u.includes('LISTRIK') || u.includes('TOKEN')) return '⚡';
-            if (u.includes('DATA') || u.includes('PAKET') || u.includes('INTERNET')) return '📶';
-            if (u.includes('VOUCHER')) return '🎟️';
-            if (u.includes('STREAMING') || u.includes('TV')) return '📺';
-            return '📦';
-          };
-
-          const keyboard: any[][] = [];
-          for (let i = 0; i < rawCategories.length; i += 2) {
-            const row = [{ text: `${getCategoryIcon(rawCategories[i])} ${rawCategories[i]}` }];
-            if (rawCategories[i + 1]) {
-              row.push({ text: `${getCategoryIcon(rawCategories[i + 1])} ${rawCategories[i + 1]}` });
-            }
-            keyboard.push(row);
-          }
-          keyboard.push([{ text: "🏷️ Ganti Tipe Harga" }, { text: "🔙 Kembali ke Menu Owner" }]);
-
-          await ctx.reply(
-            `📂 *PILIH KATEGORI PRODUK*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe Harga Terpilih: *${labelType}*\n📊 Sumber Data: *Sesuai Kelola Produk Digiflazz*\n\nSilakan pilih kategori produk yang ingin dicetak gambarnya:`,
-            {
-              parse_mode: 'Markdown',
-              reply_markup: {
-                keyboard,
-                resize_keyboard: true
-              }
-            }
-          );
-        } catch (e: any) {
-          await ctx.reply("❌ Gagal memuat kategori produk dari Digiflazz: " + e.message);
-        }
-      }
-
-      async function showPriceListBrands(ctx: any, rawCategoryText: string) {
+      bot.hears(["👑 List Harga VIP", "List Harga VIP", "/listhargavip"], async (ctx) => {
         if (!db.owners.includes(ctx.from?.id || 0)) return;
-        const state = userStates[ctx.from?.id || 0];
-        const priceType: 'biasa' | 'vip' | 'owner' = state?.data?.priceType || 'owner';
-        const labelType: string = state?.data?.labelType || 'Harga Jual Owner';
+        await showPriceListCategoryMenu(ctx, 'vip');
+      });
 
-        const cleanCat = rawCategoryText.replace(/^[^\w\s]+/gi, '').trim().toUpperCase();
-
-        try {
-          const products = await getDigiflazzProducts('prepaid');
-          let catProducts = products.filter((p: any) => (p.category || '').toUpperCase().trim() === cleanCat);
-          if (catProducts.length === 0) {
-            catProducts = products.filter((p: any) => (p.category || '').toUpperCase().includes(cleanCat) || cleanCat.includes((p.category || '').toUpperCase()));
-          }
-          if (catProducts.length === 0) {
-            catProducts = products;
-          }
-
-          const rawBrands: string[] = Array.from(new Set<string>(catProducts.map((p: any) => String(p.brand || '').trim()).filter(Boolean))).sort();
-
-          if (rawBrands.length === 0) {
-            return ctx.reply(`⚠️ Tidak ditemukan produk untuk kategori *${rawCategoryText}* di akun Digiflazz.`);
-          }
-
-          userStates[ctx.from.id] = { step: 'PRICE_LIST_BRAND', data: { priceType, labelType, category: cleanCat } };
-
-          const getBrandIcon = (b: string) => {
-            const u = b.toUpperCase();
-            if (u.includes('FREE FIRE')) return '🔥';
-            if (u.includes('MOBILE LEGEND')) return '⚔️';
-            if (u.includes('PUBG')) return '🪂';
-            if (u.includes('GENSHIN')) return '⚡';
-            if (u.includes('VALORANT')) return '🎯';
-            if (u.includes('DANA') || u.includes('GOPAY') || u.includes('OVO') || u.includes('SHOPEE') || u.includes('LINKAJA')) return '💳';
-            if (u.includes('TELKOMSEL') || u.includes('INDOSAT') || u.includes('XL') || u.includes('AXIS') || u.includes('TRI') || u.includes('SMARTFREN')) return '📱';
-            if (u.includes('PLN')) return '⚡';
-            return '🏷️';
-          };
-
-          const keyboard: any[][] = [];
-          for (let i = 0; i < rawBrands.length; i += 2) {
-            const row = [{ text: `${getBrandIcon(rawBrands[i])} ${rawBrands[i]}` }];
-            if (rawBrands[i + 1]) {
-              row.push({ text: `${getBrandIcon(rawBrands[i + 1])} ${rawBrands[i + 1]}` });
-            }
-            keyboard.push(row);
-          }
-          keyboard.push([{ text: "🔙 Kembali ke Kategori" }, { text: "🔙 Kembali ke Menu Owner" }]);
-
-          await ctx.reply(
-            `📦 *PILIH PRODUK / BRAND (${cleanCat})*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe: *${labelType}*\n📊 Terhubung Akun Digiflazz: *${rawBrands.length} Brand Aktif*\n\nSilakan pilih brand yang ingin dicetak list harganya:`,
-            {
-              parse_mode: 'Markdown',
-              reply_markup: {
-                keyboard,
-                resize_keyboard: true
-              }
-            }
-          );
-        } catch (e: any) {
-          await ctx.reply("❌ Gagal memuat daftar brand: " + e.message);
-        }
-      }
-
-      bot.hears(["👤 List Harga Biasa", "👑 List Harga VIP", "💼 List Harga Owner", "💼 List Harga Jual Owner", "🏷️ List Harga Produk", "🏷️ List Harga"], async (ctx) => {
+      bot.hears(["💼 List Harga Owner", "💼 List Harga Jual Owner", "List Harga Owner", "Harga Jual Owner", "/listhargaowner"], async (ctx) => {
         if (!db.owners.includes(ctx.from?.id || 0)) return;
-        const text = ctx.message.text;
-        let priceType: 'biasa' | 'vip' | 'owner' = 'owner';
-        let labelType = 'Harga Jual Owner';
-        if (text.includes("Biasa")) {
-          priceType = 'biasa';
-          labelType = 'Harga Pelanggan Biasa';
-        } else if (text.includes("VIP")) {
-          priceType = 'vip';
-          labelType = 'Harga Member VIP';
-        }
-
-        await showPriceListCategories(ctx, priceType, labelType);
+        await showPriceListCategoryMenu(ctx, 'owner');
       });
 
       bot.hears("🏷️ Ganti Tipe Harga", async (ctx) => {
@@ -7834,25 +7783,198 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
         });
       });
 
+      bot.hears("🔙 Kembali ke Menu Owner", async (ctx) => {
+        if (!db.owners.includes(ctx.from?.id || 0)) return;
+        delete userStates[ctx.from.id];
+        await ctx.reply("👑 Kembali ke Menu Utama Owner:", {
+          reply_markup: {
+            keyboard: getOwnerMenuKeyboard(),
+            resize_keyboard: true
+          }
+        });
+      });
+
       bot.hears("🔙 Kembali ke Kategori", async (ctx) => {
         if (!db.owners.includes(ctx.from?.id || 0)) return;
         const state = userStates[ctx.from.id];
         const priceType = state?.data?.priceType || 'owner';
-        const labelType = state?.data?.labelType || 'Harga Jual Owner';
-        await showPriceListCategories(ctx, priceType, labelType);
+        await showPriceListCategoryMenu(ctx, priceType);
       });
 
-      async function generateAndSendPriceList(ctx: any, rawBrandText: string) {
+      async function showCategoryBrands(ctx: any, categoryName: string) {
+        if (!db.owners.includes(ctx.from?.id || 0)) return;
+        const state = userStates[ctx.from.id];
+        const priceType = state?.data?.priceType || 'owner';
+        const labelType = state?.data?.labelType || 'Harga Jual Owner';
+        userStates[ctx.from.id] = { step: 'PRICE_LIST_BRAND', data: { priceType, labelType, category: categoryName } };
+
+        try {
+          const prods = await getDigiflazzProducts('prepaid');
+          const matching = prods.filter((p: any) => 
+            (p.category || '').toLowerCase().includes(categoryName.toLowerCase()) ||
+            (p.type || '').toLowerCase().includes(categoryName.toLowerCase())
+          );
+          const brands = Array.from(new Set(matching.map((p: any) => (p.brand || '').trim()).filter(Boolean)));
+
+          const brandButtons: any[] = [];
+          for (let i = 0; i < brands.length; i += 2) {
+            const row = [{ text: brands[i] as string }];
+            if (i + 1 < brands.length) {
+              row.push({ text: brands[i + 1] as string });
+            }
+            brandButtons.push(row);
+          }
+          brandButtons.push([{ text: "🔙 Kembali ke Kategori" }, { text: "🔙 Kembali ke Menu Owner" }]);
+
+          await ctx.reply(
+            `📂 *PILIH BRAND / PRODUK (${categoryName.toUpperCase()})*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe: *${labelType}*\n📦 Total Brand Terdeteksi: ${brands.length}\n\nSilakan pilih tombol di bawah atau *ketik langsung nama brand* di chat:`,
+            {
+              parse_mode: 'Markdown',
+              reply_markup: {
+                keyboard: brandButtons.length > 1 ? brandButtons : [
+                  [{ text: "🔥 Free Fire" }, { text: "⚔️ Mobile Legends" }],
+                  [{ text: "🪂 PUBG Mobile" }, { text: "⚡ Genshin Impact" }],
+                  [{ text: "🔙 Kembali ke Kategori" }, { text: "🔙 Kembali ke Menu Owner" }]
+                ],
+                resize_keyboard: true
+              }
+            }
+          );
+        } catch (e: any) {
+          ctx.reply(`❌ Gagal memuat brand Digiflazz: ${e.message}`);
+        }
+      }
+
+      bot.hears("🎮 Games", async (ctx) => {
+        if (!db.owners.includes(ctx.from?.id || 0)) return;
+        const state = userStates[ctx.from.id];
+        const priceType = state?.data?.priceType || 'owner';
+        const labelType = state?.data?.labelType || 'Harga Jual Owner';
+        userStates[ctx.from.id] = { step: 'PRICE_LIST_BRAND', data: { priceType, labelType, category: 'Games' } };
+
+        await ctx.reply(
+          `🎮 *PILIH GAME*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe: *${labelType}*\n\nSilakan pilih game atau langsung *ketik nama game* di chat:`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              keyboard: [
+                [{ text: "🔥 Free Fire" }, { text: "⚔️ Mobile Legends" }],
+                [{ text: "🪂 PUBG Mobile" }, { text: "⚡ Genshin Impact" }],
+                [{ text: "🧱 Roblox" }, { text: "🎯 Valorant" }],
+                [{ text: "🔙 Kembali ke Kategori" }, { text: "🔙 Kembali ke Menu Owner" }]
+              ],
+              resize_keyboard: true
+            }
+          }
+        );
+      });
+
+      bot.hears("💳 E-Money", async (ctx) => {
+        if (!db.owners.includes(ctx.from?.id || 0)) return;
+        const state = userStates[ctx.from.id];
+        const priceType = state?.data?.priceType || 'owner';
+        const labelType = state?.data?.labelType || 'Harga Jual Owner';
+        userStates[ctx.from.id] = { step: 'PRICE_LIST_BRAND', data: { priceType, labelType, category: 'E-Money' } };
+
+        await ctx.reply(
+          `💳 *PILIH E-MONEY*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe: *${labelType}*\n\nSilakan pilih e-wallet atau ketik namanya di chat:`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              keyboard: [
+                [{ text: "DANA" }, { text: "GoPay" }],
+                [{ text: "OVO" }, { text: "ShopeePay" }],
+                [{ text: "🔙 Kembali ke Kategori" }, { text: "🔙 Kembali ke Menu Owner" }]
+              ],
+              resize_keyboard: true
+            }
+          }
+        );
+      });
+
+      bot.hears("📱 Pulsa", async (ctx) => {
+        if (!db.owners.includes(ctx.from?.id || 0)) return;
+        const state = userStates[ctx.from.id];
+        const priceType = state?.data?.priceType || 'owner';
+        const labelType = state?.data?.labelType || 'Harga Jual Owner';
+        userStates[ctx.from.id] = { step: 'PRICE_LIST_BRAND', data: { priceType, labelType, category: 'Pulsa' } };
+
+        await ctx.reply(
+          `📱 *PILIH OPERATOR PULSA*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe: *${labelType}*\n\nSilakan pilih operator atau ketik di chat:`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              keyboard: [
+                [{ text: "Telkomsel" }, { text: "Indosat" }],
+                [{ text: "XL" }, { text: "Axis" }],
+                [{ text: "Tri" }, { text: "Smartfren" }],
+                [{ text: "🔙 Kembali ke Kategori" }, { text: "🔙 Kembali ke Menu Owner" }]
+              ],
+              resize_keyboard: true
+            }
+          }
+        );
+      });
+
+      bot.hears("📦 Kategori Lainnya (Digiflazz)", async (ctx) => {
+        if (!db.owners.includes(ctx.from?.id || 0)) return;
+        const state = userStates[ctx.from.id];
+        const priceType = state?.data?.priceType || 'owner';
+        const labelType = state?.data?.labelType || 'Harga Jual Owner';
+
+        try {
+          const prods = await getDigiflazzProducts('prepaid');
+          const cats = Array.from(new Set(prods.map((p: any) => (p.category || '').trim()).filter(Boolean)));
+          
+          if (cats.length === 0) {
+            return ctx.reply("Belum ada kategori tambahan di katalog Digiflazz.");
+          }
+
+          const catButtons: any[] = [];
+          for (let i = 0; i < cats.length; i += 2) {
+            const row = [{ text: `📁 ${cats[i]}` }];
+            if (i + 1 < cats.length) {
+              row.push({ text: `📁 ${cats[i + 1]}` });
+            }
+            catButtons.push(row);
+          }
+          catButtons.push([{ text: "🔙 Kembali ke Kategori" }, { text: "🔙 Kembali ke Menu Owner" }]);
+
+          userStates[ctx.from.id] = { step: 'PRICE_LIST_CATEGORY_OTHER', data: { priceType, labelType } };
+
+          await ctx.reply(
+            `📦 *SEMUA KATEGORI DARI SERVER DIGIFLAZZ*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe: *${labelType}*\n\nSilakan pilih kategori produk Digiflazz:`,
+            {
+              parse_mode: 'Markdown',
+              reply_markup: {
+                keyboard: catButtons,
+                resize_keyboard: true
+              }
+            }
+          );
+        } catch (e: any) {
+          ctx.reply(`❌ Gagal membaca kategori: ${e.message}`);
+        }
+      });
+
+      async function generateAndSendPriceList(ctx: any, rawBrandText: string, forcedPriceType?: 'biasa' | 'vip' | 'owner') {
         if (!db.owners.includes(ctx.from?.id || 0)) return;
         const state = userStates[ctx.from?.id || 0];
-        const priceType: 'biasa' | 'vip' | 'owner' = state?.data?.priceType || 'owner';
-        const labelType: string = state?.data?.labelType || 'Harga Jual Owner';
+        const priceType: 'biasa' | 'vip' | 'owner' = forcedPriceType || state?.data?.priceType || 'owner';
+        let labelType = 'Harga Jual Owner';
+        if (priceType === 'biasa') {
+          labelType = 'Harga Member Biasa';
+        } else if (priceType === 'vip') {
+          labelType = 'Harga Member VIP';
+        }
 
-        let targetBrand = rawBrandText.replace(/^[^\w\s]+/gi, '').trim().toUpperCase();
-        if (targetBrand.includes('FREE FIRE')) targetBrand = 'FREE FIRE';
-        else if (targetBrand.includes('MOBILE LEGEND')) targetBrand = 'MOBILE LEGENDS';
+        let query = rawBrandText.replace(/^[^\w\s]+/gi, '').trim();
+        let targetBrand = query.toUpperCase();
+        if (targetBrand.includes('FREE FIRE') || targetBrand === 'FF') targetBrand = 'FREE FIRE';
+        else if (targetBrand.includes('MOBILE LEGEND') || targetBrand === 'ML' || targetBrand === 'MLBB') targetBrand = 'MOBILE LEGENDS';
         else if (targetBrand.includes('PUBG')) targetBrand = 'PUBG MOBILE';
         else if (targetBrand.includes('GENSHIN')) targetBrand = 'GENSHIN IMPACT';
+        else if (targetBrand.includes('ROBLOX')) targetBrand = 'ROBLOX';
         else if (targetBrand.includes('VALORANT')) targetBrand = 'VALORANT';
         else if (targetBrand.includes('DANA')) targetBrand = 'DANA';
         else if (targetBrand.includes('GOPAY')) targetBrand = 'GOPAY';
@@ -7863,26 +7985,39 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
         else if (targetBrand.includes('XL')) targetBrand = 'XL';
         else if (targetBrand.includes('AXIS')) targetBrand = 'AXIS';
         else if (targetBrand.includes('TRI')) targetBrand = 'TRI';
+        else if (targetBrand.includes('SMARTFREN')) targetBrand = 'SMARTFREN';
         else if (targetBrand.includes('PLN')) targetBrand = 'PLN';
 
-        await ctx.reply(`🎨 *Sedang merender gambar poster List Harga ${targetBrand}...*\n_Mengambil tarif ${labelType} sesuai Kelola Produk Digiflazz..._`, { parse_mode: 'Markdown' });
+        await ctx.reply(`🎨 *Sedang membuat poster List Harga ${targetBrand}...*\n_Tipe: ${labelType}_\n_Mengambil data produk dari katalog server Digiflazz..._`, { parse_mode: 'Markdown' });
 
         try {
           const products = await getDigiflazzProducts('prepaid');
           let brandProds = products.filter((p: any) => (p.brand || '').toUpperCase().trim() === targetBrand);
           if (brandProds.length === 0) {
-            brandProds = products.filter((p: any) => (p.brand || '').toUpperCase().includes(targetBrand) || targetBrand.includes((p.brand || '').toUpperCase().trim()));
+            brandProds = products.filter((p: any) => (p.brand || '').toUpperCase().includes(targetBrand));
           }
           if (brandProds.length === 0) {
             brandProds = products.filter((p: any) => (p.product_name || '').toUpperCase().includes(targetBrand));
           }
           if (brandProds.length === 0) {
-            return ctx.reply(`⚠️ Tidak ditemukan produk untuk brand *${targetBrand}* di akun Digiflazz / Kelola Produk Anda.\n\nPastikan produk ini aktif di akun Digiflazz Anda.`);
+            const pasca = await getDigiflazzProducts('pasca');
+            brandProds = pasca.filter((p: any) => 
+              (p.brand || '').toUpperCase().includes(targetBrand) || 
+              (p.product_name || '').toUpperCase().includes(targetBrand)
+            );
           }
 
-          const mapped = brandProds.map((p: any) => {
+          if (brandProds.length === 0) {
+            return ctx.reply(`⚠️ Tidak ditemukan produk untuk *${rawBrandText}* di katalog server Digiflazz. Pastikan nama brand atau produk sudah sesuai.`);
+          }
+
+          // Prioritize active products if any
+          const activeProds = brandProds.filter((p: any) => p.buyer_product_status !== false && p.seller_product_status !== false);
+          const finalProds = activeProds.length > 0 ? activeProds : brandProds;
+
+          const mapped = finalProds.map((p: any) => {
             const fee = getProductFee(p.buyer_sku_code);
-            let calculatedPrice = Number(p.price);
+            let calculatedPrice = Number(p.price) || 0;
             if (priceType === 'biasa') {
               calculatedPrice += (fee.biasa || 0);
             } else if (priceType === 'vip') {
@@ -7893,7 +8028,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
             return {
               buyer_sku_code: p.buyer_sku_code,
               product_name: p.product_name,
-              brand: p.brand,
+              brand: p.brand || targetBrand,
               price: calculatedPrice,
               category: p.category
             };
@@ -7903,22 +8038,23 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
             brand: targetBrand,
             priceType,
             products: mapped,
-            category: state?.data?.category || brandProds[0]?.category || 'Games'
+            category: finalProds[0]?.category || 'Games',
+            customStoreName: (db as any).storeName || 'E4 STORE'
           }, 12);
 
           const totalPages = buffers.length;
           for (let i = 0; i < totalPages; i++) {
             const startIdx = i * 12 + 1;
             const endIdx = Math.min((i + 1) * 12, mapped.length);
-            const partHeader = totalPages > 1 ? ` (Halaman ${i + 1}/${totalPages})` : '';
+            const partHeader = totalPages > 1 ? ` (Part ${i + 1}/${totalPages})` : '';
             const rangeText = totalPages > 1 
-              ? `📦 *Item:* ${startIdx} - ${endIdx} dari ${mapped.length} item\n`
+              ? `📦 *Item:* ${startIdx} - ${endIdx} dari ${mapped.length} produk\n`
               : `📦 *Total Produk:* ${mapped.length} item\n`;
 
             await ctx.replyWithPhoto(
               { source: buffers[i] },
               {
-                caption: `✅ *POSTER DAFTAR HARGA: ${targetBrand}${partHeader}*\n━━━━━━━━━━━━━━━━━━━━━\n👑 *Tipe Harga:* ${labelType}\n${rangeText}✨ *Desain:* Resmi E4 Store (Format Story 9:16)\n\n_Harga otomatis sesuai dengan konfigurasi di Web Dashboard!_${totalPages > 1 && i < totalPages - 1 ? '\n\n⏳ _Mengirim halaman kelanjutan berikutnya..._' : ''}`,
+                caption: `✅ *POSTER DAFTAR HARGA: ${targetBrand}${partHeader}*\n━━━━━━━━━━━━━━━━━━━━━\n🏷️ *Tipe Harga:* ${labelType}\n${rangeText}✨ *Format:* Poster Gambar Resmi E4 Store (9:16)\n\n_Harga otomatis sesuai dengan konfigurasi server & Digiflazz!_${totalPages > 1 && i < totalPages - 1 ? '\n\n⏳ _Mengirim gambar halaman kelanjutan berikutnya..._' : ''}`,
                 parse_mode: 'Markdown'
               }
             );
@@ -7933,6 +8069,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
       bot.hears(["⚔️ Mobile Legends", "Mobile Legends", "mobile legends", "ml"], async (ctx) => generateAndSendPriceList(ctx, "MOBILE LEGENDS"));
       bot.hears(["🪂 PUBG Mobile", "PUBG Mobile", "pubg"], async (ctx) => generateAndSendPriceList(ctx, "PUBG MOBILE"));
       bot.hears(["⚡ Genshin Impact", "Genshin Impact", "genshin"], async (ctx) => generateAndSendPriceList(ctx, "GENSHIN IMPACT"));
+      bot.hears(["🧱 Roblox", "Roblox", "roblox"], async (ctx) => generateAndSendPriceList(ctx, "ROBLOX"));
       bot.hears(["🎯 Valorant", "Valorant", "valorant"], async (ctx) => generateAndSendPriceList(ctx, "VALORANT"));
       bot.hears(["DANA", "dana"], async (ctx) => generateAndSendPriceList(ctx, "DANA"));
       bot.hears(["GoPay", "gopay"], async (ctx) => generateAndSendPriceList(ctx, "GOPAY"));
@@ -8928,6 +9065,9 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
           "🔙 Kembali ke Menu Owner",
           "🔙 Kembali ke Kategori",
           "🏷️ Ganti Tipe Harga",
+          "📦 Kategori Lainnya (Digiflazz)",
+          "🔄 Sinkron Digiflazz",
+          "🔄 Refresh Digiflazz",
           "🎮 Games",
           "💳 E-Money",
           "📱 Pulsa",
@@ -8935,31 +9075,28 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
           "📶 Paket Data",
           "🎟️ Voucher Digital"
         ];
-        const state = userStates[userId];
-        if (state?.step === 'PRICE_LIST_CATEGORY' && db.owners.includes(userId)) {
-          if (text === '🔙 Kembali ke Menu Owner' || text === '🏷️ Ganti Tipe Harga') {
-            delete userStates[userId];
-            return next();
-          }
-          await showPriceListBrands(ctx, text);
-          return;
-        }
-
-        if (state?.step === 'PRICE_LIST_BRAND' && db.owners.includes(userId)) {
-          if (text === '🔙 Kembali ke Kategori' || text === '🔙 Kembali ke Menu Owner' || text === '🏷️ Ganti Tipe Harga') {
-            return next();
-          }
-          await generateAndSendPriceList(ctx, text);
-          return;
-        }
-
         if (ownerMenu.includes(text) && db.owners.includes(userId)) {
            delete userStates[userId];
            return next(); 
         }
 
+        const state = userStates[userId];
         if (state) {
             switch (state.step) {
+                case 'PRICE_LIST_CATEGORY':
+                case 'PRICE_LIST_CATEGORY_OTHER':
+                case 'PRICE_LIST_BRAND': {
+                  if (text === '🔙 Kembali ke Kategori' || text === '🔙 Kembali ke Menu Owner' || text === '🏷️ Ganti Tipe Harga') {
+                    return next();
+                  }
+                  if (text.startsWith('📁 ')) {
+                    const catName = text.replace('📁 ', '').trim();
+                    await showCategoryBrands(ctx, catName);
+                    return;
+                  }
+                  await generateAndSendPriceList(ctx, text);
+                  return;
+                }
 
                 case 'TOPUP_SELECT_AMOUNT':
                 case 'TOPUP_INPUT_CUSTOM_AMOUNT': {
@@ -9000,14 +9137,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                         delete userStates[userId];
                         await ctx.reply("❌ Download dibatalkan.", {
                             reply_markup: {
-                                keyboard: db.owners.includes(userId) ? 
-                                [
-                                    [{ text: "📒 Cek Utang Member" }],
-                                    [{ text: "📝 Tambah Member" }, { text: "👑 List Member" }],
-                                    [{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }],
-                                    [{ text: "📢 Pengumuman WA" }, { text: "📥 Fitur Download" }]
-                                ] :
-                                [
+                                keyboard: db.owners.includes(userId) ? getOwnerMenuKeyboard() : [
                                     [{ text: "💵 Cek Saldo" }],
                                     [{ text: "🧾 Cek Tagihan" }],
                                     [{ text: "📋 Menu Produk" }],
@@ -9043,11 +9173,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                     if (pinEntered === '❌ Batal' || pinEntered.toLowerCase() === 'batal') {
                         delete userStates[userId];
                         const isOwner = db.owners.includes(userId);
-                        let kb = [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Fitur Download" }]];
-                        if (isOwner) {
-                            kb.push([{ text: "👑 List Member" }, { text: "📒 Cek Utang Member" }]);
-                            kb.push([{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }]);
-                        }
+                        let kb = isOwner ? getOwnerMenuKeyboard() : [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Fitur Download" }]];
                         await ctx.reply("❌ Transaksi dibatalkan.", { reply_markup: { keyboard: kb, resize_keyboard: true } });
                         return;
                     }
@@ -9077,11 +9203,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                     if (pinEntered === '❌ Batal' || pinEntered.toLowerCase() === 'batal') {
                         delete userStates[userId];
                         const isOwner = db.owners.includes(userId);
-                        let kb = [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Fitur Download" }]];
-                        if (isOwner) {
-                            kb.push([{ text: "👑 List Member" }, { text: "📒 Cek Utang Member" }]);
-                            kb.push([{ text: "💳 Saldo Pusat" }, { text: "⚙️ Pengaturan" }]);
-                        }
+                        let kb = isOwner ? getOwnerMenuKeyboard() : [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Fitur Download" }]];
                         await ctx.reply("❌ Transaksi dibatalkan.", { reply_markup: { keyboard: kb, resize_keyboard: true } });
                         return;
                     }
@@ -11441,7 +11563,8 @@ E4 Store`,
         brand: brandUpper,
         priceType,
         products: mapped,
-        category: (filtered[0]?.category) || "Games"
+        category: (filtered[0]?.category) || "Games",
+        customStoreName: (db as any).storeName || "E4 STORE"
       }, 12);
 
       const totalPages = buffers.length;

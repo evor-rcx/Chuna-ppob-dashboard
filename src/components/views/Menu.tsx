@@ -347,13 +347,6 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
               >
                 <RefreshCw size={14} /> Refresh
               </button>
-              <button
-                onClick={() => setIsZoomed(true)}
-                className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 rounded-xl text-xs font-medium transition-colors flex items-center gap-1.5 border border-amber-500/30 cursor-pointer"
-                title="Perbesar gambar nota"
-              >
-                <ZoomIn size={14} /> Perbesar
-              </button>
             </div>
           </div>
 
