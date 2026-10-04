@@ -1,5 +1,6 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { resolveAvatarImage } from './royalStrukReceipt';
+import { initGlobalFonts, UNICODE_FONT_STACK } from './fontHelper';
 import path from 'path';
 import fs from 'fs';
 
@@ -243,12 +244,13 @@ export async function generateDebtSettlementReceipt(data: DebtSettlementReceiptD
     }
 
     // Atas Nama (Header E4 STORE & NOTA PEMBAYARAN LUNAS sudah ada di mentahan)
+    initGlobalFonts();
     const cleanCustomerName = (data.nama || 'Kakak').trim();
     drawCrispText(
         `Atas Nama: ${cleanCustomerName.startsWith('Kak') ? cleanCustomerName : 'Kak ' + cleanCustomerName}`,
         avatarCenterX,
         446,
-        'bold 30px "Liberation Sans", "DejaVu Sans", Arial, sans-serif',
+        `bold 30px ${UNICODE_FONT_STACK}`,
         '#ffffff',
         'center',
         8

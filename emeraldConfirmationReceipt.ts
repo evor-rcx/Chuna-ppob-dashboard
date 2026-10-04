@@ -1,5 +1,6 @@
 import fs from 'fs';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
+import { initGlobalFonts, UNICODE_FONT_STACK } from './fontHelper';
 
 export interface EmeraldConfirmationData {
     customerName: string;         // Nama profile WA / Nama terdaftar
@@ -378,8 +379,9 @@ export async function generateEmeraldConfirmationImage(data: EmeraldConfirmation
 
     // Field 1: Nama
     ctx.save();
+    initGlobalFonts();
     ctx.fillStyle = '#ffffff';
-    ctx.font = '600 36px "Segoe UI", "Liberation Sans", "FreeSans", "IPAPGothic", "KacstArt", Arial, sans-serif';
+    ctx.font = `600 36px ${UNICODE_FONT_STACK}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText(`Nama : ${cleanCustomerName}`, contentStartX, 424);

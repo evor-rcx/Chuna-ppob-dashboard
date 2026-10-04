@@ -1,5 +1,6 @@
 import { createCanvas, loadImage, Image } from '@napi-rs/canvas';
 import { resolveAvatarImage } from './royalStrukReceipt';
+import { initGlobalFonts, UNICODE_FONT_STACK } from './fontHelper';
 import path from 'path';
 import fs from 'fs';
 import { getHolidayInfo, getWitaDateComponents } from './src/utils/holidays';
@@ -339,7 +340,8 @@ export async function generatePascabayarTagihanReceipt(data: PascabayarTagihanDa
     ctx.fillText('Nama', leftX, 380);
 
     ctx.textAlign = 'right';
-    ctx.font = 'bold 35px "Liberation Sans", "DejaVu Sans", Arial, sans-serif';
+    initGlobalFonts();
+    ctx.font = `bold 35px ${UNICODE_FONT_STACK}`;
     ctx.fillText(namaVal, rightX, 380);
 
     drawThinDivider(412);

@@ -1,5 +1,6 @@
 import { createCanvas, loadImage, Image } from '@napi-rs/canvas';
 import { resolveAvatarImage } from './royalStrukReceipt';
+import { initGlobalFonts, UNICODE_FONT_STACK } from './fontHelper';
 import path from 'path';
 import fs from 'fs';
 
@@ -283,6 +284,7 @@ ${refundBlock}`;
  * - Total Bayar menyala neon pink di bawah kotak
  */
 export async function generateKonfirmasiReceipt(data: KonfirmasiData): Promise<Buffer> {
+    initGlobalFonts();
     const templateImg = await getKonfirmasiTemplate();
     const width = templateImg ? templateImg.width : 1080;
     const height = templateImg ? templateImg.height : 1060;
@@ -345,7 +347,7 @@ export async function generateKonfirmasiReceipt(data: KonfirmasiData): Promise<B
         );
 
         ctx.fillStyle = '#38bdf8';
-        ctx.font = 'bold 110px "Liberation Sans", "DejaVu Sans", Arial, sans-serif';
+        ctx.font = `bold 110px ${UNICODE_FONT_STACK}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.shadowColor = 'rgba(56, 189, 248, 0.9)';
@@ -445,7 +447,7 @@ export async function generateKonfirmasiReceipt(data: KonfirmasiData): Promise<B
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
 
-        ctx.font = 'bold 31px "Liberation Sans", "DejaVu Sans", Arial, sans-serif';
+        ctx.font = `bold 31px ${UNICODE_FONT_STACK}`;
         ctx.fillStyle = '#ffffff';
         ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
         ctx.shadowBlur = 6;
@@ -493,7 +495,7 @@ export async function generateKonfirmasiReceipt(data: KonfirmasiData): Promise<B
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = 'italic 900 46px "Liberation Sans", "DejaVu Sans", Arial, sans-serif';
+    ctx.font = `italic 900 46px ${UNICODE_FONT_STACK}`;
     ctx.fillStyle = '#ff3385';
     ctx.shadowColor = 'rgba(255, 51, 133, 0.95)';
     ctx.shadowBlur = 18;
@@ -501,7 +503,7 @@ export async function generateKonfirmasiReceipt(data: KonfirmasiData): Promise<B
 
     // Lapisan core putih untuk efek lampu tabung neon
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'italic 900 44px "Liberation Sans", "DejaVu Sans", Arial, sans-serif';
+    ctx.font = `italic 900 44px ${UNICODE_FONT_STACK}`;
     ctx.shadowBlur = 4;
     ctx.fillText(totalBayarStr, boxX + boxW / 2, 746);
     ctx.restore();

@@ -33,6 +33,10 @@ import { generateKonfirmasiReceipt, formatKonfirmasiMessage, formatKonfirmasiSuc
 import { generatePascabayarTagihanReceipt, formatPascabayarTagihanMessage, formatPascabayarNotFoundMessage } from "./pascabayarTagihanReceipt";
 import { DEFAULT_PREPAID_PRODUCTS, DEFAULT_PASCA_PRODUCTS } from "./defaultDigiflazzProducts";
 import { generatePriceListImage, generatePriceListImages } from "./priceListReceipt";
+import { initGlobalFonts, UNICODE_FONT_STACK } from "./fontHelper";
+
+// Inisialisasi engine font Unicode CJK (No-Tofu) agar nama Jepang, China, Arab, dll. langsung aman
+initGlobalFonts();
 
 import path from 'path';
 
@@ -7770,7 +7774,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
             parse_mode: 'Markdown',
             reply_markup: {
               keyboard: [
-                [{ text: "📦 Kategori Lainnya (Digiflazz)" }, { text: "🔄 Sinkron Digiflazz" }],
+                [{ text: "📦 MENU HARGA produk" }, { text: "🔄 Sinkron Digiflazz" }],
                 [{ text: "🏷️ Ganti Tipe Harga" }, { text: "🔙 Kembali ke Menu Owner" }]
               ],
               resize_keyboard: true
@@ -7885,7 +7889,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
             }
           );
         } catch (e: any) {
-          ctx.reply(`❌ Gagal memuat brand Digiflazz: ${e.message}`);
+          ctx.reply(`❌ Gagal memuat brand: ${e.message}`);
         }
       }
 
@@ -7960,7 +7964,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
         );
       });
 
-      bot.hears(["📦 Kategori Lainnya (Digiflazz)", "📦 Kategori Lainnya", "Kategori Lainnya", "Kategori Lain", "kategori lainnya"], async (ctx) => {
+      bot.hears(["📦 MENU HARGA produk", "MENU HARGA produk", "📦 Menu Harga Produk", "Menu Harga Produk", "📦 Kategori Lainnya (Digiflazz)", "📦 Kategori Lainnya", "Kategori Lainnya", "Kategori Lain", "kategori lainnya"], async (ctx) => {
         if (!db.owners.includes(ctx.from?.id || 0)) return;
         const state = userStates[ctx.from.id];
         const priceType = state?.data?.priceType || 'owner';
@@ -7971,7 +7975,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
           const cats = Array.from(new Set(prods.map((p: any) => (p.category || '').trim()).filter(Boolean)));
           
           if (cats.length === 0) {
-            return ctx.reply("Belum ada kategori tambahan di katalog Digiflazz.");
+            return ctx.reply("Belum ada kategori tambahan di katalog produk.");
           }
 
           const catButtons: any[] = [];
@@ -7987,7 +7991,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
           userStates[ctx.from.id] = { step: 'PRICE_LIST_CATEGORY_OTHER', data: { priceType, labelType } };
 
           await ctx.reply(
-            `📦 *SEMUA KATEGORI DARI SERVER DIGIFLAZZ*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe: *${labelType}*\n\nSilakan pilih kategori produk Digiflazz:`,
+            `📦 *SEMUA KATEGORI DARI SERVER*\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tipe: *${labelType}*\n\nSilakan pilih kategori produk:`,
             {
               parse_mode: 'Markdown',
               reply_markup: {
@@ -8032,7 +8036,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
         else if (targetBrand.includes('SMARTFREN')) targetBrand = 'SMARTFREN';
         else if (targetBrand.includes('PLN')) targetBrand = 'PLN';
 
-        await ctx.reply(`🎨 *Sedang membuat poster List Harga ${targetBrand}...*\n_Tipe: ${labelType}_\n_Mengambil data produk dari katalog server Digiflazz..._`, { parse_mode: 'Markdown' });
+        await ctx.reply(`🎨 *Sedang membuat poster List Harga ${targetBrand}...*\n_Tipe: ${labelType}_\n_Mengambil data produk dari katalog server..._`, { parse_mode: 'Markdown' });
 
         try {
           const products = await getDigiflazzProducts('prepaid');
@@ -9109,6 +9113,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
           "🔙 Kembali ke Menu Owner",
           "🔙 Kembali ke Kategori",
           "🏷️ Ganti Tipe Harga",
+          "📦 MENU HARGA produk",
           "📦 Kategori Lainnya (Digiflazz)",
           "🔄 Sinkron Digiflazz",
           "🔄 Refresh Digiflazz",
