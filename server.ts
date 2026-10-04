@@ -8008,6 +8008,10 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
       async function generateAndSendPriceList(ctx: any, rawBrandText: string, forcedPriceType?: 'biasa' | 'vip' | 'owner') {
         if (!db.owners.includes(ctx.from?.id || 0)) return;
         const state = userStates[ctx.from?.id || 0];
+        // Pastikan HANYA berjalan jika user memang sedang aktif di menu pembuatan list harga
+        if (!state || !state.step || !state.step.startsWith('PRICE_LIST')) {
+          return;
+        }
         const priceType: 'biasa' | 'vip' | 'owner' = forcedPriceType || state?.data?.priceType || 'owner';
         let labelType = 'Harga Jual Owner';
         if (priceType === 'biasa') {
@@ -8112,24 +8116,6 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
           await ctx.reply(`❌ Gagal membuat gambar list harga: ${err.message}`);
         }
       }
-
-      bot.hears(["🔥 Free Fire", "Free Fire", "free fire", "ff"], async (ctx) => generateAndSendPriceList(ctx, "FREE FIRE"));
-      bot.hears(["⚔️ Mobile Legends", "Mobile Legends", "mobile legends", "ml"], async (ctx) => generateAndSendPriceList(ctx, "MOBILE LEGENDS"));
-      bot.hears(["🪂 PUBG Mobile", "PUBG Mobile", "pubg"], async (ctx) => generateAndSendPriceList(ctx, "PUBG MOBILE"));
-      bot.hears(["⚡ Genshin Impact", "Genshin Impact", "genshin"], async (ctx) => generateAndSendPriceList(ctx, "GENSHIN IMPACT"));
-      bot.hears(["🧱 Roblox", "Roblox", "roblox"], async (ctx) => generateAndSendPriceList(ctx, "ROBLOX"));
-      bot.hears(["🎯 Valorant", "Valorant", "valorant"], async (ctx) => generateAndSendPriceList(ctx, "VALORANT"));
-      bot.hears(["DANA", "dana"], async (ctx) => generateAndSendPriceList(ctx, "DANA"));
-      bot.hears(["GoPay", "gopay"], async (ctx) => generateAndSendPriceList(ctx, "GOPAY"));
-      bot.hears(["OVO", "ovo"], async (ctx) => generateAndSendPriceList(ctx, "OVO"));
-      bot.hears(["ShopeePay", "shopeepay"], async (ctx) => generateAndSendPriceList(ctx, "SHOPEEPAY"));
-      bot.hears(["Telkomsel", "telkomsel"], async (ctx) => generateAndSendPriceList(ctx, "TELKOMSEL"));
-      bot.hears(["Indosat", "indosat"], async (ctx) => generateAndSendPriceList(ctx, "INDOSAT"));
-      bot.hears(["XL", "xl"], async (ctx) => generateAndSendPriceList(ctx, "XL"));
-      bot.hears(["Axis", "axis"], async (ctx) => generateAndSendPriceList(ctx, "AXIS"));
-      bot.hears(["Tri", "tri"], async (ctx) => generateAndSendPriceList(ctx, "TRI"));
-      bot.hears(["Smartfren", "smartfren"], async (ctx) => generateAndSendPriceList(ctx, "SMARTFREN"));
-      bot.hears(["⚡ Token PLN", "Token PLN", "PLN", "pln"], async (ctx) => generateAndSendPriceList(ctx, "PLN"));
 
       bot.hears("👑 List Member", async (ctx) => {
         if (!db.owners.includes(ctx.from.id)) return;
@@ -9116,13 +9102,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
           "📦 MENU HARGA produk",
           "📦 Kategori Lainnya (Digiflazz)",
           "🔄 Sinkron Digiflazz",
-          "🔄 Refresh Digiflazz",
-          "🎮 Games",
-          "💳 E-Money",
-          "📱 Pulsa",
-          "⚡ Token PLN",
-          "📶 Paket Data",
-          "🎟️ Voucher Digital"
+          "🔄 Refresh Digiflazz"
         ];
         if (ownerMenu.includes(text) && db.owners.includes(userId)) {
            delete userStates[userId];

@@ -1,4 +1,5 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
+import { initGlobalFonts, UNICODE_FONT_STACK } from './fontHelper';
 import path from 'path';
 import fs from 'fs';
 
@@ -528,6 +529,7 @@ export function getRoyalStrukCaption(isLunas: boolean): string {
  * - Footer lengkap E4 Store & Chuna
  */
 export async function generateRoyalTidakLunasReceipt(data: RoyalStrukData): Promise<Buffer> {
+    initGlobalFonts();
     const width = 1024;
     const height = 1024;
 
@@ -575,7 +577,7 @@ export async function generateRoyalTidakLunasReceipt(data: RoyalStrukData): Prom
         ctx.fillRect(avatarCenterX - avatarRadius, avatarCenterY - avatarRadius, avatarRadius * 2, avatarRadius * 2);
 
         ctx.fillStyle = '#fde047';
-        ctx.font = 'bold 64px "DejaVu Sans", "Segoe UI", Arial, sans-serif';
+        ctx.font = `bold 64px ${UNICODE_FONT_STACK}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.shadowColor = 'rgba(251, 191, 36, 0.9)';
@@ -599,7 +601,7 @@ export async function generateRoyalTidakLunasReceipt(data: RoyalStrukData): Prom
     const metode = data.metode || 'CASH';
 
     ctx.save();
-    ctx.font = 'bold 18.5px "DejaVu Sans", "Segoe UI", Arial, sans-serif';
+    ctx.font = `bold 18.5px ${UNICODE_FONT_STACK}`;
     ctx.fillStyle = '#ffffff';
     ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
     ctx.shadowBlur = 5;
@@ -653,11 +655,11 @@ export async function generateRoyalTidakLunasReceipt(data: RoyalStrukData): Prom
     // 8. Footer Info (Diturunkan agar bersih dan tidak menimpa tulisan mentahan 'Segerah di lunasi ya kak')
     ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
     ctx.shadowBlur = 4;
-    ctx.font = 'bold 14px "DejaVu Sans", "Segoe UI", Arial, sans-serif';
+    ctx.font = `bold 14px ${UNICODE_FONT_STACK}`;
     ctx.fillStyle = '#ffffff';
     ctx.fillText('Terima kasih telah berbelanja di E4 Store!', avatarCenterX, 796);
 
-    ctx.font = 'bold 13px "DejaVu Sans", "Segoe UI", Arial, sans-serif';
+    ctx.font = `bold 13px ${UNICODE_FONT_STACK}`;
     ctx.fillStyle = '#e2e8f0';
     const orderCode = orderId.startsWith('PRE-') ? orderId.substring(0, 8) : `#${orderId.substring(0, 8).toUpperCase()}`;
     const cetakStr = data.cetakDate || tanggal;
@@ -679,6 +681,7 @@ export async function generateRoyalTidakLunasReceipt(data: RoyalStrukData): Prom
  * Menggunakan template Picsart_26-09-28_17-56-42-115.png (Royal Gold Mahkota Emas)
  */
 export async function generateRoyalLunasReceipt(data: RoyalStrukData): Promise<Buffer> {
+    initGlobalFonts();
     const width = 2048;
     const height = 2048;
 
@@ -724,7 +727,7 @@ export async function generateRoyalLunasReceipt(data: RoyalStrukData): Promise<B
         ctx.fillRect(avatarCenterX - avatarRadius, avatarCenterY - avatarRadius, avatarRadius * 2, avatarRadius * 2);
 
         ctx.fillStyle = '#fde047';
-        ctx.font = 'bold 110px "DejaVu Sans", "Segoe UI", Arial, sans-serif';
+        ctx.font = `bold 110px ${UNICODE_FONT_STACK}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.shadowColor = 'rgba(251, 191, 36, 0.9)';
@@ -775,7 +778,7 @@ export async function generateRoyalLunasReceipt(data: RoyalStrukData): Promise<B
     }
 
     ctx.save();
-    ctx.font = 'bold 34px "DejaVu Sans", "Segoe UI", Arial, sans-serif';
+    ctx.font = `bold 34px ${UNICODE_FONT_STACK}`;
     ctx.fillStyle = '#ffffff';
 
     for (const r of rows) {
@@ -801,7 +804,7 @@ export async function generateRoyalLunasReceipt(data: RoyalStrukData): Promise<B
     ctx.stroke();
 
     ctx.textAlign = 'center';
-    ctx.font = 'bold 26px "DejaVu Sans", "Segoe UI", Arial, sans-serif';
+    ctx.font = `bold 26px ${UNICODE_FONT_STACK}`;
     ctx.fillStyle = '#fde047';
     ctx.fillText(meta.dividerTitle, avatarCenterX, divY + 8);
 
@@ -856,11 +859,11 @@ export async function generateRoyalLunasReceipt(data: RoyalStrukData): Promise<B
     ctx.fillText(`TOTAL BAYAR: Rp ${totalBayar.toLocaleString('id-ID')}`, avatarCenterX, 1425);
 
     // 7. Footer Text
-    ctx.font = 'bold 26px "DejaVu Sans", "Segoe UI", Arial, sans-serif';
+    ctx.font = `bold 26px ${UNICODE_FONT_STACK}`;
     ctx.fillStyle = '#ffffff';
     ctx.fillText('Terima kasih telah berbelanja di E4 Store!', avatarCenterX, 1575);
 
-    ctx.font = 'bold 24px "DejaVu Sans", "Segoe UI", Arial, sans-serif';
+    ctx.font = `bold 24px ${UNICODE_FONT_STACK}`;
     ctx.fillStyle = '#f1f5f9';
     const orderCode = orderId.startsWith('PRE-') ? orderId.substring(0, 8) : `#${orderId.substring(0, 8).toUpperCase()}`;
     const cetakStr = data.cetakDate || tanggal;

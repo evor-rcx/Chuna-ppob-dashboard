@@ -1,5 +1,6 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { resolveAvatarImage } from './royalStrukReceipt';
+import { initGlobalFonts, UNICODE_FONT_STACK } from './fontHelper';
 
 export interface VintageTagihanItem {
     name: string;
@@ -116,6 +117,7 @@ No. HP: ${cleanPhone}`;
  * - Kotak emas glowing TOTAL UTANG
  */
 export async function generateVintageTagihanReceipt(data: VintageTagihanData): Promise<Buffer> {
+    initGlobalFonts();
     const width = 1024;
     const height = 1024;
     const canvas = createCanvas(width, height);
@@ -300,7 +302,7 @@ export async function generateVintageTagihanReceipt(data: VintageTagihanData): P
 
         // Gold Initials
         ctx.fillStyle = '#fde047';
-        ctx.font = 'bold 54px "DejaVu Sans", "Segoe UI", Arial, sans-serif';
+        ctx.font = `bold 54px ${UNICODE_FONT_STACK}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.shadowColor = 'rgba(251, 191, 36, 0.9)';
@@ -356,7 +358,7 @@ export async function generateVintageTagihanReceipt(data: VintageTagihanData): P
     e4Grad.addColorStop(0.5, '#fef08a');
     e4Grad.addColorStop(1, '#f59e0b');
 
-    ctx.font = 'italic bold 44px "DejaVu Sans", "Segoe UI", Arial, sans-serif';
+    ctx.font = `italic bold 44px ${UNICODE_FONT_STACK}`;
     ctx.fillStyle = e4Grad;
     ctx.shadowColor = 'rgba(245, 158, 11, 0.75)';
     ctx.shadowBlur = 14;
@@ -364,7 +366,7 @@ export async function generateVintageTagihanReceipt(data: VintageTagihanData): P
     ctx.shadowBlur = 0;
 
     // BUKTI CATATAN TAGIHAN (Bold Crisp White)
-    ctx.font = 'bold 32px "DejaVu Sans", "Segoe UI", Arial, sans-serif';
+    ctx.font = `bold 32px ${UNICODE_FONT_STACK}`;
     ctx.fillStyle = '#ffffff';
     ctx.shadowColor = 'rgba(0, 242, 254, 0.6)';
     ctx.shadowBlur = 10;
@@ -403,7 +405,7 @@ export async function generateVintageTagihanReceipt(data: VintageTagihanData): P
 
     // Status Text inside pill
     ctx.textAlign = 'center';
-    ctx.font = 'bold 19px "DejaVu Sans", "Segoe UI", Arial, sans-serif';
+    ctx.font = `bold 19px ${UNICODE_FONT_STACK}`;
     ctx.fillStyle = '#ffffff';
     ctx.fillText(`Status: ${status}`, pillX + pillW / 2, pillY + 34);
     ctx.restore();
@@ -431,7 +433,7 @@ export async function generateVintageTagihanReceipt(data: VintageTagihanData): P
     const contentRight = 896;
 
     ctx.save();
-    ctx.font = 'bold 22px "DejaVu Sans", "Segoe UI", Arial, sans-serif';
+    ctx.font = `bold 22px ${UNICODE_FONT_STACK}`;
     ctx.fillStyle = '#ffffff';
 
     // Left: Customer: [Name]
@@ -472,13 +474,13 @@ export async function generateVintageTagihanReceipt(data: VintageTagihanData): P
 
         // Product Name
         ctx.textAlign = 'left';
-        ctx.font = 'bold 21px "DejaVu Sans", "Segoe UI", Arial, sans-serif';
+        ctx.font = `bold 21px ${UNICODE_FONT_STACK}`;
         ctx.fillStyle = '#ffffff';
         ctx.fillText(`❖ ${it.name} — Rp`, contentLeft, itemY);
 
         // Price (Gold / Bright Yellow)
         ctx.textAlign = 'right';
-        ctx.font = 'bold 24px "DejaVu Sans", "Segoe UI", Arial, sans-serif';
+        ctx.font = `bold 24px ${UNICODE_FONT_STACK}`;
         ctx.fillStyle = '#fde047';
         ctx.fillText(it.price.toLocaleString('id-ID'), contentRight, itemY);
     });
@@ -504,7 +506,7 @@ export async function generateVintageTagihanReceipt(data: VintageTagihanData): P
 
     // Text: TOTAL UTANG: Rp [nominal]
     ctx.textAlign = 'center';
-    ctx.font = 'bold 26px "DejaVu Sans", "Segoe UI", Arial, sans-serif';
+    ctx.font = `bold 26px ${UNICODE_FONT_STACK}`;
     ctx.fillStyle = '#fef08a';
     ctx.fillText(`TOTAL UTANG: Rp ${data.totalDebt.toLocaleString('id-ID')}`, avatarCenterX, totalBoxY + 41);
     ctx.restore();
@@ -512,7 +514,7 @@ export async function generateVintageTagihanReceipt(data: VintageTagihanData): P
     // 12. Note Message (Y ≈ 824)
     ctx.save();
     ctx.textAlign = 'center';
-    ctx.font = 'italic 20px "DejaVu Sans", "Segoe UI", Arial, sans-serif';
+    ctx.font = `italic 20px ${UNICODE_FONT_STACK}`;
     ctx.fillStyle = '#fef3c7';
     const note = data.noteMessage || 'Tolong segera diselesaikan ya kak, terima kasih';
     ctx.fillText(`“${note}”`, avatarCenterX, 824);
@@ -525,7 +527,7 @@ export async function generateVintageTagihanReceipt(data: VintageTagihanData): P
 
     ctx.save();
     ctx.textAlign = 'center';
-    ctx.font = 'bold 21px "DejaVu Sans", "Segoe UI", Arial, sans-serif';
+    ctx.font = `bold 21px ${UNICODE_FONT_STACK}`;
     ctx.fillStyle = '#ffffff';
     ctx.fillText(`No. HP: ${cleanPhone}`, avatarCenterX, 892);
     ctx.restore();
