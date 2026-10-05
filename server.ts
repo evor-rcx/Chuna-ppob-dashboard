@@ -35,6 +35,7 @@ import { DEFAULT_PREPAID_PRODUCTS, DEFAULT_PASCA_PRODUCTS } from "./defaultDigif
 import { generatePriceListImage, generatePriceListImages } from "./priceListReceipt";
 import { initGlobalFonts, UNICODE_FONT_STACK } from "./fontHelper";
 import { transliterateForTts } from "./src/utils/transliterateForTts";
+import { cleanTargetNumber } from "./src/utils/cleanTargetNumber";
 
 // Inisialisasi engine font Unicode CJK (No-Tofu) agar nama Jepang, China, Arab, dll. langsung aman
 initGlobalFonts();
@@ -2498,10 +2499,11 @@ export function cleanProductName(text: string) {
 }
 
 
-async function checkPascaBill(sku: string, customerNo: string) {
+async function checkPascaBill(sku: string, rawCustomerNo: string) {
   if (!digiflazzUsername || !digiflazzApiKey) {
     throw new Error("Digiflazz belum dikonfigurasi");
   }
+  const customerNo = cleanTargetNumber(rawCustomerNo);
   const ref_id = "INQ-" + Date.now();
   const signText = digiflazzUsername + digiflazzApiKey + ref_id;
   const sign = crypto.createHash("md5").update(signText).digest("hex");
@@ -5043,18 +5045,27 @@ Chuna – E4 Store`;
     const offlineMembers = members.filter(m => !m.telegram || !m.telegram.startsWith('ID:'));
     const enriched = offlineMembers.map(m => {
       const cleanPhone = cleanWaPhone(m.whatsapp || '');
+      const localPhone = cleanPhone ? "0" + cleanPhone.replace(/^62/, '') : '';
+
       let photoUrl = m.photoUrl;
-      if (!photoUrl && cleanPhone && db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) {
-        photoUrl = db.waProfilePhotos[cleanPhone];
+      if (!photoUrl && cleanPhone && db.waProfilePhotos) {
+        photoUrl = db.waProfilePhotos[cleanPhone] || (localPhone && db.waProfilePhotos[localPhone]) || null;
       }
+
       let lid = m.lid || null;
-      if (!lid && cleanPhone && db.waLids && db.waLids[cleanPhone]) {
-        lid = db.waLids[cleanPhone];
+      if (!lid && cleanPhone && db.waLids) {
+        lid = db.waLids[cleanPhone] || (localPhone && db.waLids[localPhone]) || null;
       }
+
+      let waProfileName = (m.waProfileName && m.waProfileName !== '-') ? m.waProfileName : null;
+      if (!waProfileName && cleanPhone && db.waProfiles) {
+        waProfileName = db.waProfiles[cleanPhone] || (localPhone && db.waProfiles[localPhone]) || null;
+      }
+
       return {
         ...m,
         photoUrl: photoUrl || null,
-        waProfileName: m.waProfileName || null,
+        waProfileName: waProfileName || null,
         lid: lid || null
       };
     });
@@ -5159,9 +5170,10 @@ Chuna – E4 Store`;
 
       let exists = false;
       let jid = `${cleanPhone}@s.whatsapp.net`;
-      let lid: string | null = (db.waLids && db.waLids[cleanPhone]) || null;
-      let waProfileName: string | null = (db.waProfiles && db.waProfiles[cleanPhone]) || null;
-      let photoUrl: string | null = (db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) || null;
+      const localPhone = "0" + cleanPhone.replace(/^62/, '');
+      let lid: string | null = (db.waLids && (db.waLids[cleanPhone] || db.waLids[localPhone])) || null;
+      let waProfileName: string | null = (db.waProfiles && (db.waProfiles[cleanPhone] || db.waProfiles[localPhone])) || null;
+      let photoUrl: string | null = (db.waProfilePhotos && (db.waProfilePhotos[cleanPhone] || db.waProfilePhotos[localPhone])) || null;
 
       // Cek dari member yang sudah ada jika belum ada di cache
       const existingMember = (db.members || []).find((m: any) => cleanWaPhone(m.whatsapp || '') === cleanPhone);
@@ -5219,10 +5231,14 @@ Chuna – E4 Store`;
     if (!member) return res.status(404).json({ success: false, error: 'Member tidak ditemukan' });
     const cleanPhone = cleanWaPhone(member.whatsapp || '');
     if (!cleanPhone) return res.status(400).json({ success: false, error: 'Nomor WhatsApp member tidak valid' });
+    const localPhone = "0" + cleanPhone.replace(/^62/, '');
 
     let fetchedPhoto = null;
-    let fetchedLid: string | null = member.lid || (db.waLids && db.waLids[cleanPhone]) || null;
-    let fetchedName: string | null = member.waProfileName || (db.waProfiles && db.waProfiles[cleanPhone]) || null;
+    let fetchedLid: string | null = member.lid || (db.waLids && (db.waLids[cleanPhone] || db.waLids[localPhone])) || null;
+    let fetchedName: string | null = (member.waProfileName && member.waProfileName !== '-') ? member.waProfileName : null;
+    if (!fetchedName && db.waProfiles) {
+      fetchedName = db.waProfiles[cleanPhone] || db.waProfiles[localPhone] || null;
+    }
 
     if (typeof waSocket !== 'undefined' && waSocket) {
       const jid = `${cleanPhone}@s.whatsapp.net`;
@@ -5246,14 +5262,19 @@ Chuna – E4 Store`;
       db.waProfilePhotos[cleanPhone] = fetchedPhoto;
       member.photoUrl = fetchedPhoto;
       updated = true;
-    } else if (db.waProfilePhotos && db.waProfilePhotos[cleanPhone]) {
-      member.photoUrl = db.waProfilePhotos[cleanPhone];
+    } else if (db.waProfilePhotos && (db.waProfilePhotos[cleanPhone] || db.waProfilePhotos[localPhone])) {
+      member.photoUrl = db.waProfilePhotos[cleanPhone] || db.waProfilePhotos[localPhone];
       fetchedPhoto = member.photoUrl;
       updated = true;
     }
 
     if (fetchedLid && member.lid !== fetchedLid) {
       member.lid = fetchedLid;
+      updated = true;
+    }
+
+    if (fetchedName && member.waProfileName !== fetchedName) {
+      member.waProfileName = fetchedName;
       updated = true;
     }
 
@@ -5265,9 +5286,92 @@ Chuna – E4 Store`;
     return res.json({ 
       success: true, 
       photoUrl: fetchedPhoto || member.photoUrl, 
-      waProfileName: fetchedName || member.name,
+      waProfileName: fetchedName || member.waProfileName || null,
       lid: fetchedLid || member.lid || null
     });
+  });
+
+  // Endpoint untuk Tarik Massal Semua Profil WhatsApp (Foto, Nama Profil, dan LID)
+  app.post("/api/members/sync-all-batch", async (req, res) => {
+    try {
+      let updatedCount = 0;
+      for (const m of members) {
+        const cleanPhone = cleanWaPhone(m.whatsapp || '');
+        if (!cleanPhone || cleanPhone.length < 8) continue;
+        const localPhone = "0" + cleanPhone.replace(/^62/, '');
+
+        let changed = false;
+
+        // 1. Tarik nama profil WhatsApp dari db.waProfiles
+        let waName = (m.waProfileName && m.waProfileName !== '-') ? m.waProfileName : null;
+        if (!waName && db.waProfiles) {
+          waName = db.waProfiles[cleanPhone] || db.waProfiles[localPhone] || null;
+        }
+
+        // 2. Tarik foto profil dari db.waProfilePhotos
+        let photo = m.photoUrl || null;
+        if (!photo && db.waProfilePhotos) {
+          photo = db.waProfilePhotos[cleanPhone] || db.waProfilePhotos[localPhone] || null;
+        }
+
+        // 3. Tarik LID dari db.waLids
+        let lid = m.lid || null;
+        if (!lid && db.waLids) {
+          lid = db.waLids[cleanPhone] || db.waLids[localPhone] || null;
+        }
+
+        // 4. Jika Baileys waSocket aktif, coba query WhatsApp langsung
+        if (typeof waSocket !== 'undefined' && waSocket) {
+          const jid = `${cleanPhone}@s.whatsapp.net`;
+          if (!photo) {
+            try {
+              const pic = await waSocket.profilePictureUrl(jid, 'image').catch(() => null);
+              if (pic) {
+                photo = pic;
+                if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                db.waProfilePhotos[cleanPhone] = pic;
+              }
+            } catch (e) {}
+          }
+          if (!lid) {
+            try {
+              const onWa = await waSocket.onWhatsApp(jid).catch(() => null);
+              if (Array.isArray(onWa) && onWa[0]?.lid) {
+                lid = onWa[0].lid;
+                saveWaLid(cleanPhone, lid);
+              }
+            } catch (e) {}
+          }
+        }
+
+        if (waName && m.waProfileName !== waName) {
+          m.waProfileName = waName;
+          changed = true;
+        }
+        if (photo && m.photoUrl !== photo) {
+          m.photoUrl = photo;
+          changed = true;
+        }
+        if (lid && m.lid !== lid) {
+          m.lid = lid;
+          changed = true;
+        }
+
+        if (changed) {
+          updatedCount++;
+        }
+      }
+
+      if (updatedCount > 0) {
+        db.members = members;
+        writeDB(db);
+      }
+
+      res.json({ success: true, updatedCount });
+    } catch (err: any) {
+      console.error("Batch sync error:", err);
+      res.status(500).json({ success: false, error: err.message });
+    }
   });
 
   app.post("/api/members/:id/custom-photo", express.json({ limit: '10mb' }), async (req, res) => {
@@ -6233,7 +6337,8 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca", forceRefresh: boo
       const processPrepaidPayment = async (ctx: any, sku: string, method: string, stateData: any, memberId: string) => {
         const product = stateData.product;
         const total = stateData.totalBayar;
-        const targetNo = stateData.targetNo || stateData.customerNo || "-";
+        const isGame = Boolean(product?.category && product.category.toLowerCase().includes('game')) || (product?.brand && (product.brand.toUpperCase() === "FREE FIRE" || product.brand.toUpperCase() === "MOBILE LEGENDS"));
+        const targetNo = cleanTargetNumber(stateData.targetNo || stateData.customerNo || "-", isGame);
         const targetDisplay = stateData.nickname ? `${targetNo} (${stateData.nickname})` : targetNo;
 
         const member = members.find((m: any) => m.id === memberId || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
@@ -9266,8 +9371,8 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
 
 
               case 'PREPAID_INPUT_NUMBER': {
-                const targetNo = text.trim();
-                if (targetNo.toLowerCase() === 'batal' || targetNo === '❌ Batal') {
+                const rawInput = text.trim();
+                if (rawInput.toLowerCase() === 'batal' || rawInput === '❌ Batal') {
                     if (state.data.memberId) {
                         userStates[userId] = { step: 'LOCKED_MEMBER', data: { memberId: state.data.memberId } };
                         await ctx.reply("❌ Pembelian dibatalkan.", { reply_markup: { keyboard: [[{ text: "🧾 Cek Tagihan" }],
@@ -9282,12 +9387,14 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                     }
                     return;
                 }
+                const product = state.data.product;
+                const isGame = Boolean(product.category && product.category.toLowerCase().includes('game')) || (product.brand && (product.brand.toUpperCase() === "FREE FIRE" || product.brand.toUpperCase() === "MOBILE LEGENDS"));
+                const targetNo = cleanTargetNumber(rawInput, isGame);
                 if (!targetNo || targetNo.length < 2) {
                     await ctx.reply("❌ Nomor tujuan tidak valid. Silakan masukkan nomor yang benar, atau ketik 'Batal'.");
                     return;
                 }
                 
-                const product = state.data.product;
                 const total = state.data.totalBayar;
                 
                 let nameInfo = "";
@@ -9670,8 +9777,8 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                 return;
 
             case 'PASCA_INPUT_NUMBER':
-                const customerNo = text.trim();
-                if (customerNo.toLowerCase() === 'batal' || customerNo === '❌ Batal') {
+                const rawCustomerNo = text.trim();
+                if (rawCustomerNo.toLowerCase() === 'batal' || rawCustomerNo === '❌ Batal') {
                     if (state.data.memberId) {
                         userStates[userId] = { step: 'LOCKED_MEMBER', data: { memberId: state.data.memberId } };
                         await ctx.reply("❌ Pengecekan dibatalkan.", { reply_markup: { keyboard: [[{ text: "🧾 Cek Tagihan" }],
@@ -9686,11 +9793,13 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                     }
                     return;
                 }
+                const product = state.data.product;
+                const isGame = Boolean(product?.category && product.category.toLowerCase().includes('game'));
+                const customerNo = cleanTargetNumber(rawCustomerNo, isGame);
                 if (!customerNo || customerNo.length < 2) {
                     await ctx.reply("❌ Nomor tujuan tidak valid.");
                     return;
                 }
-                const product = state.data.product;
                 await ctx.reply(`⏳ Sedang mengecek tagihan untuk nomor ${customerNo}...`);
 
                 let finalCustomerNo = customerNo;
