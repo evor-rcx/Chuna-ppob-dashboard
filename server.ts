@@ -34,6 +34,7 @@ import { generatePascabayarTagihanReceipt, formatPascabayarTagihanMessage, forma
 import { DEFAULT_PREPAID_PRODUCTS, DEFAULT_PASCA_PRODUCTS } from "./defaultDigiflazzProducts";
 import { generatePriceListImage, generatePriceListImages } from "./priceListReceipt";
 import { initGlobalFonts, UNICODE_FONT_STACK } from "./fontHelper";
+import { transliterateForTts } from "./src/utils/transliterateForTts";
 
 // Inisialisasi engine font Unicode CJK (No-Tofu) agar nama Jepang, China, Arab, dll. langsung aman
 initGlobalFonts();
@@ -4171,7 +4172,8 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                     // Sesuai instruksi: HAPUS penimpaan oleh member.name atau tx.target!
                     
                     try {
-                        const vnText = `Sama-sama Kak ${customerName}! Makasih banyak ya udah belanja di E4 Store. Semoga rezekinya makin lancar. Chuna tunggu pesanan selanjutnya ya kak!`;
+                        const spokenCustomerName = transliterateForTts(customerName) || "Kakak";
+                        const vnText = `Sama-sama Kak ${spokenCustomerName}! Makasih banyak ya udah belanja di E4 Store. Semoga rezekinya makin lancar. Chuna tunggu pesanan selanjutnya ya kak!`;
                         const baseVnName = path.join(process.cwd(), `tmp_vn_${Date.now()}_${Math.floor(Math.random()*1000)}`);
                         const vnPathMp3 = `${baseVnName}.mp3`;
                         const vnPathOgg = `${baseVnName}.ogg`;
@@ -4236,7 +4238,8 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                         }
                     }
                     // Sesuai instruksi: HAPUS penimpaan oleh member.name!
-                    const customerName = resolvedName ? " " + resolvedName : "";
+                    const spokenResolved = transliterateForTts(resolvedName);
+                    const customerName = spokenResolved ? " " + spokenResolved : "";
 
                     try {
                         const vnText = `Halo Kak${customerName}, mohon maaf mengganggu waktunya. Saya Chuna, asisten otomatis E4 Store. Nomor ini dioperasikan oleh sistem bot, jadi tidak bisa membalas pesan atau menerima telepon. Apabila Kakak mau memesan produk atau ada yang ingin ditanyakan, silakan kontak langsung ke Owner kami lewat link berikut. Sekian dari Chuna, mohon maaf sebesar-besarnya dan terima kasih!`;
@@ -4325,7 +4328,8 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
               }
               // Sesuai instruksi: HAPUS penimpaan oleh member.name
               if (resolvedCallName) {
-                  customerName = " " + resolvedCallName;
+                  const spokenCallName = transliterateForTts(resolvedCallName);
+                  customerName = spokenCallName ? " " + spokenCallName : "";
               }
               
               const replyMsg = `Maaf banget, Kak${customerName}! Chuna nggak bisa angkat telepon sekarang (lagi sibuk ngurus pelanggan lain, hihi). Tapi jangan khawatir, mending langsung chat Bot Telegram resmi E4Store aja! Di sana Chuna 24 jam siap bantu jawab semua pertanyaan kamu dengan cepat dan ramah~Chuna asisten E4Store, transaksi langsung otomatis kok, tetap aman dan terpercaya! Yuk, mampir~ Chuna tunggu, ya! 😘🐾`;
