@@ -105,8 +105,26 @@ export function Sidebar() {
     <>
       <aside className="w-full md:w-72 border-r border-slate-800 bg-[#0f172a]/50 p-6 flex flex-col gap-6 md:min-h-screen">
         <div className="flex items-center gap-3 mb-2">
-          <div className="w-16 h-16 flex items-center justify-center relative">
-            <video src="./logo.mp4" autoPlay loop muted playsInline className="w-full h-full object-contain pointer-events-none" />
+          <div className="w-16 h-16 aspect-square rounded-2xl overflow-hidden flex items-center justify-center relative bg-slate-800/40 border border-slate-700/50 shadow-md">
+            <video 
+              src="/logo.mp4" 
+              poster="/logo.webp"
+              autoPlay 
+              loop 
+              muted 
+              playsInline 
+              className="w-full h-full object-cover pointer-events-none"
+              onError={(e) => {
+                const parent = e.currentTarget.parentElement;
+                if (parent) {
+                  const img = document.createElement('img');
+                  img.src = '/logo.webp';
+                  img.className = 'w-full h-full object-cover pointer-events-none';
+                  img.onerror = () => { img.src = '/logo.gif'; };
+                  parent.replaceChild(img, e.currentTarget);
+                }
+              }}
+            />
           </div>
           <h1 className="text-3xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-sky-400 via-indigo-400 to-purple-500 drop-shadow-md">STORE</h1>
         </div>

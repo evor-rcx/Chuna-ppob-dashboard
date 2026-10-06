@@ -144,6 +144,8 @@ const PROTECTED_FILENAMES = new Set([
   'stickerConfirmation.ts',
   'formatFailHelper.ts',
   'logo.gif',
+  'logo.webp',
+  'logo.mp4',
   'emerald_silk_bg.jpg',
   'creds.json'
 ]);

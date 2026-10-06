@@ -89,11 +89,29 @@ export function Login({ onLogin }: { onLogin: () => void }) {
           >
             <div className="text-center mb-8">
               <motion.div 
-                className="w-24 h-24 flex items-center justify-center mx-auto mb-4 relative rounded-3xl overflow-hidden bg-white/5 border border-white/10 shadow-[0_0_20px_rgba(236,72,153,0.2)]"
+                className="w-24 h-24 aspect-square flex items-center justify-center mx-auto mb-4 relative rounded-3xl overflow-hidden bg-white/5 border border-white/10 shadow-[0_0_20px_rgba(236,72,153,0.2)]"
                 whileHover={{ scale: 1.05, rotate: 5 }}
                 transition={{ type: "spring", stiffness: 300 }}
               >
-                <video src="./logo.mp4" autoPlay loop muted playsInline className="w-full h-full object-cover pointer-events-none" />
+                <video 
+                  src="/logo.mp4" 
+                  poster="/logo.webp"
+                  autoPlay 
+                  loop 
+                  muted 
+                  playsInline 
+                  className="w-full h-full object-cover pointer-events-none"
+                  onError={(e) => {
+                    const parent = e.currentTarget.parentElement;
+                    if (parent) {
+                      const img = document.createElement('img');
+                      img.src = '/logo.webp';
+                      img.className = 'w-full h-full object-cover pointer-events-none';
+                      img.onerror = () => { img.src = '/logo.gif'; };
+                      parent.replaceChild(img, e.currentTarget);
+                    }
+                  }}
+                />
               </motion.div>
               <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-300 to-purple-400 tracking-wide">E4 STORE</h1>
               <p className="text-pink-200/70 text-sm mt-2 font-medium italic">"Okaeri, silahkan login."</p>

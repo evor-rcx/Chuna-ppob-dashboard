@@ -2131,8 +2131,20 @@ export async function generateCanvasDebtReceipt(member: any, utangTxs: any[]): P
 
         try {
             const waDetails = await getCustomerWaDetails(member);
-            if (waDetails.waProfile && waDetails.waProfile !== '-' && !isPhoneNumberOrEmpty(waDetails.waProfile)) {
-                memberName = waDetails.waProfile;
+            const rawWaPhone = (member?.whatsapp || waPhone || '').replace(/\D/g, '').replace(/^0/, '62');
+            const localWaPhone = "0" + rawWaPhone.replace(/^62/, '');
+            let resolvedWa = waDetails?.waProfile && waDetails.waProfile !== '-' && !isPhoneNumberOrEmpty(waDetails.waProfile) ? waDetails.waProfile.trim() : null;
+            if (!resolvedWa && rawWaPhone && db.waProfiles && db.waProfiles[rawWaPhone] && !isPhoneNumberOrEmpty(db.waProfiles[rawWaPhone])) {
+                resolvedWa = db.waProfiles[rawWaPhone].trim();
+            }
+            if (!resolvedWa && localWaPhone && db.waProfiles && db.waProfiles[localWaPhone] && !isPhoneNumberOrEmpty(db.waProfiles[localWaPhone])) {
+                resolvedWa = db.waProfiles[localWaPhone].trim();
+            }
+            if (!resolvedWa && member?.waProfileName && !isPhoneNumberOrEmpty(member.waProfileName)) {
+                resolvedWa = member.waProfileName.trim();
+            }
+            if (resolvedWa) {
+                memberName = resolvedWa;
             } else if (member?.name && !isPhoneNumberOrEmpty(member.name)) {
                 memberName = member.name.trim();
             } else {
@@ -4966,7 +4978,29 @@ Chuna – E4 Store`;
 
     const member = members.find((m: any) => m.id === tx.memberId);
     if (member) {
-      const nama = member.name || "Kak";
+      let waPhotoUrl: string | null = null;
+      let waDetails: any = null;
+      try {
+        waDetails = await getCustomerWaDetails(member);
+        waPhotoUrl = waDetails?.waPhotoUrl || null;
+      } catch (e) {}
+
+      // Prioritas 1: Nama Profil WhatsApp asli (waProfileName / db.waProfiles)
+      // Prioritas 2: Nama member pendaftaran sebagai cadangan
+      const rawWaPhone = (member.whatsapp || '').replace(/\D/g, '').replace(/^0/, '62');
+      const localWaPhone = "0" + rawWaPhone.replace(/^62/, '');
+      let resolvedWaName = waDetails?.waProfile && !isPhoneNumberOrEmpty(waDetails.waProfile) && waDetails.waProfile !== '-' ? waDetails.waProfile.trim() : null;
+      if (!resolvedWaName && rawWaPhone && db.waProfiles && db.waProfiles[rawWaPhone] && !isPhoneNumberOrEmpty(db.waProfiles[rawWaPhone])) {
+        resolvedWaName = db.waProfiles[rawWaPhone].trim();
+      }
+      if (!resolvedWaName && localWaPhone && db.waProfiles && db.waProfiles[localWaPhone] && !isPhoneNumberOrEmpty(db.waProfiles[localWaPhone])) {
+        resolvedWaName = db.waProfiles[localWaPhone].trim();
+      }
+      if (!resolvedWaName && member?.waProfileName && !isPhoneNumberOrEmpty(member.waProfileName)) {
+        resolvedWaName = member.waProfileName.trim();
+      }
+      const nama = resolvedWaName || member.name || "Kak";
+
       const dUtang = new Date(tx.date || new Date());
       const months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
       const tglUtangStr = `${dUtang.getDate()} ${months[dUtang.getMonth()]} ${dUtang.getFullYear()}`;
@@ -4974,7 +5008,7 @@ Chuna – E4 Store`;
       const tglBayarStr = `${today.getDate()} ${months[today.getMonth()]} ${today.getFullYear()}`;
 
       const msg = formatDebtSettlementMessage({
-        nama: `Kak ${nama}`,
+        nama: nama.startsWith('Kak') ? nama : `Kak ${nama}`,
         isLunasTotal: true,
         products: [{ name: tx.product, price: tx.price }],
         totalDebt: tx.price,
@@ -4985,16 +5019,10 @@ Chuna – E4 Store`;
         tglBayar: tglBayarStr
       });
       
-      let waPhotoUrl: string | null = null;
-      try {
-        const waDetails = await getCustomerWaDetails(member);
-        waPhotoUrl = waDetails?.waPhotoUrl || null;
-      } catch (e) {}
-
       let imgBuffer: Buffer | null = null;
       try {
         imgBuffer = await generateDebtSettlementReceipt({
-          nama: `Kak ${nama}`,
+          nama: nama.startsWith('Kak') ? nama : `Kak ${nama}`,
           isLunasTotal: true,
           products: [{ name: tx.product, price: tx.price }],
           totalDebt: tx.price,
@@ -10191,8 +10219,31 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                       price: t.price || 0
                   }));
 
+                  let waPhotoUrl: string | null = null;
+                  let waDetails: any = null;
+                  try {
+                      waDetails = await getCustomerWaDetails(member);
+                      waPhotoUrl = waDetails?.waPhotoUrl || null;
+                  } catch (e) {}
+
+                  // Prioritas 1: Nama Profil WhatsApp asli (waProfileName / db.waProfiles)
+                  // Prioritas 2: Nama member pendaftaran sebagai cadangan
+                  const rawWaPhone = (member?.whatsapp || wa || '').replace(/\D/g, '').replace(/^0/, '62');
+                  const localWaPhone = "0" + rawWaPhone.replace(/^62/, '');
+                  let resolvedWaName = waDetails?.waProfile && !isPhoneNumberOrEmpty(waDetails.waProfile) && waDetails.waProfile !== '-' ? waDetails.waProfile.trim() : null;
+                  if (!resolvedWaName && rawWaPhone && db.waProfiles && db.waProfiles[rawWaPhone] && !isPhoneNumberOrEmpty(db.waProfiles[rawWaPhone])) {
+                      resolvedWaName = db.waProfiles[rawWaPhone].trim();
+                  }
+                  if (!resolvedWaName && localWaPhone && db.waProfiles && db.waProfiles[localWaPhone] && !isPhoneNumberOrEmpty(db.waProfiles[localWaPhone])) {
+                      resolvedWaName = db.waProfiles[localWaPhone].trim();
+                  }
+                  if (!resolvedWaName && member?.waProfileName && !isPhoneNumberOrEmpty(member.waProfileName)) {
+                      resolvedWaName = member.waProfileName.trim();
+                  }
+                  const displayName = resolvedWaName || nama;
+
                   const lunasText = formatDebtSettlementMessage({
-                      nama: `Kak ${nama}`,
+                      nama: displayName.startsWith('Kak') ? displayName : `Kak ${displayName}`,
                       isLunasTotal: isLunasTotal,
                       products: receiptProducts,
                       totalDebt: totalDebt,
@@ -10203,16 +10254,10 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                       tglBayar: tglLunas
                   });
 
-                  let waPhotoUrl: string | null = null;
-                  try {
-                      const waDetails = await getCustomerWaDetails(member);
-                      waPhotoUrl = waDetails?.waPhotoUrl || null;
-                  } catch (e) {}
-
                   let lunasImageBuffer: Buffer | null = null;
                   try {
                       lunasImageBuffer = await generateDebtSettlementReceipt({
-                          nama: `Kak ${nama}`,
+                          nama: displayName.startsWith('Kak') ? displayName : `Kak ${displayName}`,
                           isLunasTotal: isLunasTotal,
                           products: receiptProducts,
                           totalDebt: totalDebt,
@@ -11833,17 +11878,34 @@ E4 Store`,
     const tglBayarStr = `${today.getDate()} ${months[today.getMonth()]} ${today.getFullYear()}`;
 
     let waPhotoUrl: string | null = null;
+    let waDetails: any = null;
     if (member) {
         try {
-            const waDetails = await getCustomerWaDetails(member);
+            waDetails = await getCustomerWaDetails(member);
             waPhotoUrl = waDetails?.waPhotoUrl || null;
         } catch (e) {}
     }
 
+    // Prioritas 1: Nama Profil WhatsApp asli (waProfileName / db.waProfiles)
+    // Prioritas 2: Nama member pendaftaran sebagai cadangan
+    const rawWaPhone = (member?.whatsapp || tx.target || '').replace(/\D/g, '').replace(/^0/, '62');
+    const localWaPhone = "0" + rawWaPhone.replace(/^62/, '');
+    let resolvedWaName = waDetails?.waProfile && !isPhoneNumberOrEmpty(waDetails.waProfile) && waDetails.waProfile !== '-' ? waDetails.waProfile.trim() : null;
+    if (!resolvedWaName && rawWaPhone && db.waProfiles && db.waProfiles[rawWaPhone] && !isPhoneNumberOrEmpty(db.waProfiles[rawWaPhone])) {
+        resolvedWaName = db.waProfiles[rawWaPhone].trim();
+    }
+    if (!resolvedWaName && localWaPhone && db.waProfiles && db.waProfiles[localWaPhone] && !isPhoneNumberOrEmpty(db.waProfiles[localWaPhone])) {
+        resolvedWaName = db.waProfiles[localWaPhone].trim();
+    }
+    if (!resolvedWaName && member?.waProfileName && !isPhoneNumberOrEmpty(member.waProfileName)) {
+        resolvedWaName = member.waProfileName.trim();
+    }
+    const finalNama = resolvedWaName || nama;
+
     const isLunas = (tx.status || '').toLowerCase().includes('lunas');
     try {
         const buffer = await generateDebtSettlementReceipt({
-            nama: `Kak ${nama}`,
+            nama: finalNama.startsWith('Kak') ? finalNama : `Kak ${finalNama}`,
             isLunasTotal: isLunas,
             products: [{ name: tx.product || 'Produk', price: tx.price || 0 }],
             totalDebt: tx.price || 0,
