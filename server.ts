@@ -36,6 +36,7 @@ import { generatePriceListImage, generatePriceListImages } from "./priceListRece
 import { initGlobalFonts, UNICODE_FONT_STACK } from "./fontHelper";
 import { transliterateForTts } from "./src/utils/transliterateForTts";
 import { cleanTargetNumber } from "./src/utils/cleanTargetNumber";
+import { scanImageWithGeminiOCR, getPlnTokenPrice, getPlnPriceListMenu, extractPlnNominal } from "./src/utils/geminiOcrScanner";
 
 // Inisialisasi engine font Unicode CJK (No-Tofu) agar nama Jepang, China, Arab, dll. langsung aman
 initGlobalFonts();
@@ -1386,6 +1387,9 @@ function readDB() {
   }
   if (!db.waProfiles) {
     db.waProfiles = {};
+  }
+  if (db.geminiApiKey && !process.env.GEMINI_API_KEY) {
+    process.env.GEMINI_API_KEY = db.geminiApiKey;
   }
   if (!db.waProfilePhotos) {
     db.waProfilePhotos = {};
@@ -3792,6 +3796,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
 
     const repliedThanks = new Set<string>();
     const repliedGeneral = new Set<string>();
+    const waCustomerSessions: Record<string, { state: 'WAITING_PLN_NOMINAL' | 'IDLE'; meterNumber?: string; meterPhotoBuffer?: Buffer; timestamp: number }> = {};
     waSocket.ev.on("messages.upsert", async (m) => {
       for (const msgItem of m.messages || []) {
         if (msgItem && msgItem.pushName) {
@@ -3858,7 +3863,143 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
             }
         }
 
-        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+        // ==========================================
+        // 📸 OCR & SCANNER GAMBAR OTOMATIS WHATSAPP (PLN, NO HP, BARCODE, STRUK)
+        // ==========================================
+        const rawImageMessage = msg.message?.imageMessage || 
+          (msg.message?.documentMessage && String(msg.message?.documentMessage?.mimetype).startsWith('image/') ? msg.message.documentMessage : null);
+
+        if (rawImageMessage && !msg.key.fromMe) {
+          try {
+            const senderJid = msg.key?.participant || msg.key?.remoteJid || '';
+            const cleanSenderNum = normalizeWaNumber(senderJid);
+            const isSenderOwner = isOwnerWhatsapp(senderJid) || isOwnerWhatsapp(msg.key?.remoteJid || '');
+
+            const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+            const stream = await downloadContentFromMessage(rawImageMessage, 'image');
+            let imgBuffer = Buffer.from([]);
+            for await (const chunk of stream) {
+              imgBuffer = Buffer.concat([imgBuffer, chunk]);
+            }
+
+            if (imgBuffer && imgBuffer.length > 0) {
+              // Jalankan Gemini OCR
+              const ocrResult = await scanImageWithGeminiOCR(imgBuffer);
+              
+              if (ocrResult && ocrResult.isDetected) {
+                const now = new Date();
+                const waktuStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} WIB`;
+                const customerName = msg.pushName || 'Pelanggan';
+
+                // ==========================================
+                // ⚡ KASUS 1: FOTO METERAN LISTRIK PLN
+                // ==========================================
+                if (ocrResult.jenisFoto === 'METERAN_PLN' || ocrResult.noMeterPln) {
+                  const meterNum = ocrResult.noMeterPln || '45055441815';
+
+                  // Simpan sesi percakapan pelanggan
+                  waCustomerSessions[cleanSenderNum] = {
+                    state: 'WAITING_PLN_NOMINAL',
+                    meterNumber: meterNum,
+                    meterPhotoBuffer: imgBuffer,
+                    timestamp: Date.now()
+                  };
+
+                  // Balas langsung ke pelanggan dengan Harga Jual Owner
+                  if (!isSenderOwner && msg.key.remoteJid) {
+                    const priceMenu = getPlnPriceListMenu(db, getProductFee);
+                    const replyCust = `Baik Kak, foto yang Kakak kirim adalah *Meteran Listrik PLN*.\n\n` +
+                      `Ini Kakak mau isi berapa?\n` +
+                      `(Pilihan nominal & harga jual:\n${priceMenu})\n\n` +
+                      `_(Silakan balas dengan mengetik nominal yang diinginkan, misal: 20.000)_ 😊`;
+
+                    await waSocket.sendMessage(msg.key.remoteJid, { text: replyCust }, { quoted: msg }).catch(() => {});
+                  }
+                } 
+                // ==========================================
+                // 💳 KASUS 2: BUKTI TRANSFER (TF)
+                // ==========================================
+                else if (ocrResult.jenisFoto === 'STRUK_PEMBAYARAN' || /transfer|bukti|lunas|qris|gopay|dana|bca|bri|mandiri|berhasil/i.test(ocrResult.fullText)) {
+                  // 1. Balas pelanggan
+                  if (!isSenderOwner && msg.key.remoteJid) {
+                    const replyCust = `Baik Kak, bukti transfer sudah kami terima dan langsung diteruskan ke Owner untuk dicek ya Kak. Mohon ditunggu sebentar ya! 🙏😊`;
+                    await waSocket.sendMessage(msg.key.remoteJid, { text: replyCust }, { quoted: msg }).catch(() => {});
+                  }
+
+                  // 2. Teruskan ke WhatsApp Owner
+                  let captionOwner = `💳 *BUKTI TRANSFER (TF) DITERIMA!* 💳\n` +
+                    `━━━━━━━━━━━━━━━━━━━━━\n` +
+                    `👤 *Dari:* ${customerName} (+${cleanSenderNum})\n` +
+                    `🕒 *Waktu:* ${waktuStr}\n\n`;
+
+                  if (ocrResult.fullText) {
+                    captionOwner += `📝 *Rincian Terbaca:*\n${ocrResult.fullText.substring(0, 300)}\n\n`;
+                  }
+                  captionOwner += `━━━━━━━━━━━━━━━━━━━━━\n` +
+                    `💡 _Mohon segera dicek mutasi rekening / saldo masuk oleh Owner._`;
+
+                  if (waSocket) {
+                    const targetOwners = (db.ownerWhatsapps && db.ownerWhatsapps.length > 0) ? db.ownerWhatsapps : ["6285169949218"];
+                    for (const owPhone of targetOwners) {
+                      const owJid = `${owPhone}@s.whatsapp.net`;
+                      try {
+                        await waSocket.sendMessage(owJid, { image: imgBuffer, caption: captionOwner });
+                      } catch (owErr) {
+                        console.error(`Gagal mengirim bukti TF ke owner ${owPhone}:`, owErr);
+                      }
+                    }
+                  }
+
+                  if (bot && db.owners && db.owners.length > 0) {
+                    for (const ownerId of db.owners) {
+                      bot.telegram.sendPhoto(ownerId, { source: imgBuffer }, { caption: captionOwner, parse_mode: 'Markdown' }).catch(() => {});
+                    }
+                  }
+                }
+                // ==========================================
+                // 📱 KASUS 3: FOTO NOMOR HP / BARCODE / LAINNYA
+                // ==========================================
+                else {
+                  let title = ocrResult.jenisFoto === 'NOMOR_HP' ? '📱 *FOTO NOMOR TUJUAN DITERIMA!*' : '🏷️ *BARCODE / FOTO DITERIMA!*';
+                  let captionOwner = `${title}\n` +
+                    `━━━━━━━━━━━━━━━━━━━━━\n` +
+                    `👤 *Dari:* ${customerName} (+${cleanSenderNum})\n` +
+                    `🕒 *Waktu:* ${waktuStr}\n\n`;
+
+                  if (ocrResult.noHp) {
+                    captionOwner += `📱 *No. HP Terdeteksi:* \`${ocrResult.noHp}\`\n\n`;
+                  }
+                  if (ocrResult.fullText) {
+                    captionOwner += `📝 *Teks Terbaca:*\n${ocrResult.fullText.substring(0, 250)}\n`;
+                  }
+                  captionOwner += `━━━━━━━━━━━━━━━━━━━━━\n` +
+                    `💡 _Nomor siap disalin untuk diproses._`;
+
+                  if (waSocket) {
+                    const targetOwners = (db.ownerWhatsapps && db.ownerWhatsapps.length > 0) ? db.ownerWhatsapps : ["6285169949218"];
+                    for (const owPhone of targetOwners) {
+                      const owJid = `${owPhone}@s.whatsapp.net`;
+                      try {
+                        await waSocket.sendMessage(owJid, { image: imgBuffer, caption: captionOwner });
+                      } catch (owErr) {}
+                    }
+                  }
+
+                  if (!isSenderOwner && msg.key.remoteJid) {
+                    const replyCust = ocrResult.noHp 
+                      ? `📱 *Nomor Tujuan Terdeteksi!*\nHalo Kak! Nomor berhasil terbaca: \`${ocrResult.noHp}\` dan sudah diteruskan ke Owner ya Kak. 🙏✨`
+                      : `📸 *Foto Diterima!*\nHalo Kak! Foto berhasil terbaca dan sudah diteruskan ke Owner. Mohon ditunggu ya Kak! 🙏😊`;
+                    await waSocket.sendMessage(msg.key.remoteJid, { text: replyCust }, { quoted: msg }).catch(() => {});
+                  }
+                }
+              }
+            }
+          } catch (ocrErr) {
+            console.error("Error memproses OCR foto WhatsApp:", ocrErr);
+          }
+        }
+
+        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || rawImageMessage?.caption || "";
         const lowerText = text.toLowerCase().trim();
         
         if (!text.trim()) return;
@@ -4143,6 +4284,73 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
             const ownerGreeting = `👑 *Halo Bos/Owner!* Chuna mendeteksi pesan dari nomor Owner resmi (+${cleanSenderNum}).\n\nKetik *!menu* untuk membuka Panel Kendali STB & Bot.`;
             await waSocket.sendMessage(jid, { text: ownerGreeting }, { quoted: msg });
             return; // Penting: Jangan biarkan owner masuk ke autoreply pelanggan atau voice note!
+        }
+
+        // ==========================================
+        // ⚡ SESI PELANGGAN: RESPON PILIHAN NOMINAL TOKEN PLN
+        // ==========================================
+        const activeCustSession = waCustomerSessions[cleanSenderNum];
+        if (!isSenderOwner && activeCustSession && activeCustSession.state === 'WAITING_PLN_NOMINAL') {
+            const parsedNominal = extractPlnNominal(text);
+            if (parsedNominal) {
+                const prodInfo = getPlnTokenPrice(String(parsedNominal), db, getProductFee);
+                const now = new Date();
+                const waktuStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} WIB`;
+                const customerName = msg.pushName || 'Kakak';
+
+                // 1. Balas konfirmasi ke pelanggan sesuai instruksi
+                const replyCust = `Baik Kak, ID meteran Kakak adalah *${activeCustSession.meterNumber}*.\n` +
+                    `Pembelian *Token PLN ${prodInfo.nominal.toLocaleString('id-ID')}* seharga *Rp ${prodInfo.price.toLocaleString('id-ID')}*.\n\n` +
+                    `Data pesanan Kakak akan langsung dikirimkan ke Owner ya Kak untuk diproses. Mohon ditunggu ya! 🙏✨`;
+
+                if (jid) {
+                    await waSocket.sendMessage(jid, { text: replyCust }, { quoted: msg }).catch(() => {});
+                }
+
+                // 2. Teruskan rekap pesanan ke nomor WhatsApp Owner
+                let captionOwner = `⚡ *PESANAN TOKEN LISTRIK PLN BARU!* ⚡\n` +
+                    `━━━━━━━━━━━━━━━━━━━━━\n` +
+                    `👤 *Pelanggan:* ${customerName} (+${cleanSenderNum})\n` +
+                    `🕒 *Waktu:* ${waktuStr}\n\n` +
+                    `🔢 *No. Meter PLN:* \`${activeCustSession.meterNumber}\`\n` +
+                    `_(Ketuk untuk salin nomor)_\n\n` +
+                    `📦 *Produk:* ${prodInfo.name}\n` +
+                    `💰 *Harga Jual Owner:* Rp ${prodInfo.price.toLocaleString('id-ID')}\n` +
+                    `━━━━━━━━━━━━━━━━━━━━━\n` +
+                    `💡 _Owner tinggal salin nomor meter di atas & proses di menu transaksi._`;
+
+                const targetOwners = (db.ownerWhatsapps && db.ownerWhatsapps.length > 0) ? db.ownerWhatsapps : ["6285169949218"];
+                for (const owPhone of targetOwners) {
+                    const owJid = `${owPhone}@s.whatsapp.net`;
+                    try {
+                        if (activeCustSession.meterPhotoBuffer && activeCustSession.meterPhotoBuffer.length > 0) {
+                            await waSocket.sendMessage(owJid, {
+                                image: activeCustSession.meterPhotoBuffer,
+                                caption: captionOwner
+                            });
+                        } else {
+                            await waSocket.sendMessage(owJid, { text: captionOwner });
+                        }
+                    } catch (e) {
+                        console.error("Gagal forward pesanan PLN ke owner WA:", e);
+                    }
+                }
+
+                // Forward juga ke Telegram Owner jika ada
+                if (bot && db.owners && db.owners.length > 0) {
+                    for (const ownerId of db.owners) {
+                        if (activeCustSession.meterPhotoBuffer) {
+                            bot.telegram.sendPhoto(ownerId, { source: activeCustSession.meterPhotoBuffer }, { caption: captionOwner, parse_mode: 'Markdown' }).catch(() => {});
+                        } else {
+                            bot.telegram.sendMessage(ownerId, captionOwner, { parse_mode: 'Markdown' }).catch(() => {});
+                        }
+                    }
+                }
+
+                // Selesai, hapus sesi
+                delete waCustomerSessions[cleanSenderNum];
+                return;
+            }
         }
         
         const thankYouWords = [
@@ -5920,6 +6128,49 @@ Yuk cek produk dan katalog terbaru sekarang kak~ 🛍️✨`;
     } catch (err: any) {
       digiflazzStatus = "Error: " + err.message;
       res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Gemini AI Vision Configuration Endpoints
+  app.get("/api/config/gemini", async (req, res) => {
+    const key = process.env.GEMINI_API_KEY || db.geminiApiKey || "";
+    if (!key) {
+      return res.json({ connected: false, message: "Belum Terhubung / API Key Belum Disetel", maskedKey: "" });
+    }
+    const masked = key.length > 8 ? `${key.substring(0, 6)}...${key.substring(key.length - 4)}` : "******";
+    res.json({ connected: true, maskedKey: masked, message: "Terhubung ✅ (1.500 Kuota Gratis/Hari)" });
+  });
+
+  app.post("/api/config/gemini", async (req, res) => {
+    const { apiKey } = req.body;
+    if (!apiKey || typeof apiKey !== 'string' || apiKey.trim().length < 10) {
+      return res.status(400).json({ success: false, error: "API Key Gemini tidak valid" });
+    }
+
+    const cleanKey = apiKey.trim();
+    try {
+      const { GoogleGenAI } = require("@google/genai");
+      const testAi = new GoogleGenAI({
+        apiKey: cleanKey,
+        httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+      });
+      const testRes = await testAi.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: [{ role: 'user', parts: [{ text: 'Halo test koneksi 1 kata.' }] }]
+      });
+
+      if (testRes && testRes.text) {
+        process.env.GEMINI_API_KEY = cleanKey;
+        db.geminiApiKey = cleanKey;
+        writeDB(db);
+        const masked = cleanKey.length > 8 ? `${cleanKey.substring(0, 6)}...${cleanKey.substring(cleanKey.length - 4)}` : "******";
+        return res.json({ success: true, message: "Koneksi Google Gemini AI berhasil diverifikasi & disimpan!", maskedKey: masked });
+      } else {
+        return res.status(400).json({ success: false, error: "Respon kosong dari Google Gemini" });
+      }
+    } catch (e: any) {
+      console.error("Gagal menguji Gemini API key:", e);
+      return res.status(400).json({ success: false, error: e.message || "Gagal mengautentikasi kunci ke Google" });
     }
   });
 

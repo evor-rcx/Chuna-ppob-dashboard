@@ -14,6 +14,7 @@ import { Saldo } from './components/views/Saldo';
 import { MemberOffline } from './components/views/MemberOffline';
 import { KasirFisik } from './components/views/KasirFisik';
 import { SecurityDashboard } from './components/views/SecurityDashboard';
+import { GeminiConfig } from './components/views/GeminiConfig';
 import { Login } from './components/views/Login';
 import { CustomAlert } from './components/CustomAlert';
 import { Page } from './types';
@@ -99,6 +100,7 @@ export default function App() {
       case 'member-offline': return <MemberOffline onBack={() => setCurrentPage('menu')} />;
       case 'kasir-fisik': return <KasirFisik onBack={() => setCurrentPage('menu')} />;
       case 'security': return <SecurityDashboard onBack={() => setCurrentPage('menu')} />;
+      case 'gemini': return <GeminiConfig onBack={() => setCurrentPage('menu')} />;
       default: return <Menu onNavigate={setCurrentPage} />;
     }
   };

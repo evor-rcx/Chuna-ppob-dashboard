@@ -243,7 +243,7 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
   };
 
   const handleItemClick = (id: Page) => {
-    if (id === 'produk' || id === 'konfig' || id === 'saldo' || id === 'bot' || id === 'security') {
+    if (id === 'produk' || id === 'konfig' || id === 'saldo' || id === 'bot' || id === 'security' || id === 'gemini') {
       setShowPasswordModal(id);
       setPasswordInput('');
       setTotpInput('');
@@ -296,6 +296,7 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
     { id: 'produk', icon: <ShoppingCart size={32} />, label: 'Kelola Produk' },
     { id: 'transaksi', icon: <FileText size={32} />, label: 'Transaksi' },
     { id: 'konfig', icon: <Settings size={32} />, label: 'Konfig API' },
+    { id: 'gemini', icon: <Sparkles size={32} className="text-amber-400" />, label: '🔑 Konfig AI Gemini' },
     { id: 'bot', icon: <Bot size={32} />, label: 'Bot WA/Tele' },
     { id: 'saldo', icon: <Wallet size={32} />, label: 'Customer Telegram' },
     { id: 'member-offline', icon: <Users size={32} />, label: 'Member Offline' },
@@ -322,7 +323,7 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
             onClick={() => handleItemClick(item.id)}
             className="bg-slate-800/30 border border-slate-700/50 p-6 rounded-2xl flex flex-col items-center gap-3 hover:bg-slate-800/50 transition-all cursor-pointer group relative"
           >
-            {(item.id === 'produk' || item.id === 'konfig' || item.id === 'saldo' || item.id === 'bot') && (
+            {(item.id === 'produk' || item.id === 'konfig' || item.id === 'saldo' || item.id === 'bot' || item.id === 'gemini') && (
                <div className="absolute top-3 right-3 text-slate-500 group-hover:text-amber-400 transition-colors">
                   <Lock size={14} />
                </div>
