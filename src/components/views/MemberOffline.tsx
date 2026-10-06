@@ -119,21 +119,41 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
     try {
       const res = await fetch(`/api/members/${memberId}/sync-photo`, { method: 'POST' });
       const data = await res.json();
-      if (data.success && data.member) {
-        setMembers(prev => prev.map(m => m.id === memberId ? data.member : m));
+      if (data.success) {
+        const existing = members.find(m => m.id === memberId) || {};
+        const updatedMember = data.member ? { ...existing, ...data.member } : {
+          ...existing,
+          photoUrl: data.photoUrl !== undefined ? data.photoUrl : existing.photoUrl,
+          waProfileName: data.waProfileName !== undefined ? data.waProfileName : existing.waProfileName,
+          lid: data.lid !== undefined ? data.lid : existing.lid
+        };
+
+        setMembers(prev => prev.map(m => m.id === memberId ? { ...m, ...updatedMember } : m));
+        
         if (selectedMember && selectedMember.id === memberId) {
-          setSelectedMember(data.member);
+          const merged = { ...selectedMember, ...updatedMember };
+          setSelectedMember(merged);
           setEditForm({
-            name: data.member.name || '',
-            waProfileName: data.member.waProfileName || '',
-            whatsapp: data.member.whatsapp || '',
-            telegram: data.member.telegram || '',
-            photoUrl: data.member.photoUrl || '',
-            type: data.member.type || 'Biasa',
-            lid: data.member.lid || ''
+            name: merged.name || '',
+            waProfileName: merged.waProfileName || '',
+            whatsapp: merged.whatsapp || '',
+            telegram: merged.telegram || '',
+            photoUrl: merged.photoUrl || '',
+            type: merged.type || 'Biasa',
+            lid: merged.lid || ''
           });
         }
-        alert("✅ Berhasil menarik profil WhatsApp:\n1. Foto Profile WhatsApp\n2. LID WhatsApp\n3. Nama Profile WhatsApp");
+
+        const itemsFound: string[] = [];
+        if (updatedMember.waProfileName) itemsFound.push(`👤 Nama Profil WA: ${updatedMember.waProfileName}`);
+        if (updatedMember.lid) itemsFound.push(`🆔 LID WhatsApp: ${updatedMember.lid}`);
+        if (updatedMember.photoUrl) itemsFound.push(`🖼️ Foto Profil WA: Terhubung`);
+
+        const detailText = itemsFound.length > 0 
+          ? `\n\nRincian Data Ditemukan:\n${itemsFound.join('\n')}` 
+          : '\n\n(Profil WhatsApp tersinkronisasi. Foto disetel privat di setelan privasi WhatsApp pengguna)';
+
+        alert(`✅ Berhasil menarik profil WhatsApp!${detailText}`);
       } else {
         alert(data.error || "Gagal menarik profil member.");
       }

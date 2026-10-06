@@ -5478,12 +5478,13 @@ Chuna – E4 Store`;
     const cleanPhone = cleanWaPhone(member.whatsapp || '');
     if (!cleanPhone) return res.status(400).json({ success: false, error: 'Nomor WhatsApp member tidak valid' });
     const localPhone = "0" + cleanPhone.replace(/^62/, '');
+    const plainPhone = cleanPhone.replace(/^62/, '');
 
     let fetchedPhoto = null;
-    let fetchedLid: string | null = member.lid || (db.waLids && (db.waLids[cleanPhone] || db.waLids[localPhone])) || null;
+    let fetchedLid: string | null = member.lid || (db.waLids && (db.waLids[cleanPhone] || db.waLids[localPhone] || db.waLids[plainPhone])) || null;
     let fetchedName: string | null = (member.waProfileName && member.waProfileName !== '-') ? member.waProfileName : null;
     if (!fetchedName && db.waProfiles) {
-      fetchedName = db.waProfiles[cleanPhone] || db.waProfiles[localPhone] || null;
+      fetchedName = db.waProfiles[cleanPhone] || db.waProfiles[localPhone] || db.waProfiles[plainPhone] || null;
     }
 
     if (typeof waSocket !== 'undefined' && waSocket) {
@@ -5498,18 +5499,26 @@ Chuna – E4 Store`;
         if (Array.isArray(onWa) && onWa[0]?.lid) {
           fetchedLid = onWa[0].lid;
           saveWaLid(cleanPhone, fetchedLid);
+          saveWaLid(localPhone, fetchedLid);
         }
       } catch (e) {}
+
+      // Jika LID ada, periksa juga nama dari cache profil berdasarkan LID
+      if (!fetchedName && fetchedLid && db.waProfiles) {
+        const lidNum = fetchedLid.replace(/@.*$/, '');
+        fetchedName = db.waProfiles[fetchedLid] || db.waProfiles[lidNum] || null;
+      }
     }
 
     let updated = false;
     if (fetchedPhoto) {
       if (!db.waProfilePhotos) db.waProfilePhotos = {};
       db.waProfilePhotos[cleanPhone] = fetchedPhoto;
+      db.waProfilePhotos[localPhone] = fetchedPhoto;
       member.photoUrl = fetchedPhoto;
       updated = true;
-    } else if (db.waProfilePhotos && (db.waProfilePhotos[cleanPhone] || db.waProfilePhotos[localPhone])) {
-      member.photoUrl = db.waProfilePhotos[cleanPhone] || db.waProfilePhotos[localPhone];
+    } else if (db.waProfilePhotos && (db.waProfilePhotos[cleanPhone] || db.waProfilePhotos[localPhone] || db.waProfilePhotos[plainPhone])) {
+      member.photoUrl = db.waProfilePhotos[cleanPhone] || db.waProfilePhotos[localPhone] || db.waProfilePhotos[plainPhone];
       fetchedPhoto = member.photoUrl;
       updated = true;
     }
@@ -5531,7 +5540,8 @@ Chuna – E4 Store`;
 
     return res.json({ 
       success: true, 
-      photoUrl: fetchedPhoto || member.photoUrl, 
+      member: member,
+      photoUrl: fetchedPhoto || member.photoUrl || null, 
       waProfileName: fetchedName || member.waProfileName || null,
       lid: fetchedLid || member.lid || null
     });
@@ -5545,25 +5555,26 @@ Chuna – E4 Store`;
         const cleanPhone = cleanWaPhone(m.whatsapp || '');
         if (!cleanPhone || cleanPhone.length < 8) continue;
         const localPhone = "0" + cleanPhone.replace(/^62/, '');
+        const plainPhone = cleanPhone.replace(/^62/, '');
 
         let changed = false;
 
         // 1. Tarik nama profil WhatsApp dari db.waProfiles
         let waName = (m.waProfileName && m.waProfileName !== '-') ? m.waProfileName : null;
         if (!waName && db.waProfiles) {
-          waName = db.waProfiles[cleanPhone] || db.waProfiles[localPhone] || null;
+          waName = db.waProfiles[cleanPhone] || db.waProfiles[localPhone] || db.waProfiles[plainPhone] || null;
         }
 
         // 2. Tarik foto profil dari db.waProfilePhotos
         let photo = m.photoUrl || null;
         if (!photo && db.waProfilePhotos) {
-          photo = db.waProfilePhotos[cleanPhone] || db.waProfilePhotos[localPhone] || null;
+          photo = db.waProfilePhotos[cleanPhone] || db.waProfilePhotos[localPhone] || db.waProfilePhotos[plainPhone] || null;
         }
 
         // 3. Tarik LID dari db.waLids
         let lid = m.lid || null;
         if (!lid && db.waLids) {
-          lid = db.waLids[cleanPhone] || db.waLids[localPhone] || null;
+          lid = db.waLids[cleanPhone] || db.waLids[localPhone] || db.waLids[plainPhone] || null;
         }
 
         // 4. Jika Baileys waSocket aktif, coba query WhatsApp langsung
