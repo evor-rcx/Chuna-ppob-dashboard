@@ -16,7 +16,22 @@ export interface OcrScanResult {
  * Memindai foto (Meteran PLN, No HP, Struk, Barcode) menggunakan Gemini Vision AI OCR
  */
 export async function scanImageWithGeminiOCR(imageBuffer: Buffer): Promise<OcrScanResult> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  let apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const dbPath = path.join(process.cwd(), 'db.json');
+      if (fs.existsSync(dbPath)) {
+        const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+        if (db.geminiApiKey) {
+          apiKey = db.geminiApiKey;
+          process.env.GEMINI_API_KEY = apiKey;
+        }
+      }
+    } catch (e) {}
+  }
+
   if (!apiKey) {
     return {
       isDetected: false,
