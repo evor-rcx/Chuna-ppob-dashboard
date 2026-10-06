@@ -129,6 +129,7 @@ KEMBALIKAN HANYA JSON MURNI (VALID JSON) TANPA CODE BLOCK / MARKDOWN:
 
 /**
  * Menghitung Harga Jual Owner resmi untuk Token PLN prabayar
+ * Mengikuti data 'owner_fixed' dan 'fee_owner' dari menu Kelola Produk toko E4 Store
  */
 export function getPlnTokenPrice(
   nominalStr: string,
@@ -138,39 +139,66 @@ export function getPlnTokenPrice(
   const norm = nominalStr.toLowerCase().replace(/[\s\.\,]/g, '');
   let sku = 'PLN20';
   let nominal = 20000;
+  let defaultOwnerPrice = 22000;
 
   if (/500000|500rb|500k|^500$/.test(norm)) {
     sku = 'PLN500';
     nominal = 500000;
+    defaultOwnerPrice = 502000;
   } else if (/200000|200rb|200k|^200$/.test(norm)) {
     sku = 'PLN200';
     nominal = 200000;
+    defaultOwnerPrice = 202000;
   } else if (/100000|100rb|100k|^100$/.test(norm)) {
     sku = 'PLN100';
     nominal = 100000;
+    defaultOwnerPrice = 102000;
   } else if (/50000|50rb|50k|^50$/.test(norm)) {
     sku = 'PLN50';
     nominal = 50000;
+    defaultOwnerPrice = 52000;
   } else {
     sku = 'PLN20';
     nominal = 20000;
+    defaultOwnerPrice = 22000;
   }
 
-  // Base price (modal Digiflazz)
+  // 1. Ambil modal dari database produk jika ada
   let basePrice = nominal + 100;
   if (db?.savedPrepaidProducts) {
-    const found = db.savedPrepaidProducts.find((p: any) => p.buyer_sku_code?.toUpperCase() === sku);
-    if (found?.price) basePrice = found.price;
+    const found = db.savedPrepaidProducts.find(
+      (p: any) => p.buyer_sku_code?.toUpperCase() === sku || p.buyer_sku_code?.toUpperCase() === `PLN${nominal}`
+    );
+    if (found?.price) basePrice = Number(found.price);
   }
 
-  // Markup / Margin Keuntungan Owner (Harga Jual Toko)
-  let fee = 1500;
+  // 2. Ambil pengaturan fee / harga jual resmi Owner dari menu Kelola Produk
+  let sellingPrice = 0;
   if (typeof getProductFee === 'function') {
-    const f = getProductFee(sku);
-    if (f && f.biasa > 0) fee = f.biasa;
+    const f = getProductFee(sku) || getProductFee(`PLN${nominal}`);
+    if (f) {
+      // Prioritas 1: 'owner_fixed' (Harga Jual Pas yang diatur langsung oleh Owner di dashboard)
+      if (f.owner_fixed !== undefined && Number(f.owner_fixed) > 0) {
+        sellingPrice = Number(f.owner_fixed);
+      }
+      // Prioritas 2: 'fee_owner' (Markup margin Owner)
+      else if (f.owner !== undefined && Number(f.owner) > 0) {
+        const rawPrice = basePrice + Number(f.owner);
+        sellingPrice = Math.ceil(rawPrice / 100) * 100;
+      }
+      // Prioritas 3: 'fee_biasa' jika disetel
+      else if (f.biasa !== undefined && Number(f.biasa) > 0) {
+        const rawPrice = basePrice + Number(f.biasa);
+        sellingPrice = Math.ceil(rawPrice / 100) * 100;
+      }
+    }
   }
 
-  const sellingPrice = basePrice + fee;
+  // Jika belum disetel manual di dashboard, gunakan harga bulat resmi default toko
+  if (!sellingPrice || sellingPrice <= 0) {
+    sellingPrice = defaultOwnerPrice;
+  }
+
   return {
     sku,
     nominal,
