@@ -1540,30 +1540,66 @@ function saveWaProfile(rawJidOrPhone: string, pushName?: string | null) {
     const cleanName = pushName.trim();
     if (!cleanName || isPhoneNumberOrEmpty(cleanName)) return;
 
-    const cleanPhone = cleanWaPhone(rawJidOrPhone);
-    if (!cleanPhone || cleanPhone.length < 8) return;
-
     if (!db.waProfiles) db.waProfiles = {};
+    if (!db.waLids) db.waLids = {};
     let changed = false;
 
-    if (db.waProfiles[cleanPhone] !== cleanName) {
-        db.waProfiles[cleanPhone] = cleanName;
+    const rawStr = String(rawJidOrPhone).trim();
+    const isLid = rawStr.endsWith('@lid') || (!rawStr.includes('@s.whatsapp.net') && rawStr.length >= 14);
+    const cleanDigits = rawStr.replace(/@.*$/, '').replace(/:\d+$/, '').replace(/\D/g, '');
+
+    // Simpan di kunci asli dan kunci angka murni
+    if (db.waProfiles[rawStr] !== cleanName) {
+        db.waProfiles[rawStr] = cleanName;
         changed = true;
     }
-    const localPhone = "0" + cleanPhone.replace(/^62/, '');
-    if (db.waProfiles[localPhone] !== cleanName) {
-        db.waProfiles[localPhone] = cleanName;
+    if (cleanDigits && db.waProfiles[cleanDigits] !== cleanName) {
+        db.waProfiles[cleanDigits] = cleanName;
         changed = true;
     }
 
-    if (Array.isArray(db.members)) {
-        for (const m of db.members) {
-            const mClean = cleanWaPhone(m.whatsapp || '');
-            if (mClean && mClean === cleanPhone) {
-                if (m.waProfileName !== cleanName) {
-                    m.waProfileName = cleanName;
-                    changed = true;
-                }
+    // Jika input adalah LID, cari apakah ada nomor HP yang terhubung
+    let linkedPhone = '';
+    if (isLid) {
+        linkedPhone = db.waLids[rawStr] || db.waLids[cleanDigits] || '';
+        if (!linkedPhone && Array.isArray(db.members)) {
+            const found = db.members.find((m: any) => m.lid && (m.lid === rawStr || cleanWaPhone(m.lid) === cleanDigits));
+            if (found && found.whatsapp) {
+                linkedPhone = cleanWaPhone(found.whatsapp);
+            }
+        }
+    } else {
+        linkedPhone = cleanWaPhone(rawStr);
+    }
+
+    if (linkedPhone && linkedPhone.length >= 8) {
+        if (db.waProfiles[linkedPhone] !== cleanName) {
+            db.waProfiles[linkedPhone] = cleanName;
+            changed = true;
+        }
+        const localPhone = "0" + linkedPhone.replace(/^62/, '');
+        if (db.waProfiles[localPhone] !== cleanName) {
+            db.waProfiles[localPhone] = cleanName;
+            changed = true;
+        }
+        const plainPhone = linkedPhone.replace(/^62/, '');
+        if (db.waProfiles[plainPhone] !== cleanName) {
+            db.waProfiles[plainPhone] = cleanName;
+            changed = true;
+        }
+    }
+
+    // Perbarui member di memori & database jika cocok
+    const targetMembers = Array.isArray(members) ? members : (db.members || []);
+    for (const m of targetMembers) {
+        const mClean = cleanWaPhone(m.whatsapp || '');
+        const mLidDigits = m.lid ? String(m.lid).replace(/@.*$/, '').replace(/\D/g, '') : '';
+        const match = (linkedPhone && mClean === linkedPhone) || 
+                      (cleanDigits && (mClean === cleanDigits || mLidDigits === cleanDigits || m.lid === rawStr));
+        if (match) {
+            if (m.waProfileName !== cleanName) {
+                m.waProfileName = cleanName;
+                changed = true;
             }
         }
     }
@@ -1573,11 +1609,12 @@ function saveWaProfile(rawJidOrPhone: string, pushName?: string | null) {
     }
 }
 
-// Simpan LID WhatsApp ke db.waLids dan member.lid
+// Simpan LID WhatsApp ke db.waLids dan member.lid secara dua arah (Two-Way Binding)
 function saveWaLid(rawJidOrPhone: string, lid?: string | null) {
     if (!lid || typeof lid !== 'string') return;
     const cleanLid = lid.trim();
     if (!cleanLid) return;
+    const lidDigits = cleanLid.replace(/@.*$/, '').replace(/\D/g, '');
 
     const cleanPhone = cleanWaPhone(rawJidOrPhone);
     if (!cleanPhone || cleanPhone.length < 8) return;
@@ -1585,6 +1622,7 @@ function saveWaLid(rawJidOrPhone: string, lid?: string | null) {
     if (!db.waLids) db.waLids = {};
     let changed = false;
 
+    // 1. Simpan phone -> LID
     if (db.waLids[cleanPhone] !== cleanLid) {
         db.waLids[cleanPhone] = cleanLid;
         changed = true;
@@ -1594,13 +1632,36 @@ function saveWaLid(rawJidOrPhone: string, lid?: string | null) {
         db.waLids[localPhone] = cleanLid;
         changed = true;
     }
+    const plainPhone = cleanPhone.replace(/^62/, '');
+    if (db.waLids[plainPhone] !== cleanLid) {
+        db.waLids[plainPhone] = cleanLid;
+        changed = true;
+    }
 
-    if (Array.isArray(db.members)) {
-        for (const m of db.members) {
-            const mClean = cleanWaPhone(m.whatsapp || '');
-            if (mClean && mClean === cleanPhone) {
-                if (m.lid !== cleanLid) {
-                    m.lid = cleanLid;
+    // 2. Simpan LID -> phone (reverse mapping)
+    if (db.waLids[cleanLid] !== cleanPhone) {
+        db.waLids[cleanLid] = cleanPhone;
+        changed = true;
+    }
+    if (lidDigits && db.waLids[lidDigits] !== cleanPhone) {
+        db.waLids[lidDigits] = cleanPhone;
+        changed = true;
+    }
+
+    // 3. Perbarui member di memori & database
+    const targetMembers = Array.isArray(members) ? members : (db.members || []);
+    for (const m of targetMembers) {
+        const mClean = cleanWaPhone(m.whatsapp || '');
+        if (mClean && (mClean === cleanPhone || mClean === localPhone || mClean === plainPhone)) {
+            if (m.lid !== cleanLid) {
+                m.lid = cleanLid;
+                changed = true;
+            }
+            // Jika ada nama yang tersimpan di LID, sambungkan langsung ke member
+            if (!m.waProfileName || m.waProfileName === '-') {
+                const nameFromLid = db.waProfiles?.[cleanLid] || db.waProfiles?.[lidDigits];
+                if (nameFromLid) {
+                    m.waProfileName = nameFromLid;
                     changed = true;
                 }
             }
@@ -3717,13 +3778,19 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
     waSocket.ev.on("contacts.upsert", (contacts) => {
       if (!db.waContacts) db.waContacts = [];
       for (const contact of contacts) {
-          if (contact.id && contact.id.endsWith('@s.whatsapp.net')) {
-              if (!db.waContacts.includes(contact.id)) {
+          if (contact.id) {
+              if (contact.id.endsWith('@s.whatsapp.net') && !db.waContacts.includes(contact.id)) {
                   db.waContacts.push(contact.id);
               }
-              const pName = (contact as any).pushName || (contact as any).notify || (contact as any).verifiedName;
+              const pName = (contact as any).pushName || (contact as any).notify || (contact as any).name || (contact as any).verifiedName;
               if (pName) {
                   saveWaProfile(contact.id, pName);
+              }
+              if ((contact as any).lid && contact.id.endsWith('@s.whatsapp.net')) {
+                  saveWaLid(contact.id, (contact as any).lid);
+              }
+              if ((contact as any).phoneNumber && contact.id.endsWith('@lid')) {
+                  saveWaLid((contact as any).phoneNumber, contact.id);
               }
           }
       }
@@ -3733,9 +3800,15 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
     waSocket.ev.on("contacts.update", (contacts) => {
       for (const contact of contacts) {
           if (contact.id) {
-              const pName = (contact as any).pushName || (contact as any).notify || (contact as any).verifiedName;
+              const pName = (contact as any).pushName || (contact as any).notify || (contact as any).name || (contact as any).verifiedName;
               if (pName) {
                   saveWaProfile(contact.id, pName);
+              }
+              if ((contact as any).lid && contact.id.endsWith('@s.whatsapp.net')) {
+                  saveWaLid(contact.id, (contact as any).lid);
+              }
+              if ((contact as any).phoneNumber && contact.id.endsWith('@lid')) {
+                  saveWaLid((contact as any).phoneNumber, contact.id);
               }
           }
       }
@@ -3744,13 +3817,19 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
     waSocket.ev.on("messaging-history.set", (history) => {
       if (!db.waContacts) db.waContacts = [];
       for (const contact of history.contacts || []) {
-          if (contact.id && contact.id.endsWith('@s.whatsapp.net')) {
-              if (!db.waContacts.includes(contact.id)) {
+          if (contact.id) {
+              if (contact.id.endsWith('@s.whatsapp.net') && !db.waContacts.includes(contact.id)) {
                   db.waContacts.push(contact.id);
               }
-              const pName = (contact as any).pushName || (contact as any).notify || (contact as any).verifiedName;
+              const pName = (contact as any).pushName || (contact as any).notify || (contact as any).name || (contact as any).verifiedName;
               if (pName) {
                   saveWaProfile(contact.id, pName);
+              }
+              if ((contact as any).lid && contact.id.endsWith('@s.whatsapp.net')) {
+                  saveWaLid(contact.id, (contact as any).lid);
+              }
+              if ((contact as any).phoneNumber && contact.id.endsWith('@lid')) {
+                  saveWaLid((contact as any).phoneNumber, contact.id);
               }
           }
       }
@@ -3758,7 +3837,6 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
     });
 
     
-
     waSocket.ev.on("connection.update", (update) => {
       const { connection, lastDisconnect } = update;
       if (connection === "close") {
@@ -3799,23 +3877,42 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
     const waCustomerSessions: Record<string, { state: 'WAITING_PLN_NOMINAL' | 'IDLE'; meterNumber?: string; meterPhotoBuffer?: Buffer; timestamp: number }> = {};
     waSocket.ev.on("messages.upsert", async (m) => {
       for (const msgItem of m.messages || []) {
-        if (msgItem && msgItem.pushName) {
-          const senderJid = msgItem.key?.participant || msgItem.key?.remoteJid || '';
-          saveWaProfile(senderJid, msgItem.pushName);
-        }
-        if (msgItem && msgItem.key) {
-          const rJid = String(msgItem.key.remoteJid || '');
-          const pJid = String(msgItem.key.participant || '');
-          const participantPn = String((msgItem.key as any).participantPn || '');
+        const senderJid = msgItem.key?.participant || msgItem.key?.remoteJid || '';
+        const pushName = msgItem.pushName;
+        const rJid = String(msgItem.key?.remoteJid || '');
+        const pJid = String(msgItem.key?.participant || '');
+        const participantPn = String((msgItem.key as any)?.participantPn || '');
 
-          if (rJid.endsWith('@s.whatsapp.net') && pJid.endsWith('@lid')) {
-            saveWaLid(rJid, pJid);
-          } else if (rJid.endsWith('@lid') && pJid.endsWith('@s.whatsapp.net')) {
-            saveWaLid(pJid, rJid);
-          } else if (participantPn && (rJid.endsWith('@lid') || pJid.endsWith('@lid'))) {
-            const lidVal = rJid.endsWith('@lid') ? rJid : pJid;
-            saveWaLid(participantPn, lidVal);
-          }
+        // 1. Pairing dari key pesan Baileys
+        if (rJid.endsWith('@s.whatsapp.net') && pJid.endsWith('@lid')) {
+          saveWaLid(rJid, pJid);
+        } else if (rJid.endsWith('@lid') && pJid.endsWith('@s.whatsapp.net')) {
+          saveWaLid(pJid, rJid);
+        } else if (participantPn && (rJid.endsWith('@lid') || pJid.endsWith('@lid'))) {
+          const lidVal = rJid.endsWith('@lid') ? rJid : pJid;
+          saveWaLid(participantPn, lidVal);
+        }
+
+        // 2. Query resmi Signal LID Mapping dari Baileys
+        if (senderJid.endsWith('@lid') && (waSocket as any)?.signalRepository?.lidMapping) {
+          try {
+            const resolvedPn = await (waSocket as any).signalRepository.lidMapping.getPNForLID(senderJid).catch(() => null);
+            if (resolvedPn) {
+              saveWaLid(resolvedPn, senderJid);
+            }
+          } catch (e) {}
+        } else if (senderJid.endsWith('@s.whatsapp.net') && (waSocket as any)?.signalRepository?.lidMapping) {
+          try {
+            const resolvedLid = await (waSocket as any).signalRepository.lidMapping.getLIDForPN(senderJid).catch(() => null);
+            if (resolvedLid) {
+              saveWaLid(senderJid, resolvedLid);
+            }
+          } catch (e) {}
+        }
+
+        // 3. Simpan Profil Pengirim (Nama & Foto)
+        if (pushName) {
+          saveWaProfile(senderJid, pushName);
         }
       }
       const msg = m.messages[0];
@@ -5289,23 +5386,47 @@ Chuna – E4 Store`;
   app.get("/api/members/offline", (req, res) => {
     // Return all members, or just those added manually (without telegram ID)
     const offlineMembers = members.filter(m => !m.telegram || !m.telegram.startsWith('ID:'));
+    let changed = false;
+
     const enriched = offlineMembers.map(m => {
       const cleanPhone = cleanWaPhone(m.whatsapp || '');
       const localPhone = cleanPhone ? "0" + cleanPhone.replace(/^62/, '') : '';
-
-      let photoUrl = m.photoUrl;
-      if (!photoUrl && cleanPhone && db.waProfilePhotos) {
-        photoUrl = db.waProfilePhotos[cleanPhone] || (localPhone && db.waProfilePhotos[localPhone]) || null;
-      }
+      const plainPhone = cleanPhone.replace(/^62/, '');
 
       let lid = m.lid || null;
       if (!lid && cleanPhone && db.waLids) {
-        lid = db.waLids[cleanPhone] || (localPhone && db.waLids[localPhone]) || null;
+        lid = db.waLids[cleanPhone] || (localPhone && db.waLids[localPhone]) || (plainPhone && db.waLids[plainPhone]) || null;
+      }
+      const lidDigits = lid ? String(lid).replace(/@.*$/, '').replace(/\D/g, '') : '';
+
+      let photoUrl = m.photoUrl;
+      if (!photoUrl && cleanPhone && db.waProfilePhotos) {
+        photoUrl = db.waProfilePhotos[cleanPhone] || (localPhone && db.waProfilePhotos[localPhone]) || (plainPhone && db.waProfilePhotos[plainPhone]) || null;
+      }
+      if (!photoUrl && lid && db.waProfilePhotos) {
+        photoUrl = db.waProfilePhotos[lid] || (lidDigits && db.waProfilePhotos[lidDigits]) || null;
       }
 
       let waProfileName = (m.waProfileName && m.waProfileName !== '-') ? m.waProfileName : null;
       if (!waProfileName && cleanPhone && db.waProfiles) {
-        waProfileName = db.waProfiles[cleanPhone] || (localPhone && db.waProfiles[localPhone]) || null;
+        waProfileName = db.waProfiles[cleanPhone] || (localPhone && db.waProfiles[localPhone]) || (plainPhone && db.waProfiles[plainPhone]) || null;
+      }
+      if (!waProfileName && lid && db.waProfiles) {
+        waProfileName = db.waProfiles[lid] || (lidDigits && db.waProfiles[lidDigits]) || null;
+      }
+
+      // Simpan perubahan ke objek member asli agar permanen di server & database
+      if (waProfileName && m.waProfileName !== waProfileName) {
+        m.waProfileName = waProfileName;
+        changed = true;
+      }
+      if (lid && m.lid !== lid) {
+        m.lid = lid;
+        changed = true;
+      }
+      if (photoUrl && m.photoUrl !== photoUrl) {
+        m.photoUrl = photoUrl;
+        changed = true;
       }
 
       return {
@@ -5315,6 +5436,12 @@ Chuna – E4 Store`;
         lid: lid || null
       };
     });
+
+    if (changed) {
+      db.members = members;
+      writeDB(db);
+    }
+
     res.json({ success: true, members: enriched });
   });
 
@@ -5417,20 +5544,42 @@ Chuna – E4 Store`;
       let exists = false;
       let jid = `${cleanPhone}@s.whatsapp.net`;
       const localPhone = "0" + cleanPhone.replace(/^62/, '');
-      let lid: string | null = (db.waLids && (db.waLids[cleanPhone] || db.waLids[localPhone])) || null;
-      let waProfileName: string | null = (db.waProfiles && (db.waProfiles[cleanPhone] || db.waProfiles[localPhone])) || null;
-      let photoUrl: string | null = (db.waProfilePhotos && (db.waProfilePhotos[cleanPhone] || db.waProfilePhotos[localPhone])) || null;
+      const plainPhone = cleanPhone.replace(/^62/, '');
+
+      let lid: string | null = (db.waLids && (db.waLids[cleanPhone] || db.waLids[localPhone] || db.waLids[plainPhone])) || null;
 
       // Cek dari member yang sudah ada jika belum ada di cache
-      const existingMember = (db.members || []).find((m: any) => cleanWaPhone(m.whatsapp || '') === cleanPhone);
+      const existingMember = (members || db.members || []).find((m: any) => cleanWaPhone(m.whatsapp || '') === cleanPhone);
       if (existingMember) {
         if (!lid && existingMember.lid) lid = existingMember.lid;
-        if (!waProfileName && existingMember.waProfileName) waProfileName = existingMember.waProfileName;
-        if (!photoUrl && existingMember.photoUrl) photoUrl = existingMember.photoUrl;
       }
+
+      let photoUrl: string | null = null;
+      let waProfileName: string | null = null;
 
       // Query ke Baileys jika bot aktif
       if (typeof waSocket !== 'undefined' && waSocket) {
+        // 1. Tarik LID resmi via signalRepository.lidMapping
+        if (!lid && (waSocket as any)?.signalRepository?.lidMapping) {
+          try {
+            const lidFromSignal = await (waSocket as any).signalRepository.lidMapping.getLIDForPN(jid).catch(() => null);
+            if (lidFromSignal) {
+              lid = lidFromSignal;
+              saveWaLid(cleanPhone, lid);
+            }
+          } catch (e) {}
+        }
+        if (!lid && (waSocket as any)?.signalRepository?.lidMapping) {
+          try {
+            const lidFromSignal2 = await (waSocket as any).signalRepository.lidMapping.getLIDForPN(cleanPhone).catch(() => null);
+            if (lidFromSignal2) {
+              lid = lidFromSignal2;
+              saveWaLid(cleanPhone, lid);
+            }
+          } catch (e) {}
+        }
+
+        // 2. Query status onWhatsApp
         try {
           const onWaResults = await waSocket.onWhatsApp(jid).catch(() => null);
           if (Array.isArray(onWaResults) && onWaResults.length > 0) {
@@ -5444,17 +5593,35 @@ Chuna – E4 Store`;
           }
         } catch (e) {}
 
-        if (!photoUrl) {
-          try {
-            const pic = await waSocket.profilePictureUrl(jid, 'image').catch(() => null);
-            if (pic) {
-              photoUrl = pic;
-              if (!db.waProfilePhotos) db.waProfilePhotos = {};
-              db.waProfilePhotos[cleanPhone] = pic;
-              writeDB(db);
-            }
-          } catch (e) {}
-        }
+        // 3. Tarik foto profil
+        try {
+          const pic = await waSocket.profilePictureUrl(jid, 'image').catch(() => null);
+          if (pic) {
+            photoUrl = pic;
+            if (!db.waProfilePhotos) db.waProfilePhotos = {};
+            db.waProfilePhotos[cleanPhone] = pic;
+            db.waProfilePhotos[localPhone] = pic;
+            writeDB(db);
+          }
+        } catch (e) {}
+      }
+
+      const lidDigits = lid ? String(lid).replace(/@.*$/, '').replace(/\D/g, '') : '';
+
+      // 4. Cari foto dari cache jika belum dapat
+      if (!photoUrl && db.waProfilePhotos) {
+        photoUrl = db.waProfilePhotos[cleanPhone] || db.waProfilePhotos[localPhone] || db.waProfilePhotos[plainPhone] || 
+                   (lid && db.waProfilePhotos[lid]) || (lidDigits && db.waProfilePhotos[lidDigits]) || null;
+      }
+      if (!photoUrl && existingMember?.photoUrl) photoUrl = existingMember.photoUrl;
+
+      // 5. Cari Nama Profil WhatsApp dari cache (Phone dan LID)
+      if (db.waProfiles) {
+        waProfileName = db.waProfiles[cleanPhone] || db.waProfiles[localPhone] || db.waProfiles[plainPhone] ||
+                        (lid && db.waProfiles[lid]) || (lidDigits && db.waProfiles[lidDigits]) || null;
+      }
+      if (!waProfileName && existingMember?.waProfileName && existingMember.waProfileName !== '-') {
+        waProfileName = existingMember.waProfileName;
       }
 
       res.json({
@@ -5480,46 +5647,69 @@ Chuna – E4 Store`;
     const localPhone = "0" + cleanPhone.replace(/^62/, '');
     const plainPhone = cleanPhone.replace(/^62/, '');
 
-    let fetchedPhoto = null;
+    let fetchedPhoto: string | null = member.photoUrl || null;
     let fetchedLid: string | null = member.lid || (db.waLids && (db.waLids[cleanPhone] || db.waLids[localPhone] || db.waLids[plainPhone])) || null;
     let fetchedName: string | null = (member.waProfileName && member.waProfileName !== '-') ? member.waProfileName : null;
-    if (!fetchedName && db.waProfiles) {
-      fetchedName = db.waProfiles[cleanPhone] || db.waProfiles[localPhone] || db.waProfiles[plainPhone] || null;
-    }
 
     if (typeof waSocket !== 'undefined' && waSocket) {
       const jid = `${cleanPhone}@s.whatsapp.net`;
       try {
-        fetchedPhoto = await waSocket.profilePictureUrl(jid, 'image').catch(() => null);
+        const pic = await waSocket.profilePictureUrl(jid, 'image').catch(() => null);
+        if (pic) fetchedPhoto = pic;
       } catch (e) {}
 
-      // Tarik LID dari WhatsApp jika belum ada
-      try {
-        const onWa = await waSocket.onWhatsApp(jid).catch(() => null);
-        if (Array.isArray(onWa) && onWa[0]?.lid) {
-          fetchedLid = onWa[0].lid;
-          saveWaLid(cleanPhone, fetchedLid);
-          saveWaLid(localPhone, fetchedLid);
-        }
-      } catch (e) {}
+      // 1. Tarik LID resmi via signalRepository.lidMapping
+      if (!fetchedLid && (waSocket as any)?.signalRepository?.lidMapping) {
+        try {
+          const lidFromSignal = await (waSocket as any).signalRepository.lidMapping.getLIDForPN(jid).catch(() => null);
+          if (lidFromSignal) {
+            fetchedLid = lidFromSignal;
+            saveWaLid(cleanPhone, fetchedLid);
+          }
+        } catch (e) {}
+      }
+      if (!fetchedLid && (waSocket as any)?.signalRepository?.lidMapping) {
+        try {
+          const lidFromSignal2 = await (waSocket as any).signalRepository.lidMapping.getLIDForPN(cleanPhone).catch(() => null);
+          if (lidFromSignal2) {
+            fetchedLid = lidFromSignal2;
+            saveWaLid(cleanPhone, fetchedLid);
+          }
+        } catch (e) {}
+      }
 
-      // Jika LID ada, periksa juga nama dari cache profil berdasarkan LID
-      if (!fetchedName && fetchedLid && db.waProfiles) {
-        const lidNum = fetchedLid.replace(/@.*$/, '');
-        fetchedName = db.waProfiles[fetchedLid] || db.waProfiles[lidNum] || null;
+      // 2. Query status onWhatsApp
+      if (!fetchedLid) {
+        try {
+          const onWa = await waSocket.onWhatsApp(jid).catch(() => null);
+          if (Array.isArray(onWa) && onWa[0]?.lid) {
+            fetchedLid = onWa[0].lid;
+            saveWaLid(cleanPhone, fetchedLid);
+          }
+        } catch (e) {}
       }
     }
 
+    const lidDigits = fetchedLid ? String(fetchedLid).replace(/@.*$/, '').replace(/\D/g, '') : '';
+
+    // 3. Ambil foto dari cache jika live query tidak dapat
+    if (!fetchedPhoto && db.waProfilePhotos) {
+      fetchedPhoto = db.waProfilePhotos[cleanPhone] || db.waProfilePhotos[localPhone] || db.waProfilePhotos[plainPhone] ||
+                     (fetchedLid && db.waProfilePhotos[fetchedLid]) || (lidDigits && db.waProfilePhotos[lidDigits]) || null;
+    }
+
+    // 4. Ambil nama profil dari cache (Phone dan LID)
+    if (!fetchedName && db.waProfiles) {
+      fetchedName = db.waProfiles[cleanPhone] || db.waProfiles[localPhone] || db.waProfiles[plainPhone] ||
+                    (fetchedLid && db.waProfiles[fetchedLid]) || (lidDigits && db.waProfiles[lidDigits]) || null;
+    }
+
     let updated = false;
-    if (fetchedPhoto) {
+    if (fetchedPhoto && member.photoUrl !== fetchedPhoto) {
       if (!db.waProfilePhotos) db.waProfilePhotos = {};
       db.waProfilePhotos[cleanPhone] = fetchedPhoto;
       db.waProfilePhotos[localPhone] = fetchedPhoto;
       member.photoUrl = fetchedPhoto;
-      updated = true;
-    } else if (db.waProfilePhotos && (db.waProfilePhotos[cleanPhone] || db.waProfilePhotos[localPhone] || db.waProfilePhotos[plainPhone])) {
-      member.photoUrl = db.waProfilePhotos[cleanPhone] || db.waProfilePhotos[localPhone] || db.waProfilePhotos[plainPhone];
-      fetchedPhoto = member.photoUrl;
       updated = true;
     }
 
@@ -5541,9 +5731,9 @@ Chuna – E4 Store`;
     return res.json({ 
       success: true, 
       member: member,
-      photoUrl: fetchedPhoto || member.photoUrl || null, 
-      waProfileName: fetchedName || member.waProfileName || null,
-      lid: fetchedLid || member.lid || null
+      photoUrl: member.photoUrl || fetchedPhoto || null, 
+      waProfileName: member.waProfileName || fetchedName || null,
+      lid: member.lid || fetchedLid || null
     });
   });
 
@@ -5559,27 +5749,26 @@ Chuna – E4 Store`;
 
         let changed = false;
 
-        // 1. Tarik nama profil WhatsApp dari db.waProfiles
-        let waName = (m.waProfileName && m.waProfileName !== '-') ? m.waProfileName : null;
-        if (!waName && db.waProfiles) {
-          waName = db.waProfiles[cleanPhone] || db.waProfiles[localPhone] || db.waProfiles[plainPhone] || null;
-        }
-
-        // 2. Tarik foto profil dari db.waProfilePhotos
-        let photo = m.photoUrl || null;
-        if (!photo && db.waProfilePhotos) {
-          photo = db.waProfilePhotos[cleanPhone] || db.waProfilePhotos[localPhone] || db.waProfilePhotos[plainPhone] || null;
-        }
-
-        // 3. Tarik LID dari db.waLids
+        // 1. Tarik LID dari db.waLids
         let lid = m.lid || null;
-        if (!lid && db.waLids) {
-          lid = db.waLids[cleanPhone] || db.waLids[localPhone] || db.waLids[plainPhone] || null;
+        if (!lid && cleanPhone && db.waLids) {
+          lid = db.waLids[cleanPhone] || (localPhone && db.waLids[localPhone]) || (plainPhone && db.waLids[plainPhone]) || null;
         }
 
-        // 4. Jika Baileys waSocket aktif, coba query WhatsApp langsung
+        let photo: string | null = m.photoUrl || null;
+
+        // 2. Jika Baileys aktif, coba tarik via Signal lidMapping atau profilePictureUrl
         if (typeof waSocket !== 'undefined' && waSocket) {
           const jid = `${cleanPhone}@s.whatsapp.net`;
+          if (!lid && (waSocket as any)?.signalRepository?.lidMapping) {
+            try {
+              const lidFromSignal = await (waSocket as any).signalRepository.lidMapping.getLIDForPN(jid).catch(() => null);
+              if (lidFromSignal) {
+                lid = lidFromSignal;
+                saveWaLid(cleanPhone, lid);
+              }
+            } catch (e) {}
+          }
           if (!photo) {
             try {
               const pic = await waSocket.profilePictureUrl(jid, 'image').catch(() => null);
@@ -5590,15 +5779,21 @@ Chuna – E4 Store`;
               }
             } catch (e) {}
           }
-          if (!lid) {
-            try {
-              const onWa = await waSocket.onWhatsApp(jid).catch(() => null);
-              if (Array.isArray(onWa) && onWa[0]?.lid) {
-                lid = onWa[0].lid;
-                saveWaLid(cleanPhone, lid);
-              }
-            } catch (e) {}
-          }
+        }
+
+        const lidDigits = lid ? String(lid).replace(/@.*$/, '').replace(/\D/g, '') : '';
+
+        // 3. Tarik nama profil WhatsApp dari db.waProfiles (Phone dan LID)
+        let waName = (m.waProfileName && m.waProfileName !== '-') ? m.waProfileName : null;
+        if (!waName && db.waProfiles) {
+          waName = db.waProfiles[cleanPhone] || db.waProfiles[localPhone] || db.waProfiles[plainPhone] || 
+                   (lid && db.waProfiles[lid]) || (lidDigits && db.waProfiles[lidDigits]) || null;
+        }
+
+        // 4. Tarik foto profil dari db.waProfilePhotos jika belum dapat
+        if (!photo && db.waProfilePhotos) {
+          photo = db.waProfilePhotos[cleanPhone] || db.waProfilePhotos[localPhone] || db.waProfilePhotos[plainPhone] || 
+                  (lid && db.waProfilePhotos[lid]) || (lidDigits && db.waProfilePhotos[lidDigits]) || null;
         }
 
         if (waName && m.waProfileName !== waName) {
