@@ -77,42 +77,40 @@ KEMBALIKAN HANYA JSON MURNI (VALID JSON) TANPA CODE BLOCK / MARKDOWN:
   "ringkasan": string
 }`;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            { inlineData: { mimeType: 'image/jpeg', data: base64Data } },
-            { text: prompt }
-          ]
-        }
-      ]
-    });
+  // Multi-Model Fallback: gemini-3.8-flash -> gemini-3.1-flash-lite -> gemini-2.5-flash
+  const candidateModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
+  let responseText: string | null = null;
+  let lastError: any = null;
 
-    let raw = response.text?.trim() || '{}';
-    if (raw.startsWith('```')) {
-      raw = raw.replace(/^```[a-z]*\s*/i, '').replace(/\s*```$/, '').trim();
+  for (const modelName of candidateModels) {
+    try {
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { inlineData: { mimeType: 'image/jpeg', data: base64Data } },
+              { text: prompt }
+            ]
+          }
+        ]
+      });
+
+      if (response && response.text) {
+        responseText = response.text;
+        break; // Sukses mendapatkan respon
+      }
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`[OCR Scanner] Model ${modelName} kendala (${err.message || err}), mencoba model cadangan...`);
+      // Jeda singkat 500ms sebelum beralih ke model cadangan
+      await new Promise(r => setTimeout(r, 500));
     }
-    const parsed = JSON.parse(raw);
-    const noMeterPln = parsed.noMeterPln ? String(parsed.noMeterPln).replace(/\D/g, '') : null;
-    const noHp = parsed.noHp ? String(parsed.noHp).replace(/\D/g, '') : null;
-    const idPelanggan = parsed.idPelanggan ? String(parsed.idPelanggan).trim() : null;
+  }
 
-    return {
-      isDetected: Boolean(noMeterPln || noHp || idPelanggan || (parsed.fullText && parsed.fullText.length > 5)),
-      jenisFoto: parsed.jenisFoto || 'LAINNYA',
-      noMeterPln: noMeterPln && noMeterPln.length >= 8 ? noMeterPln : null,
-      noHp: noHp && noHp.length >= 8 ? noHp : null,
-      idPelanggan: idPelanggan || null,
-      merkAtauModel: parsed.merkAtauModel || null,
-      dayaAtauTarif: parsed.dayaAtauTarif || null,
-      fullText: parsed.fullText || '',
-      ringkasan: parsed.ringkasan || ''
-    };
-  } catch (err: any) {
-    console.error('Error scanning image with Gemini OCR:', err);
+  if (!responseText) {
+    console.error('Semua model Gemini OCR gagal memproses foto:', lastError);
     return {
       isDetected: false,
       jenisFoto: 'LAINNYA',
@@ -122,7 +120,83 @@ KEMBALIKAN HANYA JSON MURNI (VALID JSON) TANPA CODE BLOCK / MARKDOWN:
       merkAtauModel: null,
       dayaAtauTarif: null,
       fullText: '',
-      ringkasan: 'Gagal memindai gambar'
+      ringkasan: 'Gagal memindai gambar (seluruh model sibuk)'
+    };
+  }
+
+  try {
+    let raw = responseText.trim();
+    if (raw.startsWith('```')) {
+      raw = raw.replace(/^```[a-z]*\s*/i, '').replace(/\s*```$/, '').trim();
+    }
+
+    let parsed: any = {};
+    try {
+      parsed = JSON.parse(raw);
+    } catch (pe) {
+      parsed = {};
+    }
+
+    let noMeterPln = parsed.noMeterPln ? String(parsed.noMeterPln).replace(/\D/g, '') : null;
+    let noHp = parsed.noHp ? String(parsed.noHp).replace(/\D/g, '') : null;
+    let idPelanggan = parsed.idPelanggan ? String(parsed.idPelanggan).trim() : null;
+    const fullText = parsed.fullText || raw || '';
+    let jenisFoto = parsed.jenisFoto || 'LAINNYA';
+
+    // SMART REGEX EXTRACTOR:
+    // Jika noMeterPln belum terisi atau kurang dari 11 digit, ekstrak nomor 11-12 digit dari teks keseluruhan
+    if (!noMeterPln || noMeterPln.length < 11) {
+      const combinedSearchText = `${fullText} ${raw}`;
+      const meterMatches = combinedSearchText.match(/\b\d{11,12}\b/g);
+      if (meterMatches && meterMatches.length > 0) {
+        noMeterPln = meterMatches[0];
+      }
+    }
+
+    // Ekstrak No HP jika belum terisi
+    if (!noHp || noHp.length < 10) {
+      const hpMatches = `${fullText} ${raw}`.match(/\b(08|628)\d{8,11}\b/g);
+      if (hpMatches && hpMatches.length > 0) {
+        noHp = hpMatches[0].startsWith('628') ? '0' + hpMatches[0].slice(2) : hpMatches[0];
+      }
+    }
+
+    // Jika nomor meteran 11-12 digit berhasil ditemukan, pastikan jenisFoto otomatis METERAN_PLN
+    const hasValidMeter = Boolean(noMeterPln && noMeterPln.length >= 11);
+    if (hasValidMeter) {
+      jenisFoto = 'METERAN_PLN';
+    }
+
+    const isDetected = Boolean(
+      hasValidMeter ||
+      (noHp && noHp.length >= 10) ||
+      idPelanggan ||
+      (fullText && fullText.length > 5)
+    );
+
+    return {
+      isDetected,
+      jenisFoto: jenisFoto as any,
+      noMeterPln: hasValidMeter ? noMeterPln : (noMeterPln && noMeterPln.length >= 8 ? noMeterPln : null),
+      noHp: noHp && noHp.length >= 8 ? noHp : null,
+      idPelanggan: idPelanggan || null,
+      merkAtauModel: parsed.merkAtauModel || null,
+      dayaAtauTarif: parsed.dayaAtauTarif || null,
+      fullText,
+      ringkasan: parsed.ringkasan || (hasValidMeter ? `Meteran PLN terdeteksi: ${noMeterPln}` : '')
+    };
+  } catch (err: any) {
+    console.error('Error parsing hasil Gemini OCR:', err);
+    return {
+      isDetected: false,
+      jenisFoto: 'LAINNYA',
+      noMeterPln: null,
+      noHp: null,
+      idPelanggan: null,
+      merkAtauModel: null,
+      dayaAtauTarif: null,
+      fullText: '',
+      ringkasan: 'Gagal memproses teks gambar'
     };
   }
 }
