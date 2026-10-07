@@ -4012,10 +4012,16 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
 
                 if (msg.key.remoteJid) {
                   const priceMenu = getPlnPriceListMenu(db, getProductFee);
-                  const replyCust = `Baik Kak, foto yang Kakak kirim adalah *Meteran Listrik PLN*.\n\n` +
-                    `Ini Kakak mau isi berapa?\n` +
-                    `(Pilihan nominal & harga jual:\n${priceMenu})\n\n` +
-                    `_(Silakan balas dengan mengetik nominal yang diinginkan, misal: 20.000)_ 😊`;
+                  let replyCust = '';
+                  if (priceMenu && priceMenu.trim().length > 0) {
+                    replyCust = `Baik Kak, foto yang Kakak kirim adalah *Meteran Listrik PLN*.\n\n` +
+                      `Ini Kakak mau isi berapa?\n` +
+                      `(Pilihan nominal & harga jual:\n${priceMenu})\n\n` +
+                      `_(Silakan balas dengan mengetik nominal yang diinginkan, misal: 20.000)_ 😊`;
+                  } else {
+                    replyCust = `Baik Kak, foto yang Kakak kirim adalah *Meteran Listrik PLN* (No. Meter: *${meterNum}*).\n\n` +
+                      `Ini Kakak mau isi berapa? Silakan balas dengan nominal yang diinginkan ya Kak. 😊`;
+                  }
 
                   await waSocket.sendMessage(msg.key.remoteJid, { text: replyCust }, { quoted: msg }).catch(() => {});
                 }
@@ -4401,11 +4407,25 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
             const parsedNominal = extractPlnNominal(text);
             if (parsedNominal) {
                 const prodInfo = getPlnTokenPrice(String(parsedNominal), db, getProductFee);
+
+                // Jika nominal belum diatur harganya oleh Owner di menu Kelola Produk (available: false)
+                if (!prodInfo.available || !prodInfo.price || prodInfo.price <= 0) {
+                    const priceMenu = getPlnPriceListMenu(db, getProductFee);
+                    const notAvailReply = `Mohon maaf Kak, untuk nominal *${parsedNominal.toLocaleString('id-ID')}* saat ini belum tersedia / belum diatur harganya oleh Owner.\n\n` +
+                        (priceMenu && priceMenu.trim().length > 0
+                            ? `Pilihan nominal yang tersedia saat ini:\n${priceMenu}\n\n_(Silakan balas dengan salah satu nominal di atas ya Kak)_ 😊`
+                            : `Silakan hubungi Owner kami untuk konfirmasi pengisian nominal ini ya Kak. 🙏`);
+                    if (jid) {
+                        await waSocket.sendMessage(jid, { text: notAvailReply }, { quoted: msg }).catch(() => {});
+                    }
+                    return;
+                }
+
                 const now = new Date();
                 const waktuStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} WIB`;
                 const customerName = msg.pushName || 'Kakak';
 
-                // 1. Balas konfirmasi ke pelanggan sesuai instruksi
+                // 1. Balas konfirmasi ke pelanggan sesuai instruksi dengan harga resmi Owner
                 const replyCust = `Baik Kak, ID meteran Kakak adalah *${activeCustSession.meterNumber}*.\n` +
                     `Pembelian *Token PLN ${prodInfo.nominal.toLocaleString('id-ID')}* seharga *Rp ${prodInfo.price.toLocaleString('id-ID')}*.\n\n` +
                     `Data pesanan Kakak akan langsung dikirimkan ke Owner ya Kak untuk diproses. Mohon ditunggu ya! 🙏✨`;

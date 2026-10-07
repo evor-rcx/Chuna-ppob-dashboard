@@ -129,95 +129,126 @@ KEMBALIKAN HANYA JSON MURNI (VALID JSON) TANPA CODE BLOCK / MARKDOWN:
 
 /**
  * Menghitung Harga Jual Owner resmi untuk Token PLN prabayar
- * Mengikuti data 'owner_fixed' dan 'fee_owner' dari menu Kelola Produk toko E4 Store
+ * Mengikuti data murni 'owner_fixed' (kolom ke-8 'Harga Jual (Owner)' di menu Kelola Produk toko E4 Store)
  */
 export function getPlnTokenPrice(
   nominalStr: string,
   db?: any,
   getProductFee?: (sku: string) => any
-): { sku: string; nominal: number; price: number; name: string } {
+): { sku: string; nominal: number; price: number; name: string; available: boolean } {
   const norm = nominalStr.toLowerCase().replace(/[\s\.\,]/g, '');
-  let sku = 'PLN20';
   let nominal = 20000;
-  let defaultOwnerPrice = 22000;
+  let skuBase = 'PLN20';
 
-  if (/500000|500rb|500k|^500$/.test(norm)) {
-    sku = 'PLN500';
+  if (/1000000|1jt|1000k|^1000$/.test(norm)) {
+    skuBase = 'PLN1000';
+    nominal = 1000000;
+  } else if (/500000|500rb|500k|^500$/.test(norm)) {
+    skuBase = 'PLN500';
     nominal = 500000;
-    defaultOwnerPrice = 502000;
   } else if (/200000|200rb|200k|^200$/.test(norm)) {
-    sku = 'PLN200';
+    skuBase = 'PLN200';
     nominal = 200000;
-    defaultOwnerPrice = 202000;
   } else if (/100000|100rb|100k|^100$/.test(norm)) {
-    sku = 'PLN100';
+    skuBase = 'PLN100';
     nominal = 100000;
-    defaultOwnerPrice = 102000;
   } else if (/50000|50rb|50k|^50$/.test(norm)) {
-    sku = 'PLN50';
+    skuBase = 'PLN50';
     nominal = 50000;
-    defaultOwnerPrice = 52000;
-  } else {
-    sku = 'PLN20';
+  } else if (/20000|20rb|20k|^20$/.test(norm)) {
+    skuBase = 'PLN20';
     nominal = 20000;
-    defaultOwnerPrice = 22000;
+  } else {
+    const parsed = parseInt(norm.replace(/\D/g, ''), 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      nominal = parsed;
+      const kVal = Math.round(nominal / 1000);
+      skuBase = `PLN${kVal}`;
+    }
   }
 
-  // 1. Ambil modal dari database produk jika ada
-  let basePrice = nominal + 100;
-  if (db?.savedPrepaidProducts) {
-    const found = db.savedPrepaidProducts.find(
-      (p: any) => p.buyer_sku_code?.toUpperCase() === sku || p.buyer_sku_code?.toUpperCase() === `PLN${nominal}`
-    );
-    if (found?.price) basePrice = Number(found.price);
+  const kSuffix = Math.round(nominal / 1000);
+  // Daftar variasi kode SKU untuk pencocokan fleksibel
+  const candidateSkus = [
+    skuBase,
+    skuBase.toLowerCase(),
+    `PLN${nominal}`,
+    `pln${nominal}`,
+    `PLN${kSuffix}K`,
+    `pln${kSuffix}k`,
+    `TOKENPLN${kSuffix}`,
+    `tokenpln${kSuffix}`,
+    `TOKENPLN${nominal}`,
+    `tokenpln${nominal}`
+  ];
+
+  // Cari juga dari katalog savedPrepaidProducts jika ada
+  if (db?.savedPrepaidProducts && Array.isArray(db.savedPrepaidProducts)) {
+    const matchProd = db.savedPrepaidProducts.find((p: any) => {
+      const b = (p.brand || '').toUpperCase();
+      const c = (p.category || '').toUpperCase();
+      const n = (p.product_name || '').toUpperCase();
+      const s = (p.buyer_sku_code || '').toUpperCase();
+      const isPln = b.includes('PLN') || c.includes('PLN') || s.includes('PLN');
+      if (!isPln) return false;
+      return n.includes(nominal.toLocaleString('id-ID')) || n.includes(String(nominal)) || s === skuBase || s === `PLN${nominal}`;
+    });
+    if (matchProd?.buyer_sku_code && !candidateSkus.includes(matchProd.buyer_sku_code)) {
+      candidateSkus.unshift(matchProd.buyer_sku_code);
+    }
   }
 
-  // 2. Ambil pengaturan fee / harga jual resmi Owner dari menu Kelola Produk
-  let sellingPrice = 0;
-  if (typeof getProductFee === 'function') {
-    const f = getProductFee(sku) || getProductFee(`PLN${nominal}`);
-    if (f) {
-      // Prioritas 1: 'owner_fixed' (Harga Jual Pas yang diatur langsung oleh Owner di dashboard)
-      if (f.owner_fixed !== undefined && Number(f.owner_fixed) > 0) {
-        sellingPrice = Number(f.owner_fixed);
+  // Ambil data 'owner_fixed' (kolom ke-8 'Harga Jual (Owner)' dari menu Kelola Produk)
+  let ownerFixedPrice = 0;
+  let matchedSku = skuBase;
+
+  for (const cSku of candidateSkus) {
+    if (typeof getProductFee === 'function') {
+      const f = getProductFee(cSku);
+      if (f && f.owner_fixed !== undefined && Number(f.owner_fixed) > 0) {
+        ownerFixedPrice = Number(f.owner_fixed);
+        matchedSku = cSku;
+        break;
       }
-      // Prioritas 2: 'fee_owner' (Markup margin Owner)
-      else if (f.owner !== undefined && Number(f.owner) > 0) {
-        const rawPrice = basePrice + Number(f.owner);
-        sellingPrice = Math.ceil(rawPrice / 100) * 100;
-      }
-      // Prioritas 3: 'fee_biasa' jika disetel
-      else if (f.biasa !== undefined && Number(f.biasa) > 0) {
-        const rawPrice = basePrice + Number(f.biasa);
-        sellingPrice = Math.ceil(rawPrice / 100) * 100;
+    }
+    if (db?.productFees && db.productFees[cSku]) {
+      const f = db.productFees[cSku];
+      if (f && f.owner_fixed !== undefined && Number(f.owner_fixed) > 0) {
+        ownerFixedPrice = Number(f.owner_fixed);
+        matchedSku = cSku;
+        break;
       }
     }
   }
 
-  // Jika belum disetel manual di dashboard, gunakan harga bulat resmi default toko
-  if (!sellingPrice || sellingPrice <= 0) {
-    sellingPrice = defaultOwnerPrice;
-  }
+  const isAvailable = Boolean(ownerFixedPrice > 0);
 
   return {
-    sku,
+    sku: matchedSku,
     nominal,
-    price: sellingPrice,
-    name: `Token PLN ${nominal.toLocaleString('id-ID')}`
+    price: ownerFixedPrice,
+    name: `Token PLN ${nominal.toLocaleString('id-ID')}`,
+    available: isAvailable
   };
 }
 
 /**
  * Membuat daftar pilihan nominal dan Harga Jual Owner untuk Token PLN
+ * HANYA memasukkan nominal yang sudah memiliki 'owner_fixed' resmi dari Owner di dashboard.
+ * Jika nominal belum diisi harganya oleh Owner, jangan dimasukkan ke dalam daftar list.
  */
 export function getPlnPriceListMenu(db?: any, getProductFee?: (sku: string) => any): string {
-  const nominals = ['20000', '50000', '100000', '200000'];
-  return nominals
-    .map(n => {
-      const info = getPlnTokenPrice(n, db, getProductFee);
-      return `• *${info.nominal.toLocaleString('id-ID')}* = Rp ${info.price.toLocaleString('id-ID')}`;
-    })
-    .join('\n');
+  const nominals = ['20000', '50000', '100000', '200000', '500000', '1000000'];
+  const availableItems: string[] = [];
+
+  for (const n of nominals) {
+    const info = getPlnTokenPrice(n, db, getProductFee);
+    if (info.available && info.price > 0) {
+      availableItems.push(`• *${info.nominal.toLocaleString('id-ID')}* = Rp ${info.price.toLocaleString('id-ID')}`);
+    }
+  }
+
+  return availableItems.join('\n');
 }
 
 /**
