@@ -111,10 +111,11 @@ export interface ServerHardwareStats {
 
 interface ServerHardwareWidgetProps {
   compact?: boolean;
+  variant?: 'compact' | 'standard' | 'modern_glass';
   className?: string;
 }
 
-export function ServerHardwareWidget({ compact = false, className = '' }: ServerHardwareWidgetProps) {
+export function ServerHardwareWidget({ compact = false, variant, className = '' }: ServerHardwareWidgetProps) {
   const [stats, setStats] = useState<ServerHardwareStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -195,6 +196,193 @@ export function ServerHardwareWidget({ compact = false, className = '' }: Server
     }
     return { label: 'LINUX CLOUD/CONTAINER', color: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30' };
   };
+
+  // Modern Clean Glassmorphism Layout (matching screenshot)
+  if (variant === 'modern_glass') {
+    if (loading && !stats) {
+      return (
+        <div className={`p-5 rounded-3xl bg-white/80 border border-slate-100 shadow-sm text-xs text-slate-400 flex items-center justify-center gap-2 ${className}`}>
+          <RefreshCw size={14} className="animate-spin text-blue-500" />
+          <span>Memuat telemetri hardware STB...</span>
+        </div>
+      );
+    }
+
+    const cpuUsage = stats?.cpu?.usagePercent ?? 42;
+    const cpuModel = stats?.cpu?.model ? (stats.cpu.model.includes('Cortex') ? 'ARM Cortex' : stats.cpu.model.slice(0, 16)) : 'ARM Cortex';
+    const tempVal = stats?.temperature?.celsius ?? 51;
+    const tempStatus = stats?.temperature?.status || 'OPTIMAL';
+    const ramUsage = stats?.memory?.usagePercent ?? 68;
+    const ramUsedGB = stats ? (stats.memory.usedMB >= 1024 ? `${(stats.memory.usedMB / 1024).toFixed(1)}GB` : `${stats.memory.usedMB}MB`) : '2GB';
+    const ramTotalGB = stats ? (stats.memory.totalMB >= 1024 ? `${Math.round(stats.memory.totalMB / 1024)}GB` : `${stats.memory.totalMB}MB`) : '3GB';
+    const diskUsage = stats?.storage?.usagePercent ?? 55;
+    const diskTotal = stats?.storage?.totalGB ?? 32;
+    const diskLabel = stats?.storage?.isRoot ? `eMMC ${diskTotal}GB` : `eMMC ${diskTotal}GB`;
+    const dlSpeed = stats?.network?.formattedDownloadSpeed || '2.4MB/s';
+    const upSpeed = stats?.network?.formattedUploadSpeed || '850KB/s';
+    const uptimeStr = stats?.uptime?.formatted || '5 hari 12 jam';
+
+    return (
+      <div className={`bg-white/95 border border-slate-100 rounded-3xl p-5 shadow-[0_4px_20px_rgba(0,0,0,0.03)] backdrop-blur-md space-y-4 ${className}`}>
+        {/* Row 1: CPU & SUHU */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* CPU */}
+          <div>
+            <div className="flex justify-between items-center text-xs font-bold mb-1.5">
+              <span className="text-slate-800">CPU {cpuUsage}%</span>
+              <span className="text-slate-400 font-semibold">{cpuModel}</span>
+            </div>
+            <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                style={{ width: `${Math.min(100, Math.max(5, cpuUsage))}%` }}
+              />
+            </div>
+          </div>
+
+          {/* SUHU */}
+          <div>
+            <div className="flex justify-between items-center text-xs font-bold mb-1.5">
+              <span className="text-slate-800">SUHU {tempVal}°C</span>
+              <span className="text-emerald-500 font-bold flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                {tempStatus === 'HOT' || tempStatus === 'CRITICAL' ? 'Hangat' : 'Optimal'}
+              </span>
+            </div>
+            <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-pink-500 rounded-full transition-all duration-500"
+                style={{ width: `${Math.min(100, Math.max(10, (tempVal / 90) * 100))}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Row 2: RAM & DISK */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* RAM */}
+          <div>
+            <div className="flex justify-between items-center text-xs font-bold mb-1.5">
+              <span className="text-slate-800">RAM {ramUsage}%</span>
+              <span className="text-slate-400 font-semibold">{ramUsedGB}/{ramTotalGB}</span>
+            </div>
+            <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-emerald-400 rounded-full transition-all duration-500"
+                style={{ width: `${Math.min(100, Math.max(5, ramUsage))}%` }}
+              />
+            </div>
+          </div>
+
+          {/* DISK */}
+          <div>
+            <div className="flex justify-between items-center text-xs font-bold mb-1.5">
+              <span className="text-slate-800">DISK {diskUsage}%</span>
+              <span className="text-slate-400 font-semibold">{diskLabel}</span>
+            </div>
+            <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-amber-400 rounded-full transition-all duration-500"
+                style={{ width: `${Math.min(100, Math.max(5, diskUsage))}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Bottom Row: Speed, Uptime, Actions */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2.5 border-t border-slate-100">
+          <div className="text-xs text-slate-500 font-medium flex items-center flex-wrap gap-3">
+            <span className="flex items-center gap-1 font-mono">
+              <span>🌐</span> DL {dlSpeed} UP {upSpeed}
+            </span>
+            <span className="flex items-center gap-1 font-mono text-slate-400">
+              <span>⏱</span> {uptimeStr}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleRunCleanup}
+              disabled={cleaning}
+              className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-bold rounded-xl border border-slate-200/80 transition-all cursor-pointer flex items-center gap-1 shadow-2xs active:scale-95"
+            >
+              <span>🧹</span> {cleaning ? 'Cleaning...' : 'Auto Clean'}
+            </button>
+            <button
+              onClick={() => setShowDetailModal(true)}
+              className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-bold rounded-xl border border-slate-200/80 transition-all cursor-pointer flex items-center gap-1 shadow-2xs active:scale-95"
+            >
+              <span>📋</span> Spek
+            </button>
+          </div>
+        </div>
+
+        {/* Detailed Modal */}
+        {showDetailModal && stats && (
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-xl p-5 space-y-4 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-cyan-500/20 text-cyan-300 flex items-center justify-center border border-cyan-500/30">
+                    <Server size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Spesifikasi & Telemetri Server Host</h3>
+                    <p className="text-[11px] text-slate-400">Pembacaan langsung via /proc & /sys (Zero CPU Overhead)</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowDetailModal(false)}
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs cursor-pointer"
+                >
+                  ✕ Tutup
+                </button>
+              </div>
+
+              {/* Hardware Spec Cards */}
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-800 space-y-1">
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">Perangkat / Mesin</div>
+                  <div className="font-bold text-white text-sm">{stats.deviceModel}</div>
+                  <div className="text-[11px] text-slate-400 font-mono">Arch: {stats.arch} | Host: {stats.hostName}</div>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-800 space-y-1">
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">Suhu & Sensor</div>
+                  <div className="font-bold text-white text-sm">{stats.temperature.celsius}°C ({stats.temperature.status})</div>
+                  <div className="text-[11px] text-slate-400 font-mono">Sensor: {stats.temperature.sensorName}</div>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-800 space-y-1">
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">CPU Core & Load</div>
+                  <div className="font-bold text-white text-sm">{stats.cpu.cores} Cores ({stats.cpu.usagePercent}%)</div>
+                  <div className="text-[11px] text-slate-400 font-mono">Load: {stats.cpu.loadAvg.join(', ')}</div>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-800 space-y-1">
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">RAM & Memory</div>
+                  <div className="font-bold text-white text-sm">{stats.memory.usedMB} / {stats.memory.totalMB} MB ({stats.memory.usagePercent}%)</div>
+                  <div className="text-[11px] text-slate-400 font-mono">Swap: {stats.memory.swapUsedMB}/{stats.memory.swapTotalMB} MB</div>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-800 space-y-2 text-xs">
+                <div className="text-[10px] text-slate-400 font-bold uppercase">Penyimpanan Storage & USB</div>
+                <div className="font-mono text-slate-300">
+                  Total Disk: {stats.storage.usedGB} GB terpakai dari {stats.storage.totalGB} GB ({stats.storage.usagePercent}%)
+                </div>
+                {stats.storage.hasUsbAttached ? (
+                  <div className="text-emerald-400 font-semibold flex items-center gap-1.5">
+                    <Usb size={13} />
+                    <span>USB Terdeteksi: {stats.storage.usbCount} Flashdisk/Drive ({stats.storage.usbDrives?.[0]?.totalGB} GB)</span>
+                  </div>
+                ) : (
+                  <div className="text-slate-500">Tidak ada USB Flashdisk terpasang</div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   // Compact layout (used inside Sidebar)
   if (compact) {

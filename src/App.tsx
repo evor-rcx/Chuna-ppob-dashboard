@@ -110,21 +110,25 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0f1d] text-slate-200 font-sans flex justify-center relative">
+    <div className="min-h-screen bg-[#f8fafc] text-slate-800 font-sans flex justify-center relative selection:bg-blue-600 selection:text-white">
       <CustomAlert />
       {bgType === 'image' && bgUrl && (
-        <div className="absolute inset-0 z-0 overflow-hidden">
+        <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
           <img src={bgUrl} className="w-full h-full object-cover opacity-20" alt="bg" data-no-invert />
         </div>
       )}
       {bgType === 'video' && bgUrl && (
-        <div className="absolute inset-0 z-0 overflow-hidden">
+        <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
           <video src={bgUrl} autoPlay loop muted playsInline className="w-full h-full object-cover opacity-20" data-no-invert />
         </div>
       )}
-      <div className="w-full max-w-[1200px] flex flex-col md:flex-row relative z-10">
-        <Sidebar />
-        <main className="flex-1 flex flex-col p-6 md:p-8 gap-8 overflow-hidden">
+      <div className={`w-full max-w-[1280px] flex flex-col ${currentPage !== 'menu' ? 'md:flex-row' : ''} relative z-10 p-2 sm:p-4 md:p-6`}>
+        {currentPage !== 'menu' && (
+          <div className="hidden md:block">
+            <Sidebar />
+          </div>
+        )}
+        <main className="flex-1 flex flex-col overflow-hidden min-w-0">
           {renderPage()}
         </main>
       </div>

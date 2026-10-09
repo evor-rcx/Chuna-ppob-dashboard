@@ -1,6 +1,10 @@
-import { BarChart3, ShoppingCart, FileText, Settings, Bot, Wallet, Users, Store, Lock, ShieldAlert, Sparkles, CheckCircle2, AlertCircle, RefreshCw, ZoomIn, Copy, Check, Crown, Search, Layers } from 'lucide-react';
+import { BarChart3, ShoppingCart, FileText, Settings, Bot, Send, Users, Store, Lock, ShieldAlert, Sparkles, CheckCircle2, AlertCircle, RefreshCw, ZoomIn, Copy, Check, Crown, Search, Layers, Bell, Eye, EyeOff, MessageSquare, Clock, ArrowRight, ExternalLink, CheckCheck } from 'lucide-react';
 import { Page } from '../../types';
 import { ReactNode, useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { getHolidayInfo } from '../../utils/holidays';
+import { playPowerDown, playTerminalBlip } from '../../utils/audio';
+import { ServerHardwareWidget } from '../ServerHardwareWidget';
 
 interface MenuProps {
   onNavigate: (page: Page) => void;
@@ -14,6 +18,288 @@ export function Menu({ onNavigate }: MenuProps) {
   const [show2FAField, setShow2FAField] = useState(false);
   const [totpInput, setTotpInput] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+
+  // WITA Clock & Dynamic Holiday State
+  const [witaTime, setWitaTime] = useState('');
+  const [witaDate, setWitaDate] = useState('');
+  const [holidayInfo, setHolidayInfo] = useState<any>(null);
+
+  // Digiflazz Live Balance State
+  const [digiflazzBalance, setDigiflazzBalance] = useState<number>(0);
+  const [digiflazzStatus, setDigiflazzStatus] = useState<string>('Disconnected');
+  const [showBalance, setShowBalance] = useState<boolean>(true);
+
+  // Notification Modal State
+  const [showNotifModal, setShowNotifModal] = useState<boolean>(false);
+  const [notifTab, setNotifTab] = useState<'services' | 'messages'>('services');
+  const [isFetchingNotif, setIsFetchingNotif] = useState<boolean>(false);
+  const [lastNotifRefreshed, setLastNotifRefreshed] = useState<Date>(new Date());
+
+  // Services Real-time Status
+  const [servicesStatus, setServicesStatus] = useState<{
+    digiflazz: { connected: boolean; balance: number; status: string; description: string };
+    wa: { connected: boolean; status: string; description: string };
+    telegram: { connected: boolean; status: string; description: string };
+    gemini: { connected: boolean; description: string };
+  }>({
+    digiflazz: { connected: false, balance: 0, status: 'Checking...', description: 'Memeriksa koneksi Digiflazz...' },
+    wa: { connected: false, status: 'Checking...', description: 'Memeriksa bot WhatsApp...' },
+    telegram: { connected: false, status: 'Checking...', description: 'Memeriksa bot Telegram...' },
+    gemini: { connected: false, description: 'Memeriksa AI Gemini...' }
+  });
+
+  // Incoming WhatsApp Messages
+  const [waMessages, setWaMessages] = useState<Array<{
+    id: string;
+    senderNumber: string;
+    senderName: string;
+    text: string;
+    timestamp: number;
+    isRead: boolean;
+  }>>([]);
+  const [unreadWaCount, setUnreadWaCount] = useState<number>(0);
+
+  const fetchSystemNotifications = async () => {
+    setIsFetchingNotif(true);
+    try {
+      const [digiRes, waRes, botRes, geminiRes, msgRes] = await Promise.allSettled([
+        fetch('/api/digiflazz/status').then(r => r.json()),
+        fetch('/api/wa/status').then(r => r.json()),
+        fetch('/api/bot/status').then(r => r.json()),
+        fetch('/api/config/gemini').then(r => r.json()),
+        fetch('/api/wa/messages').then(r => r.json())
+      ]);
+
+      // 1. Digiflazz Status
+      if (digiRes.status === 'fulfilled') {
+        const d = digiRes.value;
+        const isConn = Boolean(d && (d.status === 'Connected' || (d.balance !== undefined && Number(d.balance) > 0)));
+        const bal = Number(d.balance || 0);
+        setDigiflazzBalance(bal);
+        setDigiflazzStatus(d.status || (isConn ? 'Connected' : 'Disconnected'));
+        setServicesStatus(prev => ({
+          ...prev,
+          digiflazz: {
+            connected: isConn,
+            balance: bal,
+            status: d.status || (isConn ? 'Connected' : 'Disconnected'),
+            description: isConn
+              ? `Saldo aktif: Rp ${bal.toLocaleString('id-ID')}`
+              : 'Kredensial API belum dikonfigurasi di menu Konfig API'
+          }
+        }));
+      } else {
+        setServicesStatus(prev => ({
+          ...prev,
+          digiflazz: {
+            connected: false,
+            balance: 0,
+            status: 'Disconnected',
+            description: 'Kredensial API belum dikonfigurasi di menu Konfig API'
+          }
+        }));
+      }
+
+      // 2. WhatsApp Bot Status
+      if (waRes.status === 'fulfilled') {
+        const w = waRes.value;
+        const isConn = Boolean(w && w.status && (w.status.includes('Connected') || w.status.includes('connected')));
+        setServicesStatus(prev => ({
+          ...prev,
+          wa: {
+            connected: isConn,
+            status: w.status || 'Disconnected',
+            description: isConn ? String(w.status) : 'WhatsApp belum di-pairing'
+          }
+        }));
+      } else {
+        setServicesStatus(prev => ({
+          ...prev,
+          wa: {
+            connected: false,
+            status: 'Disconnected',
+            description: 'WhatsApp belum di-pairing'
+          }
+        }));
+      }
+
+      // 3. Telegram Bot Status
+      if (botRes.status === 'fulfilled') {
+        const b = botRes.value;
+        const isConn = Boolean(b && (b.running || (b.status && b.status.includes('Connected'))));
+        setServicesStatus(prev => ({
+          ...prev,
+          telegram: {
+            connected: isConn,
+            status: b.status || 'Disconnected',
+            description: isConn ? String(b.status || 'Bot Telegram siap melayani 24 jam') : 'WhatsApp/Telegram belum di-pairing'
+          }
+        }));
+      } else {
+        setServicesStatus(prev => ({
+          ...prev,
+          telegram: {
+            connected: false,
+            status: 'Disconnected',
+            description: 'WhatsApp/Telegram belum di-pairing'
+          }
+        }));
+      }
+
+      // 4. AI Gemini OCR Status
+      if (geminiRes.status === 'fulfilled') {
+        const g = geminiRes.value;
+        const isConn = Boolean(g && g.connected);
+        setServicesStatus(prev => ({
+          ...prev,
+          gemini: {
+            connected: isConn,
+            description: isConn
+              ? 'Kunci API terpasang, OCR PLN & bukti transfer siap'
+              : 'API Key Gemini belum disetel'
+          }
+        }));
+      } else {
+        setServicesStatus(prev => ({
+          ...prev,
+          gemini: {
+            connected: false,
+            description: 'API Key Gemini belum disetel'
+          }
+        }));
+      }
+
+      // 5. WhatsApp Incoming Messages
+      if (msgRes.status === 'fulfilled' && msgRes.value && Array.isArray(msgRes.value.messages)) {
+        setWaMessages(msgRes.value.messages);
+        const unread = Number(msgRes.value.unreadCount ?? msgRes.value.messages.filter((m: any) => !m.isRead).length);
+        setUnreadWaCount(unread);
+      }
+      setLastNotifRefreshed(new Date());
+    } catch (e) {
+      console.error('Failed to fetch system notifications:', e);
+    } finally {
+      setIsFetchingNotif(false);
+    }
+  };
+
+  const handleMarkAllWaRead = async () => {
+    try {
+      await fetch('/api/wa/messages/mark-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      setWaMessages(prev => prev.map(m => ({ ...m, isRead: true })));
+      setUnreadWaCount(0);
+    } catch (e) {}
+  };
+
+  const handleOpenWaChat = async (msgId: string) => {
+    try {
+      await fetch('/api/wa/messages/mark-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: msgId })
+      });
+      setWaMessages(prev => prev.map(m => m.id === msgId ? { ...m, isRead: true } : m));
+      setUnreadWaCount(prev => Math.max(0, prev - 1));
+    } catch (e) {}
+    setShowNotifModal(false);
+    onNavigate('bot');
+  };
+
+  const formatRelativeTime = (ts: number) => {
+    if (!ts) return 'Baru saja';
+    const diffSec = Math.floor((Date.now() - ts) / 1000);
+    if (diffSec < 30) return 'Baru saja';
+    if (diffSec < 60) return `${diffSec} dtk lalu`;
+    if (diffSec < 3600) return `${Math.floor(diffSec / 60)} mnt lalu`;
+    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} jam lalu`;
+    return new Date(ts).toLocaleDateString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const offlineServicesCount =
+    (servicesStatus.digiflazz.connected ? 0 : 1) +
+    (servicesStatus.wa.connected ? 0 : 1) +
+    (servicesStatus.telegram.connected ? 0 : 1) +
+    (servicesStatus.gemini.connected ? 0 : 1);
+
+  const totalAttentionCount = offlineServicesCount + unreadWaCount;
+
+  // Logout Terminal Sequence State
+  const [isLoggingOut, setIsLoggingOut] = useState<boolean>(false);
+  const [logoutLogs, setLogoutLogs] = useState<string[]>([]);
+
+  useEffect(() => {
+    const updateWita = () => {
+      const now = new Date();
+      // Format time in Asia/Makassar (WITA)
+      const timeOptions: Intl.DateTimeFormatOptions = {
+        timeZone: 'Asia/Makassar',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      };
+      const timeStr = new Intl.DateTimeFormat('id-ID', timeOptions).format(now).replace(/\./g, ':');
+      setWitaTime(timeStr);
+
+      const dateOptions: Intl.DateTimeFormatOptions = {
+        timeZone: 'Asia/Makassar',
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+      };
+      const dateStr = new Intl.DateTimeFormat('id-ID', dateOptions).format(now);
+      setWitaDate(dateStr);
+
+      setHolidayInfo(getHolidayInfo(now));
+    };
+
+    updateWita();
+    const timer = setInterval(updateWita, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    fetchSystemNotifications();
+    const interval = setInterval(fetchSystemNotifications, 20000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleLogout = () => {
+    setIsLoggingOut(true);
+    playPowerDown();
+    
+    const logs = [
+      "INITIATING LOGOUT SEQUENCE...",
+      "DISCONNECTING FROM MAINFRAME...",
+      "CLEARING LOCAL CACHE...",
+      "CLOSING SECURE SOCKETS...",
+      "TERMINATING PPOB CONNECTION...",
+      "PURGING SESSION DATA...",
+      "ENCRYPTING LOCAL STORE...",
+      "ACCESS REVOKED.",
+      "GOODBYE, OWNER E4 STORE."
+    ];
+
+    let currentLogIndex = 0;
+    const interval = setInterval(() => {
+      if (currentLogIndex < logs.length) {
+        setLogoutLogs(prev => [...prev, logs[currentLogIndex]]);
+        playTerminalBlip();
+        currentLogIndex++;
+      } else {
+        clearInterval(interval);
+        setTimeout(() => {
+          sessionStorage.removeItem('chuna_auth');
+          window.dispatchEvent(new Event('logout'));
+        }, 1500);
+      }
+    }, 400);
+  };
 
   // Live Nota Model Preview State
   const [activeNotaTab, setActiveNotaTab] = useState<'price-list' | 'tagihan-pasca' | 'konfirmasi' | 'royal-tidaklunas' | 'royal' | 'tagihan' | 'lunas' | 'angsuran'>('price-list');
@@ -291,48 +577,543 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
     }
   };
 
-  const menuItems: { id: Page; icon: ReactNode; label: string }[] = [
-    { id: 'ringkasan', icon: <BarChart3 size={32} />, label: 'Ringkasan' },
-    { id: 'produk', icon: <ShoppingCart size={32} />, label: 'Kelola Produk' },
-    { id: 'transaksi', icon: <FileText size={32} />, label: 'Transaksi' },
-    { id: 'konfig', icon: <Settings size={32} />, label: 'Konfig API' },
-    { id: 'gemini', icon: <Sparkles size={32} className="text-amber-400" />, label: '🔑 Konfig AI Gemini' },
-    { id: 'bot', icon: <Bot size={32} />, label: 'Bot WA/Tele' },
-    { id: 'saldo', icon: <Wallet size={32} />, label: 'Customer Telegram' },
-    { id: 'member-offline', icon: <Users size={32} />, label: 'Member Offline' },
-    { id: 'kasir-fisik', icon: <Store size={32} />, label: 'Kasir Jualan Fisik' },
-    { id: 'security', icon: <ShieldAlert size={32} className="text-indigo-400" />, label: 'Keamanan Super' },
+  const menuItems: { id: Page; icon: ReactNode; label: string; subtitle: string; iconBg: string }[] = [
+    { id: 'ringkasan', icon: <BarChart3 size={24} />, label: 'RINGKASAN', subtitle: 'Laba • Trx • Grafik', iconBg: 'bg-amber-50 text-amber-500 border border-amber-200/60' },
+    { id: 'produk', icon: <ShoppingCart size={24} />, label: 'PRODUK', subtitle: 'Prabayar • Pascabayar...', iconBg: 'bg-blue-50 text-blue-600 border border-blue-200/60' },
+    { id: 'transaksi', icon: <FileText size={24} />, label: 'TRANSAKSI', subtitle: 'Sukses • Pending • Gagal...', iconBg: 'bg-emerald-50 text-emerald-600 border border-emerald-200/60' },
+    { id: 'konfig', icon: <Settings size={24} />, label: 'KONFIG API', subtitle: 'Digiflazz • WA Owner', iconBg: 'bg-orange-50 text-orange-500 border border-orange-200/60' },
+    { id: 'gemini', icon: <Sparkles size={24} />, label: 'KONFIG AI GEMINI', subtitle: 'Model • API Key • Prompts', iconBg: 'bg-purple-50 text-purple-600 border border-purple-200/60' },
+    { id: 'bot', icon: <Bot size={24} />, label: 'BOT WA / TELE', subtitle: 'Status • QR Baileys • Tele', iconBg: 'bg-cyan-50 text-cyan-600 border border-cyan-200/60' },
+    { id: 'saldo', icon: <Send size={24} />, label: 'SALDO TELEGRAM', subtitle: 'Cek & Topup Saldo Bot', iconBg: 'bg-sky-50 text-sky-600 border border-sky-200/60' },
+    { id: 'member-offline', icon: <Users size={24} />, label: 'MEMBER OFFLINE', subtitle: 'Data Pelanggan & Utang', iconBg: 'bg-teal-50 text-teal-600 border border-teal-200/60' },
+    { id: 'kasir-fisik', icon: <Store size={24} />, label: 'KASIR FISIK', subtitle: 'Transaksi Langsung & POS', iconBg: 'bg-amber-50 text-amber-600 border border-amber-200/60' },
+    { id: 'security', icon: <ShieldAlert size={24} />, label: 'KEAMANAN SUPER', subtitle: 'PIN • Proteksi • Audit Log', iconBg: 'bg-rose-50 text-rose-600 border border-rose-200/60' },
   ];
 
+  const isConnected = digiflazzStatus?.includes('Connected');
+
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-      <header className="flex justify-between items-center mb-8">
-        <div>
-          <h2 className="text-2xl font-semibold text-white">Menu Utama</h2>
-          <p className="text-slate-400 text-sm">Selamat datang kembali, Admin.</p>
+    <div className="min-h-screen bg-gradient-to-b from-sky-50/70 via-slate-50 to-indigo-50/40 rounded-[32px] p-4 sm:p-6 md:p-8 text-slate-800 shadow-xl border border-slate-200/70 relative overflow-hidden backdrop-blur-xl animate-in fade-in duration-300">
+      {/* Background Dot Grid Overlay */}
+      <div className="absolute inset-0 bg-[radial-gradient(#94a3b8_1px,transparent_1px)] [background-size:20px_20px] opacity-25 pointer-events-none" />
+
+      {/* Moving Ambient Aurora Orbs */}
+      <motion.div
+        animate={{ x: [0, 25, 0], y: [0, -20, 0] }}
+        transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
+        className="pointer-events-none absolute -top-24 -left-24 w-80 h-80 bg-sky-300/25 rounded-full blur-3xl"
+      />
+      <motion.div
+        animate={{ x: [0, -25, 0], y: [0, 25, 0] }}
+        transition={{ duration: 14, repeat: Infinity, ease: "easeInOut" }}
+        className="pointer-events-none absolute -bottom-24 -right-24 w-80 h-80 bg-indigo-300/25 rounded-full blur-3xl"
+      />
+
+      {/* 1. Header Atas (Top Bar): Avatar/Logo Bergerak + Sapaan & Bell Notifikasi */}
+      <div className="relative z-10 flex items-center justify-between pb-4 border-b border-slate-200/70">
+        <div className="flex items-center gap-3">
+          {/* Wadah Lingkaran Ikon Bergerak E4 Store */}
+          <div className="relative w-14 h-14 sm:w-16 sm:h-16 aspect-square rounded-full p-0.5 bg-gradient-to-tr from-sky-400 via-blue-500 to-indigo-500 shadow-md flex items-center justify-center">
+            <div className="w-full h-full rounded-full overflow-hidden bg-white flex items-center justify-center relative">
+              <video
+                src="/logo.mp4"
+                poster="/logo.webp"
+                autoPlay
+                loop
+                muted
+                playsInline
+                className="w-full h-full object-cover pointer-events-none"
+                onError={(e) => {
+                  const parent = e.currentTarget.parentElement;
+                  if (parent) {
+                    const img = document.createElement('img');
+                    img.src = '/logo.webp';
+                    img.className = 'w-full h-full object-cover pointer-events-none';
+                    img.onerror = () => { img.src = '/logo.gif'; };
+                    parent.replaceChild(img, e.currentTarget);
+                  }
+                }}
+              />
+            </div>
+            {/* Pulsing Aura Ring */}
+            <span className="absolute inset-0 rounded-full border border-sky-400/50 animate-ping pointer-events-none opacity-40"></span>
+          </div>
+
+          <div>
+            <p className="text-xs sm:text-sm font-medium text-slate-500">Halo, Owner 👋</p>
+            <h2 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900">E4 STORE</h2>
+          </div>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700"></div>
-        </div>
-      </header>
-      
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-        {menuItems.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => handleItemClick(item.id)}
-            className="bg-slate-800/30 border border-slate-700/50 p-6 rounded-2xl flex flex-col items-center gap-3 hover:bg-slate-800/50 transition-all cursor-pointer group relative"
+
+        {/* Lonceng Notifikasi Melingkar dengan Badge Dinamis */}
+        <div className="relative">
+          <motion.button
+            animate={totalAttentionCount > 0 ? { rotate: [0, -10, 10, -10, 8, 0] } : {}}
+            transition={{ repeat: Infinity, repeatDelay: 4, duration: 0.8 }}
+            onClick={() => {
+              const next = !showNotifModal;
+              setShowNotifModal(next);
+              if (next) {
+                fetchSystemNotifications();
+              }
+            }}
+            className="relative p-2.5 rounded-full bg-white/95 border border-slate-200/80 shadow-xs hover:bg-slate-100 transition-colors cursor-pointer text-slate-700 active:scale-95"
+            title="Notifikasi Sistem"
           >
-            {(item.id === 'produk' || item.id === 'konfig' || item.id === 'saldo' || item.id === 'bot' || item.id === 'gemini') && (
-               <div className="absolute top-3 right-3 text-slate-500 group-hover:text-amber-400 transition-colors">
-                  <Lock size={14} />
-               </div>
+            <Bell size={20} className={totalAttentionCount > 0 ? 'text-blue-600' : 'text-slate-700'} />
+            
+            {/* Dynamic Badge */}
+            {totalAttentionCount > 0 ? (
+              <span className={`absolute -top-1 -right-1 min-w-[20px] h-5 px-1 rounded-full text-white text-[10px] font-black flex items-center justify-center shadow-xs ${
+                unreadWaCount > 0 ? 'bg-blue-600 animate-pulse' : 'bg-rose-500'
+              }`}>
+                {totalAttentionCount > 9 ? '9+' : totalAttentionCount}
+              </span>
+            ) : (
+              /* Green dot for 100% all clear / normal */
+              <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white shadow-2xs" title="Semua Layanan Normal & Aktif" />
             )}
-            <div className="text-slate-300 group-hover:scale-110 transition-transform">
+          </motion.button>
+
+          {/* Popup Modal Notifikasi Ringkas & Real-Time */}
+          <AnimatePresence>
+            {showNotifModal && (
+              <motion.div
+                initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                className="absolute right-0 mt-2 w-80 sm:w-96 max-w-[95vw] bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-2xl shadow-2xl p-4 z-50 text-xs space-y-3"
+              >
+                {/* Header Modal */}
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-blue-50 text-blue-600 border border-blue-100">
+                      <Bell size={15} />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-slate-800 text-sm leading-tight">Notifikasi Sistem</h4>
+                      <p className="text-[10px] text-slate-500 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
+                        Real-time STB Server
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => fetchSystemNotifications()}
+                      className={`p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-slate-100 transition-all cursor-pointer ${isFetchingNotif ? 'animate-spin text-blue-600' : ''}`}
+                      title="Refresh Data Segar"
+                    >
+                      <RefreshCw size={14} />
+                    </button>
+                    <button
+                      onClick={() => setShowNotifModal(false)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+                      title="Tutup"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+
+                {/* Switcher Tab Segmented (Status Layanan vs Pesan Masuk Bot WA) */}
+                <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100/80 rounded-xl border border-slate-200/70">
+                  <button
+                    onClick={() => setNotifTab('services')}
+                    className={`py-1.5 px-2 rounded-lg font-bold text-[11px] transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      notifTab === 'services'
+                        ? 'bg-white text-slate-900 shadow-2xs'
+                        : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    <span>Status Layanan</span>
+                    {offlineServicesCount > 0 ? (
+                      <span className="px-1.5 py-0.2 rounded-full bg-rose-100 text-rose-700 text-[9px] font-extrabold border border-rose-200">
+                        {offlineServicesCount}
+                      </span>
+                    ) : (
+                      <span className="px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-700 text-[9px] font-bold border border-emerald-200">
+                        4/4
+                      </span>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => setNotifTab('messages')}
+                    className={`py-1.5 px-2 rounded-lg font-bold text-[11px] transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      notifTab === 'messages'
+                        ? 'bg-white text-blue-700 shadow-2xs'
+                        : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    <MessageSquare size={12} />
+                    <span>Chat WA Bot</span>
+                    {unreadWaCount > 0 ? (
+                      <span className="px-1.5 py-0.2 rounded-full bg-blue-600 text-white text-[9px] font-black animate-pulse">
+                        {unreadWaCount} Baru
+                      </span>
+                    ) : (
+                      <span className="px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-600 text-[9px] font-bold">
+                        {waMessages.length}
+                      </span>
+                    )}
+                  </button>
+                </div>
+
+                {/* Tab 1: Status Layanan */}
+                {notifTab === 'services' && (
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                    {/* Digiflazz Status */}
+                    <div className={`p-2.5 rounded-xl border flex items-start gap-2.5 transition-all ${
+                      servicesStatus.digiflazz.connected
+                        ? 'bg-emerald-50/70 border-emerald-200/80 text-emerald-950'
+                        : 'bg-rose-50/70 border-rose-200/80 text-rose-950'
+                    }`}>
+                      <span className={`w-2 h-2 mt-1 rounded-full shrink-0 ${servicesStatus.digiflazz.connected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1 flex-wrap">
+                          <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            servicesStatus.digiflazz.connected
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-rose-600 text-white'
+                          }`}>
+                            {servicesStatus.digiflazz.connected ? 'Digiflazz Terhubung' : 'Digiflazz Belum Terhubung'}
+                          </span>
+                          {!servicesStatus.digiflazz.connected && (
+                            <button
+                              onClick={() => { setShowNotifModal(false); onNavigate('konfig'); }}
+                              className="text-[10px] font-semibold text-rose-700 hover:underline inline-flex items-center gap-0.5 cursor-pointer"
+                            >
+                              Konfig <ArrowRight size={10} />
+                            </button>
+                          )}
+                        </div>
+                        <p className={`text-[11px] mt-1 font-medium leading-relaxed ${servicesStatus.digiflazz.connected ? 'text-emerald-800' : 'text-rose-700'}`}>
+                          {servicesStatus.digiflazz.description}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* WhatsApp Bot Status */}
+                    <div className={`p-2.5 rounded-xl border flex items-start gap-2.5 transition-all ${
+                      servicesStatus.wa.connected
+                        ? 'bg-emerald-50/70 border-emerald-200/80 text-emerald-950'
+                        : 'bg-amber-50/70 border-amber-200/80 text-amber-950'
+                    }`}>
+                      <span className={`w-2 h-2 mt-1 rounded-full shrink-0 ${servicesStatus.wa.connected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1 flex-wrap">
+                          <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            servicesStatus.wa.connected
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-amber-600 text-white'
+                          }`}>
+                            {servicesStatus.wa.connected ? 'Bot Aktif' : 'Bot Belum Terhubung'}
+                          </span>
+                          {!servicesStatus.wa.connected && (
+                            <button
+                              onClick={() => { setShowNotifModal(false); onNavigate('bot'); }}
+                              className="text-[10px] font-semibold text-amber-800 hover:underline inline-flex items-center gap-0.5 cursor-pointer"
+                            >
+                              Pairing WA <ArrowRight size={10} />
+                            </button>
+                          )}
+                        </div>
+                        <p className={`text-[11px] mt-1 font-medium leading-relaxed ${servicesStatus.wa.connected ? 'text-emerald-800' : 'text-amber-800'}`}>
+                          {servicesStatus.wa.description}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Telegram Bot Status */}
+                    <div className={`p-2.5 rounded-xl border flex items-start gap-2.5 transition-all ${
+                      servicesStatus.telegram.connected
+                        ? 'bg-sky-50/70 border-sky-200/80 text-sky-950'
+                        : 'bg-amber-50/70 border-amber-200/80 text-amber-950'
+                    }`}>
+                      <span className={`w-2 h-2 mt-1 rounded-full shrink-0 ${servicesStatus.telegram.connected ? 'bg-sky-500 animate-pulse' : 'bg-amber-500'}`} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1 flex-wrap">
+                          <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            servicesStatus.telegram.connected
+                              ? 'bg-sky-600 text-white'
+                              : 'bg-amber-600 text-white'
+                          }`}>
+                            {servicesStatus.telegram.connected ? 'Bot Aktif' : 'Bot Belum Terhubung'}
+                          </span>
+                          {!servicesStatus.telegram.connected && (
+                            <button
+                              onClick={() => { setShowNotifModal(false); onNavigate('bot'); }}
+                              className="text-[10px] font-semibold text-amber-800 hover:underline inline-flex items-center gap-0.5 cursor-pointer"
+                            >
+                              Setel Bot <ArrowRight size={10} />
+                            </button>
+                          )}
+                        </div>
+                        <p className={`text-[11px] mt-1 font-medium leading-relaxed ${servicesStatus.telegram.connected ? 'text-sky-800' : 'text-amber-800'}`}>
+                          {servicesStatus.telegram.description}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* AI Gemini OCR Status */}
+                    <div className={`p-2.5 rounded-xl border flex items-start gap-2.5 transition-all ${
+                      servicesStatus.gemini.connected
+                        ? 'bg-purple-50/70 border-purple-200/80 text-purple-950'
+                        : 'bg-amber-50/70 border-amber-200/80 text-amber-950'
+                    }`}>
+                      <span className={`w-2 h-2 mt-1 rounded-full shrink-0 ${servicesStatus.gemini.connected ? 'bg-purple-500 animate-pulse' : 'bg-amber-500'}`} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1 flex-wrap">
+                          <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            servicesStatus.gemini.connected
+                              ? 'bg-purple-600 text-white'
+                              : 'bg-amber-600 text-white'
+                          }`}>
+                            {servicesStatus.gemini.connected ? 'AI Gemini OCR Aktif' : 'AI Gemini Belum Aktif'}
+                          </span>
+                          {!servicesStatus.gemini.connected && (
+                            <button
+                              onClick={() => { setShowNotifModal(false); onNavigate('gemini'); }}
+                              className="text-[10px] font-semibold text-amber-800 hover:underline inline-flex items-center gap-0.5 cursor-pointer"
+                            >
+                              Setel API <ArrowRight size={10} />
+                            </button>
+                          )}
+                        </div>
+                        <p className={`text-[11px] mt-1 font-medium leading-relaxed ${servicesStatus.gemini.connected ? 'text-purple-800' : 'text-amber-800'}`}>
+                          {servicesStatus.gemini.description}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tab 2: Pesan Masuk Bot WA */}
+                {notifTab === 'messages' && (
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                    <div className="flex items-center justify-between px-0.5 pb-1">
+                      <span className="text-[11px] text-slate-500 font-semibold">
+                        Chat Masuk Terbaru ({waMessages.length})
+                      </span>
+                      {unreadWaCount > 0 && (
+                        <button
+                          onClick={handleMarkAllWaRead}
+                          className="text-[10px] text-blue-600 hover:text-blue-800 font-bold inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <CheckCheck size={12} />
+                          Tandai Semua Dibaca
+                        </button>
+                      )}
+                    </div>
+
+                    {waMessages.length === 0 ? (
+                      <div className="p-6 text-center rounded-xl bg-slate-50 border border-dashed border-slate-200">
+                        <MessageSquare size={26} className="mx-auto text-slate-300 mb-2" />
+                        <p className="font-semibold text-slate-600 text-xs">Belum Ada Chat Masuk</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Setiap pesan baru dari pelanggan di WhatsApp Bot akan otomatis tampil di sini.
+                        </p>
+                      </div>
+                    ) : (
+                      waMessages.slice(0, 5).map((msg) => (
+                        <div
+                          key={msg.id}
+                          className={`p-2.5 rounded-xl border transition-all ${
+                            !msg.isRead
+                              ? 'bg-blue-50/80 border-blue-200/90 shadow-2xs'
+                              : 'bg-slate-50/60 border-slate-200/70'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              {!msg.isRead && (
+                                <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0 animate-pulse" title="Pesan Belum Dibaca" />
+                              )}
+                              <span className="font-bold text-slate-800 truncate text-[11px]">
+                                {msg.senderName}
+                              </span>
+                              {msg.senderNumber && (
+                                <span className="text-[10px] text-slate-500 font-mono bg-white/80 px-1.5 py-0.2 rounded border border-slate-200/60 shrink-0">
+                                  +{msg.senderNumber}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap shrink-0">
+                              {formatRelativeTime(msg.timestamp)}
+                            </span>
+                          </div>
+
+                          <div className="mt-1.5 text-slate-700 bg-white/90 p-2 rounded-lg border border-slate-100 text-[11px] leading-relaxed line-clamp-2">
+                            {msg.text}
+                          </div>
+
+                          <div className="mt-2 flex items-center justify-end">
+                            <button
+                              onClick={() => handleOpenWaChat(msg.id)}
+                              className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-[10px] inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs active:scale-95"
+                            >
+                              <span>Buka Chat / Balas</span>
+                              <ArrowRight size={10} />
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {/* Footer Modal Ringkas */}
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400">
+                  <span>STB Real-time Telemetry</span>
+                  <button
+                    onClick={() => setShowNotifModal(false)}
+                    className="font-bold text-slate-600 hover:text-slate-900 cursor-pointer"
+                  >
+                    Tutup
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+
+      {/* 2. Baris Waktu (WITA), Tanggal, Hari Libur Nasional & Tombol Logout */}
+      <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-4">
+        <div>
+          <h3 className="text-sm font-extrabold tracking-wider text-slate-700 uppercase">E4 STORE</h3>
+          <div className="flex items-baseline gap-2 mt-0.5">
+            <span className="text-3xl sm:text-4xl md:text-5xl font-black text-slate-900 tracking-tight font-mono">
+              {witaTime || '14:25:36'}
+            </span>
+            <span className="text-sm sm:text-base font-bold text-slate-500 font-sans">WITA</span>
+          </div>
+          <p className="text-xs sm:text-sm text-slate-500 font-medium mt-0.5">{witaDate}</p>
+
+          {holidayInfo && (
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50/90 text-blue-600 border border-blue-200/70 text-xs font-semibold shadow-2xs mt-2.5">
+              <span>🇮🇩</span>
+              <span>{holidayInfo.text}</span>
+              {holidayInfo.isToday && (
+                <span className="relative flex h-2 w-2 ml-0.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Kartu Kanan: E4 STORE & [ LOGOUT ] */}
+        <div className="bg-white/95 border border-slate-100 rounded-2xl p-4 shadow-sm flex flex-col items-center justify-center min-w-[140px] self-start sm:self-auto">
+          <span className="text-base sm:text-lg font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600">
+            E4 STORE
+          </span>
+          <button
+            onClick={handleLogout}
+            className="mt-2.5 w-full px-4 py-1.5 text-xs font-bold tracking-wider text-rose-500 border border-rose-300 hover:bg-rose-50 rounded-xl transition-all cursor-pointer text-center active:scale-95"
+          >
+            LOGOUT
+          </button>
+        </div>
+      </div>
+
+      {/* 4. Telemetri STB / Hardware & Status Sistem PPOB Digiflazz Terpadu */}
+      <div className="relative z-10 space-y-4 my-5">
+        <ServerHardwareWidget variant="modern_glass" />
+
+        {/* Card Status Sistem PPOB Server (Terpadu di Tab STB / HW) */}
+        <div className="bg-white/95 border border-slate-200/80 rounded-3xl p-5 shadow-[0_4px_20px_rgba(0,0,0,0.03)] backdrop-blur-md space-y-3 transition-all hover:border-slate-300">
+          <div className="flex justify-between items-center">
+            <span className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+              Status Sistem PPOB Server
+            </span>
+            <span className={`flex items-center gap-1.5 text-xs font-bold ${isConnected ? 'text-emerald-600' : 'text-rose-500'}`}>
+              <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></span>
+              {isConnected ? 'Connected & Stable' : 'Disconnected'}
+            </span>
+          </div>
+          <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+            <div className={`h-full rounded-full transition-all duration-500 ${isConnected ? 'bg-emerald-500 w-full' : 'bg-rose-500 w-1/4'}`} />
+          </div>
+          <div className="flex justify-between items-center text-xs text-slate-500 font-medium pt-2 border-t border-slate-100">
+            <div className="flex items-center gap-1.5 text-indigo-600 font-bold">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              SHIELD: EGIS • NYX • ANCHOR
+            </div>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 font-bold border border-emerald-200/60">
+              ACTIVE
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* 5. Card Utama Saldo Digiflazz Besar dengan Efek Shimmer & Toggle Mata */}
+      <div className="relative z-10 my-5">
+        <div className="rounded-[28px] p-6 bg-gradient-to-r from-blue-50/70 via-indigo-50/50 to-purple-50/70 border border-indigo-100/80 shadow-sm relative overflow-hidden backdrop-blur-md flex flex-col items-center justify-center text-center">
+          {/* Gradient Shimmer Sweep Effect */}
+          <motion.div
+            animate={{ x: ['-100%', '200%'] }}
+            transition={{ duration: 4, repeat: Infinity, ease: 'linear', repeatDelay: 2 }}
+            className="pointer-events-none absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent skew-x-12"
+          />
+
+          <div className="flex items-center gap-3">
+            <span className="text-3xl sm:text-4xl md:text-5xl font-black tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 select-all font-sans">
+              {showBalance ? `Rp ${digiflazzBalance.toLocaleString('id-ID')}` : 'Rp ••••••••'}
+            </span>
+            <button
+              onClick={() => setShowBalance(!showBalance)}
+              className="p-1.5 rounded-full hover:bg-indigo-100/50 text-indigo-400 hover:text-indigo-600 transition-colors cursor-pointer"
+              title={showBalance ? 'Sembunyikan Saldo' : 'Tampilkan Saldo'}
+            >
+              {showBalance ? <Eye size={20} /> : <EyeOff size={20} />}
+            </button>
+          </div>
+
+          {/* Pulsing Green Indicator Dot */}
+          <div className="mt-3 flex items-center justify-center">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]"></span>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* 6. Grid Menu Navigasi 2 Kolom (Card Style Modern & Interaktif) */}
+      <div className="relative z-10 grid grid-cols-2 gap-3 sm:gap-4 my-6">
+        {menuItems.map((item) => (
+          <motion.button
+            key={item.id}
+            whileHover={{ y: -3, scale: 1.01 }}
+            whileTap={{ scale: 0.98 }}
+            transition={{ type: "spring", stiffness: 400, damping: 25 }}
+            onClick={() => handleItemClick(item.id)}
+            className="bg-white/95 border border-slate-100/90 shadow-[0_2px_12px_rgba(0,0,0,0.03)] hover:shadow-lg hover:border-blue-200/80 p-3.5 sm:p-4 rounded-2xl flex items-center gap-3 transition-all cursor-pointer group relative overflow-hidden text-left backdrop-blur-sm"
+          >
+            {/* Ikon Gembok untuk Menu Sensitif */}
+            {(item.id === 'produk' || item.id === 'konfig' || item.id === 'saldo' || item.id === 'bot' || item.id === 'gemini' || item.id === 'security') && (
+              <div className="absolute top-2.5 right-2.5 text-slate-300 group-hover:text-amber-500 transition-colors">
+                <Lock size={12} />
+              </div>
+            )}
+
+            <div className={`w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 ${item.iconBg}`}>
               {item.icon}
             </div>
-            <span className="text-sm font-medium text-slate-300 group-hover:text-white transition-colors">{item.label}</span>
-          </button>
+
+            <div className="min-w-0 flex-1">
+              <h4 className="text-xs sm:text-sm font-extrabold text-slate-800 tracking-tight uppercase group-hover:text-blue-600 transition-colors truncate">
+                {item.label}
+              </h4>
+              <p className="text-[10px] sm:text-[11px] text-slate-400 font-medium truncate mt-0.5">
+                {item.subtitle}
+              </p>
+            </div>
+          </motion.button>
         ))}
       </div>
 
@@ -1107,30 +1888,33 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
 
 
       {showPasswordModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-6">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-white/95 border border-slate-200/80 rounded-3xl w-full max-w-sm p-6 shadow-2xl backdrop-blur-xl text-slate-800">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                <Lock size={20} className="text-amber-400" /> Keamanan Tambahan
+              <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+                <span className="p-1.5 rounded-xl bg-amber-50 text-amber-500 border border-amber-200/60">
+                  <Lock size={18} />
+                </span>
+                Keamanan Tambahan
               </h3>
-              <button onClick={() => setShowPasswordModal(null)} className="text-slate-400 hover:text-white">✕</button>
+              <button onClick={() => setShowPasswordModal(null)} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">✕</button>
             </div>
             
-            <p className="text-slate-400 text-sm mb-4">Masukkan kata sandi untuk mengakses menu ini.</p>
+            <p className="text-slate-500 text-xs sm:text-sm mb-4">Masukkan kata sandi untuk mengakses menu ini.</p>
             
             <input 
               type="password" 
               value={passwordInput}
               onChange={e => { setPasswordInput(e.target.value); setPasswordError(false); }}
               onKeyDown={e => { if (e.key === 'Enter') verifyPassword(); }}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none mb-2"
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-900 focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100 outline-none mb-2 text-sm transition-all"
               placeholder="Kata Sandi Admin"
               autoFocus
             />
 
             {show2FAField && (
               <div className="mt-2 mb-2 animate-fadeIn">
-                <label className="text-xs text-indigo-300 font-semibold block mb-1">
+                <label className="text-xs text-indigo-600 font-bold block mb-1">
                   🔑 2FA Authenticator Code (6-digit)
                 </label>
                 <input
@@ -1139,25 +1923,25 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
                   value={totpInput}
                   onChange={e => { setTotpInput(e.target.value); setPasswordError(false); }}
                   onKeyDown={e => { if (e.key === 'Enter') verifyPassword(); }}
-                  className="w-full bg-slate-950 border border-indigo-500/50 rounded-lg p-3 text-white tracking-widest text-center font-mono font-bold focus:border-indigo-400 outline-none"
+                  className="w-full bg-slate-50 border border-indigo-200 rounded-xl p-3 text-slate-900 tracking-widest text-center font-mono font-bold focus:border-indigo-500 focus:bg-white outline-none text-base"
                   placeholder="000000"
                   autoFocus
                 />
               </div>
             )}
 
-            {passwordError && <p className="text-red-400 text-xs mb-4">{errorMessage || 'Kata sandi salah!'}</p>}
+            {passwordError && <p className="text-rose-500 text-xs mb-4 font-semibold">{errorMessage || 'Kata sandi salah!'}</p>}
             
             <div className="flex gap-3 mt-6">
                <button 
                  onClick={() => setShowPasswordModal(null)}
-                 className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-colors"
+                 className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer active:scale-95"
                >
                  Batal
                </button>
                <button 
                  onClick={verifyPassword}
-                 className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
+                 className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm active:scale-95"
                >
                  Buka Akses
                </button>
@@ -1165,6 +1949,56 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
           </div>
         </div>
       )}
+
+      {/* Terminal Logout Overlay Animation */}
+      <AnimatePresence>
+        {isLoggingOut && (
+          <motion.div 
+            className="fixed inset-0 z-50 bg-[#050914] flex flex-col p-8 font-mono text-cyan-500 shadow-[inset_0_0_100px_rgba(6,182,212,0.1)]"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            {/* Terminal Header */}
+            <div className="flex justify-between items-center border-b border-cyan-900/50 pb-4 mb-6">
+              <div className="text-xs tracking-[0.3em] uppercase">E4 STORE - System Terminal</div>
+              <div className="flex gap-2">
+                <div className="w-3 h-3 rounded-full bg-cyan-900 animate-pulse"></div>
+                <div className="w-3 h-3 rounded-full bg-cyan-900"></div>
+                <div className="w-3 h-3 rounded-full bg-cyan-900"></div>
+              </div>
+            </div>
+            
+            {/* Terminal Logs */}
+            <div className="flex-1 overflow-hidden flex flex-col justify-end">
+              {logoutLogs.map((log, idx) => (
+                <motion.div 
+                  key={idx}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ type: "spring", stiffness: 300, damping: 20 }}
+                  className="mb-2 text-sm md:text-lg flex gap-3"
+                >
+                  <span className="text-cyan-700">[{new Date().toISOString().split('T')[1].substring(0,8)}]</span>
+                  <span className={log?.includes('REVOKED') || log?.includes('GOODBYE') ? 'text-cyan-300 font-bold' : ''}>
+                    {log}
+                  </span>
+                </motion.div>
+              ))}
+              {/* Blinking Cursor */}
+              <motion.div
+                animate={{ opacity: [1, 0] }}
+                transition={{ repeat: Infinity, duration: 0.8 }}
+                className="w-3 h-5 bg-cyan-500 mt-2"
+              ></motion.div>
+            </div>
+            
+            {/* Grid Overlay for CRT effect */}
+            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_4px,3px_100%] opacity-20"></div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

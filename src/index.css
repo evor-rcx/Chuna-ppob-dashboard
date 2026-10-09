@@ -1,18 +1,7 @@
 @import "tailwindcss";
 
 html, body {
-  background-color: #0a0f1d;
-  color: #e2e8f0;
+  background-color: #f8fafc;
+  color: #1e293b;
   min-height: 100vh;
-}
-
-html.theme-light {
-  filter: invert(1) hue-rotate(180deg);
-}
-
-html.theme-light img,
-html.theme-light video,
-html.theme-light canvas,
-html.theme-light [data-no-invert] {
-  filter: invert(1) hue-rotate(180deg);
 }

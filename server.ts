@@ -1394,11 +1394,15 @@ function readDB() {
   if (!db.waProfilePhotos) {
     db.waProfilePhotos = {};
   }
+  if (!db.recentWaMessages) {
+    db.recentWaMessages = [];
+  }
   return db;
 }
 function writeDB(data: any) {
   if (!data.waProfiles) data.waProfiles = {};
   if (!data.waProfilePhotos) data.waProfilePhotos = {};
+  if (!data.recentWaMessages) data.recentWaMessages = [];
   try {
     securitySuite.auditDatabaseIntegrity(data);
   } catch (e) {}
@@ -3703,7 +3707,35 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
 
   // --- WA Bot API Routes ---
   app.get("/api/wa/status", (req, res) => {
-    res.json({ status: waStatus, pairingCode: waPairingCode });
+    res.json({ status: waStatus, pairingCode: waPairingCode, phone: globalWaPhoneNumber });
+  });
+
+  app.get("/api/wa/messages", (req, res) => {
+    const messages = db.recentWaMessages || [];
+    const unreadCount = messages.filter((m: any) => !m.isRead).length;
+    res.json({
+      success: true,
+      messages: messages.slice(0, 15),
+      unreadCount
+    });
+  });
+
+  app.post("/api/wa/messages/mark-read", express.json(), (req, res) => {
+    const { id } = req.body || {};
+    if (db.recentWaMessages && Array.isArray(db.recentWaMessages)) {
+      if (id) {
+        db.recentWaMessages.forEach((m: any) => {
+          if (m.id === id) m.isRead = true;
+        });
+      } else {
+        db.recentWaMessages.forEach((m: any) => {
+          m.isRead = true;
+        });
+      }
+      writeDB(db);
+    }
+    const unreadCount = (db.recentWaMessages || []).filter((m: any) => !m.isRead).length;
+    res.json({ success: true, unreadCount });
   });
 
   app.post("/api/wa/reset", async (req, res) => {
@@ -3913,6 +3945,43 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
         // 3. Simpan Profil Pengirim (Nama & Foto)
         if (pushName) {
           saveWaProfile(senderJid, pushName);
+        }
+
+        // 4. Catat Pesan Masuk untuk Notifikasi Sistem (Real-time Incoming Chat Reader)
+        if (!msgItem.key?.fromMe && msgItem.message) {
+          const rawText = msgItem.message.conversation ||
+            msgItem.message.extendedTextMessage?.text ||
+            msgItem.message.imageMessage?.caption ||
+            msgItem.message.videoMessage?.caption ||
+            msgItem.message.documentMessage?.caption ||
+            (msgItem.message.imageMessage ? "📸 [Foto / Gambar Masuk]" : "") ||
+            (msgItem.message.audioMessage ? "🎙️ [Pesan Suara / VN]" : "") ||
+            (msgItem.message.stickerMessage ? "👾 [Stiker]" : "") ||
+            (msgItem.message.locationMessage ? "📍 [Lokasi]" : "") ||
+            (msgItem.message.contactMessage ? "👤 [Kontak]" : "") ||
+            "Pesan masuk";
+
+          const cleanSender = normalizeWaNumber(senderJid);
+          const name = pushName || (db.waProfiles && db.waProfiles[cleanSender]) || (cleanSender ? `+${cleanSender}` : 'Pelanggan WA');
+          const msgId = String(msgItem.key?.id || `${Date.now()}-${Math.random()}`);
+
+          if (!db.recentWaMessages) db.recentWaMessages = [];
+          const exists = db.recentWaMessages.some((item: any) => item.id === msgId);
+          if (!exists && rawText) {
+            db.recentWaMessages.unshift({
+              id: msgId,
+              senderJid,
+              senderNumber: cleanSender,
+              senderName: name,
+              text: String(rawText).trim().substring(0, 160),
+              timestamp: msgItem.messageTimestamp ? Number(msgItem.messageTimestamp) * 1000 : Date.now(),
+              isRead: false
+            });
+            if (db.recentWaMessages.length > 50) {
+              db.recentWaMessages = db.recentWaMessages.slice(0, 50);
+            }
+            writeDB(db);
+          }
         }
       }
       const msg = m.messages[0];

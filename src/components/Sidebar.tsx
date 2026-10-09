@@ -13,24 +13,42 @@ const Clock = () => {
     return () => clearInterval(timer);
   }, []);
   
-  const hours = time.getHours().toString().padStart(2, '0');
-  const minutes = time.getMinutes().toString().padStart(2, '0');
-  const hari = ['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'];
-  const bulan = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Ags','Sep','Okt','Nov','Des'];
-  const dateString = `${hari[time.getDay()]}, ${time.getDate()} ${bulan[time.getMonth()]} ${time.getFullYear()}`;
+  const timeOptions: Intl.DateTimeFormatOptions = {
+    timeZone: 'Asia/Makassar',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  };
+  const timeStr = new Intl.DateTimeFormat('id-ID', timeOptions).format(time).replace(/\./g, ':');
+
+  const dateOptions: Intl.DateTimeFormatOptions = {
+    timeZone: 'Asia/Makassar',
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric'
+  };
+  const dateString = new Intl.DateTimeFormat('id-ID', dateOptions).format(time);
   const holidayInfo = getHolidayInfo(time);
 
   return (
-    <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-5 relative overflow-hidden">
-      <div className="text-4xl font-light text-white tracking-tighter">{hours}:{minutes}</div>
-      <div className="text-xs uppercase tracking-widest text-slate-400 mt-1">{dateString}</div>
+    <div className="bg-white/95 border border-slate-100 rounded-2xl p-4 sm:p-5 shadow-xs relative overflow-hidden">
+      <div className="flex items-baseline gap-2">
+        <span className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight font-mono">{timeStr}</span>
+        <span className="text-xs font-bold text-slate-500 font-sans">WITA</span>
+      </div>
+      <div className="text-xs text-slate-500 font-medium mt-1">{dateString}</div>
       {holidayInfo && (
-        <div className={`mt-3 pt-3 border-t border-slate-700/50 text-xs font-medium tracking-wide flex items-center gap-2 ${holidayInfo.isToday ? 'text-amber-400' : 'text-slate-500'}`}>
-          <span className="relative flex h-2 w-2">
-            {holidayInfo.isToday && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>}
-            <span className={`relative inline-flex rounded-full h-2 w-2 ${holidayInfo.isToday ? 'bg-amber-500' : 'bg-slate-600'}`}></span>
-          </span>
-          {holidayInfo.text}
+        <div className={`mt-3 pt-2.5 border-t border-slate-100 text-xs font-semibold flex items-center gap-1.5 ${holidayInfo.isToday ? 'text-blue-600' : 'text-slate-500'}`}>
+          <span>🇮🇩</span>
+          <span>{holidayInfo.text}</span>
+          {holidayInfo.isToday && (
+            <span className="relative flex h-2 w-2 ml-auto">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+            </span>
+          )}
         </div>
       )}
     </div>
@@ -82,7 +100,7 @@ export function Sidebar() {
       "PURGING SESSION DATA...",
       "ENCRYPTING LOCAL STORE...",
       "ACCESS REVOKED.",
-      "GOODBYE, OWNER EKO PRASETYO NUGROHO."
+      "GOODBYE, OWNER E4 STORE."
     ];
 
     let currentLogIndex = 0;
@@ -103,43 +121,50 @@ export function Sidebar() {
 
   return (
     <>
-      <aside className="w-full md:w-72 border-r border-slate-800 bg-[#0f172a]/50 p-6 flex flex-col gap-6 md:min-h-screen">
-        <div className="flex items-center gap-3 mb-2">
-          <div className="w-16 h-16 aspect-square rounded-2xl overflow-hidden flex items-center justify-center relative bg-slate-800/40 border border-slate-700/50 shadow-md">
-            <video 
-              src="/logo.mp4" 
-              poster="/logo.webp"
-              autoPlay 
-              loop 
-              muted 
-              playsInline 
-              className="w-full h-full object-cover pointer-events-none"
-              onError={(e) => {
-                const parent = e.currentTarget.parentElement;
-                if (parent) {
-                  const img = document.createElement('img');
-                  img.src = '/logo.webp';
-                  img.className = 'w-full h-full object-cover pointer-events-none';
-                  img.onerror = () => { img.src = '/logo.gif'; };
-                  parent.replaceChild(img, e.currentTarget);
-                }
-              }}
-            />
+      <aside className="w-full md:w-80 border border-slate-200/80 bg-white/90 p-5 sm:p-6 flex flex-col gap-5 md:min-h-screen rounded-3xl shadow-xl backdrop-blur-xl mb-4 md:mb-0 md:mr-6 text-slate-800 shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="w-14 h-14 sm:w-16 sm:h-16 aspect-square rounded-full p-0.5 bg-gradient-to-tr from-sky-400 via-blue-500 to-indigo-500 shadow-md flex items-center justify-center">
+            <div className="w-full h-full rounded-full overflow-hidden bg-white flex items-center justify-center relative">
+              <video 
+                src="/logo.mp4" 
+                poster="/logo.webp"
+                autoPlay 
+                loop 
+                muted 
+                playsInline 
+                className="w-full h-full object-cover pointer-events-none"
+                onError={(e) => {
+                  const parent = e.currentTarget.parentElement;
+                  if (parent) {
+                    const img = document.createElement('img');
+                    img.src = '/logo.webp';
+                    img.className = 'w-full h-full object-cover pointer-events-none';
+                    img.onerror = () => { img.src = '/logo.gif'; };
+                    parent.replaceChild(img, e.currentTarget);
+                  }
+                }}
+              />
+            </div>
           </div>
-          <h1 className="text-3xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-sky-400 via-indigo-400 to-purple-500 drop-shadow-md">STORE</h1>
+          <div>
+            <p className="text-xs text-slate-500 font-medium">Halo, Owner 👋</p>
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900">E4 STORE</h1>
+          </div>
         </div>
+
         <Clock />
-        <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-4 sm:p-5">
+
+        <div className="bg-white/95 border border-slate-100 rounded-2xl p-4 sm:p-5 shadow-xs">
           {/* Sub-header with Tab Selector: Armbian/HW vs PPOB */}
-          <div className="flex items-center justify-between mb-3 border-b border-slate-700/40 pb-2">
-            <div className="flex items-center gap-1">
+          <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
+            <div className="flex items-center gap-1 bg-slate-100/80 p-0.5 rounded-full">
               <button
                 type="button"
                 onClick={() => setStatusView('hardware')}
-                className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                className={`px-3 py-1 rounded-full text-[10px] font-extrabold transition-all cursor-pointer ${
                   statusView === 'hardware'
-                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
                 STB / HW
@@ -147,10 +172,10 @@ export function Sidebar() {
               <button
                 type="button"
                 onClick={() => setStatusView('ppob')}
-                className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                className={`px-3 py-1 rounded-full text-[10px] font-extrabold transition-all cursor-pointer ${
                   statusView === 'ppob'
-                    ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
                 PPOB
@@ -163,50 +188,40 @@ export function Sidebar() {
           </div>
 
           {statusView === 'hardware' ? (
-            <ServerHardwareWidget compact={true} />
+            <ServerHardwareWidget variant="modern_glass" />
           ) : (
-            <div>
-              <div className="flex justify-between items-center mb-3">
-                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Status Sistem PPOB</span>
-                <span className={`flex h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></span>
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Status Digiflazz</span>
+                <span className={`text-xs font-bold ${isConnected ? 'text-emerald-600' : 'text-rose-500'}`}>
+                  {isConnected ? 'Connected' : 'Disconnected'}
+                </span>
               </div>
-              <div className="h-1.5 w-full bg-slate-700 rounded-full overflow-hidden">
-                <div className={`h-full w-[100%] ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+              <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                <div className={`h-full ${isConnected ? 'bg-emerald-500 w-full' : 'bg-rose-500 w-1/4'}`}></div>
               </div>
-              <div className="flex justify-between items-center mt-2">
-                <p className="text-[10px] text-slate-500">Koneksi Pusat: {isConnected ? 'Stable' : 'Disconnected'}</p>
-              </div>
-              
-              <div className="mt-3 pt-3 border-t border-slate-700/40 flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-[10px] font-semibold text-indigo-300">
+              <div className="flex justify-between items-center text-xs text-slate-500 font-medium pt-2 border-t border-slate-100">
+                <div className="flex items-center gap-1.5 text-indigo-600 font-bold text-[10px]">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
                   SHIELD: EGIS • NYX • ANCHOR
                 </div>
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30">
+                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600 font-bold border border-emerald-200/60">
                   ACTIVE
                 </span>
               </div>
             </div>
           )}
         </div>
-        <div className="bg-gradient-to-br from-sky-600 to-indigo-700 rounded-2xl p-5 shadow-lg shadow-sky-900/20">
-          <div className="text-xs text-sky-100 opacity-80 uppercase tracking-widest">Dasbord Pengaturan Owner</div>
-          <motion.div 
-            animate={{ 
-              backgroundPosition: ["0% 50%", "100% 50%", "0% 50%"],
-            }}
-            transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-            className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-white to-yellow-400 mt-1 drop-shadow-[0_0_8px_rgba(253,224,71,0.6)] tracking-tighter"
-            style={{ backgroundSize: "200% auto" }}
-          >
+
+        <div className="bg-white/95 border border-slate-100 rounded-2xl p-4 shadow-sm flex flex-col items-center justify-center">
+          <span className="text-base font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600 font-mono">
             E4 STORE
-          </motion.div>
-          
+          </span>
           <button 
             onClick={handleLogout}
-            className="mt-6 w-full bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer"
+            className="mt-2.5 w-full px-4 py-1.5 text-xs font-bold tracking-wider text-rose-500 border border-rose-300 hover:bg-rose-50 rounded-xl transition-all cursor-pointer text-center active:scale-95"
           >
-            Logout
+            [ LOGOUT ]
           </button>
         </div>
       </aside>
