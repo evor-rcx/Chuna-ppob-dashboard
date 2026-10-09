@@ -610,7 +610,7 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
       />
 
       {/* 1. Header Atas (Top Bar): Avatar/Logo Bergerak + Sapaan & Bell Notifikasi */}
-      <div className="relative z-10 flex items-center justify-between pb-4 border-b border-slate-200/70">
+      <div className={`relative flex items-center justify-between pb-4 border-b border-slate-200/70 ${showNotifModal ? 'z-50' : 'z-20'}`}>
         <div className="flex items-center gap-3">
           {/* Wadah Lingkaran Ikon Bergerak E4 Store */}
           <div className="relative w-14 h-14 sm:w-16 sm:h-16 aspect-square rounded-full p-0.5 bg-gradient-to-tr from-sky-400 via-blue-500 to-indigo-500 shadow-md flex items-center justify-center">
@@ -675,46 +675,55 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
             )}
           </motion.button>
 
-          {/* Popup Modal Notifikasi Ringkas & Real-Time */}
+          {/* Popup Dropdown Notifikasi Sistem (Melayang di Pojok Kanan Atas di Bawah Lonceng) */}
           <AnimatePresence>
             {showNotifModal && (
-              <motion.div
-                initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                className="absolute right-0 mt-2 w-80 sm:w-96 max-w-[95vw] bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-2xl shadow-2xl p-4 z-50 text-xs space-y-3"
-              >
-                {/* Header Modal */}
-                <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-                  <div className="flex items-center gap-2">
-                    <div className="p-1.5 rounded-lg bg-blue-50 text-blue-600 border border-blue-100">
-                      <Bell size={15} />
+              <>
+                {/* Backdrop Transparan Bening (Click Outside to Close, Tanpa Menggelapkan Layar) */}
+                <div
+                  className="fixed inset-0 z-40 bg-transparent"
+                  onClick={() => setShowNotifModal(false)}
+                />
+
+                {/* Dropdown Melayang di Pojok Kanan Atas */}
+                <motion.div
+                  initial={{ opacity: 0, y: -8, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -8, scale: 0.95 }}
+                  transition={{ duration: 0.18, ease: "easeOut" }}
+                  className="absolute right-0 top-12 z-50 w-[calc(100vw-2.5rem)] max-w-sm sm:w-96 bg-white border border-slate-200/90 rounded-3xl shadow-2xl p-4 text-xs space-y-3 max-h-[75vh] overflow-y-auto"
+                >
+                  {/* Header Dropdown */}
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-2 rounded-xl bg-blue-50 text-blue-600 border border-blue-100/80 shadow-2xs">
+                        <Bell size={17} />
+                      </div>
+                      <div>
+                        <h4 className="font-extrabold text-slate-800 text-sm leading-tight">Notifikasi Sistem</h4>
+                        <p className="text-[10px] text-slate-500 flex items-center gap-1 font-medium mt-0.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
+                          Real-time STB Server
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <h4 className="font-bold text-slate-800 text-sm leading-tight">Notifikasi Sistem</h4>
-                      <p className="text-[10px] text-slate-500 flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
-                        Real-time STB Server
-                      </p>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => fetchSystemNotifications()}
+                        className={`p-2 rounded-xl text-slate-400 hover:text-blue-600 hover:bg-slate-100 transition-all cursor-pointer ${isFetchingNotif ? 'animate-spin text-blue-600' : ''}`}
+                        title="Refresh Data Segar"
+                      >
+                        <RefreshCw size={15} />
+                      </button>
+                      <button
+                        onClick={() => setShowNotifModal(false)}
+                        className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer text-sm font-bold leading-none"
+                        title="Tutup"
+                      >
+                        ✕
+                      </button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => fetchSystemNotifications()}
-                      className={`p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-slate-100 transition-all cursor-pointer ${isFetchingNotif ? 'animate-spin text-blue-600' : ''}`}
-                      title="Refresh Data Segar"
-                    >
-                      <RefreshCw size={14} />
-                    </button>
-                    <button
-                      onClick={() => setShowNotifModal(false)}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
-                      title="Tutup"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
 
                 {/* Switcher Tab Segmented (Status Layanan vs Pesan Masuk Bot WA) */}
                 <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100/80 rounded-xl border border-slate-200/70">
@@ -974,8 +983,9 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
                   </button>
                 </div>
               </motion.div>
-            )}
-          </AnimatePresence>
+            </>
+          )}
+        </AnimatePresence>
         </div>
       </div>
 
