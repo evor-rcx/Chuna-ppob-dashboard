@@ -121,10 +121,10 @@ export function Sidebar() {
 
   return (
     <>
-      <aside className="w-full md:w-80 border border-slate-200/80 bg-white/90 p-5 sm:p-6 flex flex-col gap-5 md:min-h-screen rounded-3xl shadow-xl backdrop-blur-xl mb-4 md:mb-0 md:mr-6 text-slate-800 shrink-0">
+      <aside className="w-full md:w-80 border border-slate-200/80 bg-white p-5 sm:p-6 flex flex-col gap-5 md:min-h-screen rounded-3xl shadow-sm mb-4 md:mb-0 md:mr-6 text-slate-800 shrink-0 stb-accelerated-scroll">
         <div className="flex items-center gap-3">
-          <div className="w-14 h-14 sm:w-16 sm:h-16 aspect-square rounded-full p-0.5 bg-gradient-to-tr from-sky-400 via-blue-500 to-indigo-500 shadow-md flex items-center justify-center">
-            <div className="w-full h-full rounded-full overflow-hidden bg-white flex items-center justify-center relative">
+          <div className="w-14 h-14 sm:w-16 sm:h-16 aspect-square rounded-full p-0.5 bg-gradient-to-tr from-sky-400 via-blue-500 to-indigo-500 shadow-md flex items-center justify-center transform-gpu">
+            <div className="w-full h-full rounded-full overflow-hidden bg-white flex items-center justify-center relative transform-gpu">
               <video 
                 src="/logo.mp4" 
                 poster="/logo.webp"
@@ -132,7 +132,7 @@ export function Sidebar() {
                 loop 
                 muted 
                 playsInline 
-                className="w-full h-full object-cover pointer-events-none"
+                className="w-full h-full object-cover pointer-events-none transform-gpu will-change-transform"
                 onError={(e) => {
                   const parent = e.currentTarget.parentElement;
                   if (parent) {

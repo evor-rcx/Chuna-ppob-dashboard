@@ -9,7 +9,7 @@ interface PageContainerProps {
 
 export function PageContainer({ title, onBack, children }: PageContainerProps) {
   return (
-    <div className="flex-1 bg-white/95 border border-slate-200/80 rounded-[32px] overflow-hidden flex flex-col shadow-xl backdrop-blur-xl animate-in fade-in slide-in-from-bottom-2 duration-300 text-slate-800 min-h-[80vh]">
+    <div className="flex-1 bg-white border border-slate-200/80 rounded-[32px] overflow-hidden flex flex-col shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-300 text-slate-800 min-h-[80vh] stb-accelerated-scroll">
       <div className="px-6 py-4 border-b border-slate-200/70 flex items-center justify-between bg-gradient-to-r from-sky-50/80 via-white to-indigo-50/50">
         <div className="flex items-center gap-3">
           <button 

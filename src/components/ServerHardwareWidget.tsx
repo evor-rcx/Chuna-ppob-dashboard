@@ -223,7 +223,7 @@ export function ServerHardwareWidget({ compact = false, variant, className = '' 
     const uptimeStr = stats?.uptime?.formatted || '5 hari 12 jam';
 
     return (
-      <div className={`bg-white/95 border border-slate-100 rounded-3xl p-5 shadow-[0_4px_20px_rgba(0,0,0,0.03)] backdrop-blur-md space-y-4 ${className}`}>
+      <div className={`bg-white border border-slate-200/80 rounded-3xl p-5 shadow-sm space-y-4 ${className}`}>
         {/* Row 1: CPU & SUHU */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {/* CPU */}
@@ -319,7 +319,7 @@ export function ServerHardwareWidget({ compact = false, variant, className = '' 
 
         {/* Detailed Modal */}
         {showDetailModal && stats && (
-          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
             <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-xl p-5 space-y-4 max-h-[90vh] overflow-y-auto">
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <div className="flex items-center gap-2">
@@ -527,7 +527,7 @@ export function ServerHardwareWidget({ compact = false, variant, className = '' 
 
         {/* Detailed Modal if clicked from sidebar */}
         {showDetailModal && (
-          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4">
             <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-xl p-5 space-y-4 max-h-[90vh] overflow-y-auto">
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <div className="flex items-center gap-2">

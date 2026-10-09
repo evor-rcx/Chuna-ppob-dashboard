@@ -1,4 +1,4 @@
-import { BarChart3, ShoppingCart, FileText, Settings, Bot, Send, Users, Store, Lock, ShieldAlert, Sparkles, CheckCircle2, AlertCircle, RefreshCw, ZoomIn, Copy, Check, Crown, Search, Layers, Bell, Eye, EyeOff, MessageSquare, Clock, ArrowRight, ExternalLink, CheckCheck } from 'lucide-react';
+import { BarChart3, ShoppingCart, FileText, Settings, Bot, Send, Users, Store, Lock, ShieldAlert, Sparkles, CheckCircle2, AlertCircle, RefreshCw, ZoomIn, Copy, Check, Crown, Search, Layers, Bell, Eye, EyeOff, MessageSquare, Clock, ArrowRight, ExternalLink, CheckCheck, Mic, Volume2, X, Loader2 } from 'lucide-react';
 import { Page } from '../../types';
 import { ReactNode, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -51,13 +51,29 @@ export function Menu({ onNavigate }: MenuProps) {
   // Incoming WhatsApp Messages
   const [waMessages, setWaMessages] = useState<Array<{
     id: string;
+    senderJid?: string;
     senderNumber: string;
     senderName: string;
     text: string;
     timestamp: number;
     isRead: boolean;
+    replied?: boolean;
   }>>([]);
   const [unreadWaCount, setUnreadWaCount] = useState<number>(0);
+
+  // Quick WA Reply State (Voice Note / VN & Text)
+  const [replyTargetMsg, setReplyTargetMsg] = useState<{
+    id: string;
+    senderJid: string;
+    senderName: string;
+    senderNumber: string;
+    text: string;
+  } | null>(null);
+  const [replyMode, setReplyMode] = useState<'vn' | 'text'>('vn');
+  const [replyText, setReplyText] = useState<string>('');
+  const [isSendingReply, setIsSendingReply] = useState<boolean>(false);
+  const [isPreviewingAudio, setIsPreviewingAudio] = useState<boolean>(false);
+  const [replyAlert, setReplyAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const fetchSystemNotifications = async () => {
     setIsFetchingNotif(true);
@@ -207,6 +223,110 @@ export function Menu({ onNavigate }: MenuProps) {
     } catch (e) {}
     setShowNotifModal(false);
     onNavigate('bot');
+  };
+
+  const handleOpenReplyDialog = (msg: any) => {
+    setReplyTargetMsg({
+      id: msg.id,
+      senderJid: msg.senderJid || (msg.senderNumber ? `${msg.senderNumber}@s.whatsapp.net` : ''),
+      senderName: msg.senderName || 'Pelanggan',
+      senderNumber: msg.senderNumber || '',
+      text: msg.text || ''
+    });
+    setReplyText('');
+    setReplyAlert(null);
+    setReplyMode('vn');
+    // Also mark read quietly
+    try {
+      fetch('/api/wa/messages/mark-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: msg.id })
+      });
+      setWaMessages(prev => prev.map(m => m.id === msg.id ? { ...m, isRead: true } : m));
+      setUnreadWaCount(prev => Math.max(0, prev - 1));
+    } catch (e) {}
+  };
+
+  const handlePreviewAudio = async () => {
+    if (!replyTargetMsg || !replyText.trim()) return;
+    setIsPreviewingAudio(true);
+    const spokenGreeting = `Halo kakk ${replyTargetMsg.senderName}, ${replyText.trim()}`;
+    try {
+      const res = await fetch('/api/wa/tts-preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: spokenGreeting })
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const audioUrl = URL.createObjectURL(blob);
+        const audio = new Audio(audioUrl);
+        audio.onended = () => setIsPreviewingAudio(false);
+        audio.onerror = () => setIsPreviewingAudio(false);
+        await audio.play();
+        return;
+      }
+    } catch (e) {
+      console.warn('Backend TTS preview failed, using Web Speech fallback', e);
+    }
+
+    // Web Speech API fallback
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(spokenGreeting);
+      utterance.lang = 'id-ID';
+      utterance.rate = 1.05;
+      utterance.onend = () => setIsPreviewingAudio(false);
+      utterance.onerror = () => setIsPreviewingAudio(false);
+      window.speechSynthesis.speak(utterance);
+    } else {
+      setIsPreviewingAudio(false);
+    }
+  };
+
+  const handleSendReply = async () => {
+    if (!replyTargetMsg || !replyText.trim()) return;
+    setIsSendingReply(true);
+    setReplyAlert(null);
+    try {
+      const res = await fetch('/api/wa/send-reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          msgId: replyTargetMsg.id,
+          senderJid: replyTargetMsg.senderJid,
+          senderName: replyTargetMsg.senderName,
+          replyText: replyText.trim(),
+          mode: replyMode
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setReplyAlert({
+          type: 'success',
+          message: data.message || 'Pesan berhasil dikirim ke WhatsApp!'
+        });
+        setWaMessages(prev => prev.map(m => m.id === replyTargetMsg.id ? { ...m, isRead: true, replied: true } : m));
+        setTimeout(() => {
+          setReplyTargetMsg(null);
+          setReplyText('');
+          setReplyAlert(null);
+        }, 1600);
+      } else {
+        setReplyAlert({
+          type: 'error',
+          message: data.error || 'Gagal mengirim balasan ke WhatsApp'
+        });
+      }
+    } catch (err: any) {
+      setReplyAlert({
+        type: 'error',
+        message: 'Terjadi kesalahan koneksi ke server'
+      });
+    } finally {
+      setIsSendingReply(false);
+    }
   };
 
   const formatRelativeTime = (ts: number) => {
@@ -593,28 +713,20 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
   const isConnected = digiflazzStatus?.includes('Connected');
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-sky-50/70 via-slate-50 to-indigo-50/40 rounded-[32px] p-4 sm:p-6 md:p-8 text-slate-800 shadow-xl border border-slate-200/70 relative overflow-hidden backdrop-blur-xl animate-in fade-in duration-300">
+    <div className="min-h-screen bg-gradient-to-b from-sky-50/70 via-slate-50 to-indigo-50/40 rounded-[32px] p-4 sm:p-6 md:p-8 text-slate-800 shadow-sm border border-slate-200/80 relative overflow-hidden animate-in fade-in duration-300 stb-accelerated-scroll">
       {/* Background Dot Grid Overlay */}
       <div className="absolute inset-0 bg-[radial-gradient(#94a3b8_1px,transparent_1px)] [background-size:20px_20px] opacity-25 pointer-events-none" />
 
-      {/* Moving Ambient Aurora Orbs */}
-      <motion.div
-        animate={{ x: [0, 25, 0], y: [0, -20, 0] }}
-        transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
-        className="pointer-events-none absolute -top-24 -left-24 w-80 h-80 bg-sky-300/25 rounded-full blur-3xl"
-      />
-      <motion.div
-        animate={{ x: [0, -25, 0], y: [0, 25, 0] }}
-        transition={{ duration: 14, repeat: Infinity, ease: "easeInOut" }}
-        className="pointer-events-none absolute -bottom-24 -right-24 w-80 h-80 bg-indigo-300/25 rounded-full blur-3xl"
-      />
+      {/* Ambient Static Glows (Ringan, Halus & Hemat Daya untuk STB Armbian) */}
+      <div className="pointer-events-none absolute -top-24 -left-24 w-72 h-72 bg-sky-200/35 rounded-full pointer-events-none" />
+      <div className="pointer-events-none absolute -bottom-24 -right-24 w-72 h-72 bg-indigo-200/35 rounded-full pointer-events-none" />
 
       {/* 1. Header Atas (Top Bar): Avatar/Logo Bergerak + Sapaan & Bell Notifikasi */}
       <div className={`relative flex items-center justify-between pb-4 border-b border-slate-200/70 ${showNotifModal ? 'z-50' : 'z-20'}`}>
         <div className="flex items-center gap-3">
           {/* Wadah Lingkaran Ikon Bergerak E4 Store */}
-          <div className="relative w-14 h-14 sm:w-16 sm:h-16 aspect-square rounded-full p-0.5 bg-gradient-to-tr from-sky-400 via-blue-500 to-indigo-500 shadow-md flex items-center justify-center">
-            <div className="w-full h-full rounded-full overflow-hidden bg-white flex items-center justify-center relative">
+          <div className="relative w-14 h-14 sm:w-16 sm:h-16 aspect-square rounded-full p-0.5 bg-gradient-to-tr from-sky-400 via-blue-500 to-indigo-500 shadow-md flex items-center justify-center transform-gpu">
+            <div className="w-full h-full rounded-full overflow-hidden bg-white flex items-center justify-center relative transform-gpu">
               <video
                 src="/logo.mp4"
                 poster="/logo.webp"
@@ -622,7 +734,7 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
                 loop
                 muted
                 playsInline
-                className="w-full h-full object-cover pointer-events-none"
+                className="w-full h-full object-cover pointer-events-none transform-gpu will-change-transform"
                 onError={(e) => {
                   const parent = e.currentTarget.parentElement;
                   if (parent) {
@@ -657,7 +769,7 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
                 fetchSystemNotifications();
               }
             }}
-            className="relative p-2.5 rounded-full bg-white/95 border border-slate-200/80 shadow-xs hover:bg-slate-100 transition-colors cursor-pointer text-slate-700 active:scale-95"
+            className="relative p-2.5 rounded-full bg-white border border-slate-200/80 shadow-xs hover:bg-slate-100 transition-colors cursor-pointer text-slate-700 active:scale-95"
             title="Notifikasi Sistem"
           >
             <Bell size={20} className={totalAttentionCount > 0 ? 'text-blue-600' : 'text-slate-700'} />
@@ -957,12 +1069,23 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
                             {msg.text}
                           </div>
 
-                          <div className="mt-2 flex items-center justify-end">
+                          <div className="mt-2 flex items-center justify-between gap-1.5">
+                            {msg.replied ? (
+                              <span className="text-[10px] text-emerald-600 font-bold inline-flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/80">
+                                <CheckCheck size={11} /> Dibalas
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-slate-400">Pesan Masuk</span>
+                            )}
                             <button
-                              onClick={() => handleOpenWaChat(msg.id)}
-                              className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-[10px] inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs active:scale-95"
+                              onClick={() => {
+                                setShowNotifModal(false);
+                                handleOpenReplyDialog(msg);
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] inline-flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs active:scale-95"
                             >
-                              <span>Buka Chat / Balas</span>
+                              <Mic size={11} />
+                              <span>Balas Voice Note (VN)</span>
                               <ArrowRight size={10} />
                             </button>
                           </div>
@@ -1034,7 +1157,7 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
         <ServerHardwareWidget variant="modern_glass" />
 
         {/* Card Status Sistem PPOB Server (Terpadu di Tab STB / HW) */}
-        <div className="bg-white/95 border border-slate-200/80 rounded-3xl p-5 shadow-[0_4px_20px_rgba(0,0,0,0.03)] backdrop-blur-md space-y-3 transition-all hover:border-slate-300">
+        <div className="bg-white border border-slate-200/80 rounded-3xl p-5 shadow-sm space-y-3 transition-all hover:border-slate-300">
           <div className="flex justify-between items-center">
             <span className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-blue-500"></span>
@@ -1062,7 +1185,7 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
 
       {/* 5. Card Utama Saldo Digiflazz Besar dengan Efek Shimmer & Toggle Mata */}
       <div className="relative z-10 my-5">
-        <div className="rounded-[28px] p-6 bg-gradient-to-r from-blue-50/70 via-indigo-50/50 to-purple-50/70 border border-indigo-100/80 shadow-sm relative overflow-hidden backdrop-blur-md flex flex-col items-center justify-center text-center">
+        <div className="rounded-[28px] p-6 bg-gradient-to-r from-blue-50/80 via-indigo-50/60 to-purple-50/80 border border-indigo-100/90 shadow-sm relative overflow-hidden flex flex-col items-center justify-center text-center">
           {/* Gradient Shimmer Sweep Effect */}
           <motion.div
             animate={{ x: ['-100%', '200%'] }}
@@ -1102,7 +1225,7 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
             whileTap={{ scale: 0.98 }}
             transition={{ type: "spring", stiffness: 400, damping: 25 }}
             onClick={() => handleItemClick(item.id)}
-            className="bg-white/95 border border-slate-100/90 shadow-[0_2px_12px_rgba(0,0,0,0.03)] hover:shadow-lg hover:border-blue-200/80 p-3.5 sm:p-4 rounded-2xl flex items-center gap-3 transition-all cursor-pointer group relative overflow-hidden text-left backdrop-blur-sm"
+            className="bg-white border border-slate-200/80 shadow-xs hover:shadow-md hover:border-blue-200/80 p-3.5 sm:p-4 rounded-2xl flex items-center gap-3 transition-all cursor-pointer group relative overflow-hidden text-left"
           >
             {/* Ikon Gembok untuk Menu Sensitif */}
             {(item.id === 'produk' || item.id === 'konfig' || item.id === 'saldo' || item.id === 'bot' || item.id === 'gemini' || item.id === 'security') && (
@@ -1128,10 +1251,10 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
       </div>
 
       {/* Live Showcase Model Nota Pembayaran E4 Store */}
-      <div className="mt-10 bg-slate-900/80 border border-amber-500/30 rounded-3xl p-6 shadow-2xl backdrop-blur-md relative overflow-hidden">
-        {/* Soft Gold Background Ambient Glow */}
-        <div className="absolute -top-24 -right-24 w-80 h-80 bg-amber-500/10 rounded-full blur-3xl pointer-events-none"></div>
-        <div className="absolute -bottom-24 -left-24 w-80 h-80 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
+      <div className="mt-10 bg-slate-900 border border-amber-500/30 rounded-3xl p-6 shadow-xl relative overflow-hidden">
+        {/* Soft Gold Background Ambient Glow (Hemat Daya Tanpa Blur Berat) */}
+        <div className="absolute -top-24 -right-24 w-80 h-80 bg-amber-500/5 rounded-full pointer-events-none"></div>
+        <div className="absolute -bottom-24 -left-24 w-80 h-80 bg-emerald-500/5 rounded-full pointer-events-none"></div>
 
         <div className="relative z-10">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-800">
@@ -1716,13 +1839,13 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
                     />
                     
                     {/* Overlay hover hint */}
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 text-white font-semibold text-sm backdrop-blur-[2px]">
+                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 text-white font-semibold text-sm">
                       <ZoomIn size={22} className="text-amber-400" /> Klik untuk memperbesar
                     </div>
 
                     {/* Badge Status */}
                     <div className="absolute top-3 left-3">
-                      <span className={`px-3 py-1 rounded-full text-xs font-bold shadow-lg uppercase tracking-wider backdrop-blur-md ${
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold shadow-md uppercase tracking-wider ${
                         activeNotaTab === 'price-list'
                           ? 'bg-gradient-to-r from-orange-600 to-amber-500 text-white border border-orange-300/60 shadow-orange-500/30'
                           : activeNotaTab === 'royal'
@@ -1853,8 +1976,8 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
       {/* Zoom Modal */}
       {isZoomed && (
         <div 
-          onClick={() => setIsZoomed(false)}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn"
+          onClick={() => setIsZoomed(false)} 
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 animate-fadeIn"
         >
           <div 
             onClick={e => e.stopPropagation()} 
@@ -1898,8 +2021,8 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
 
 
       {showPasswordModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md animate-in fade-in duration-200">
-          <div className="bg-white/95 border border-slate-200/80 rounded-3xl w-full max-w-sm p-6 shadow-2xl backdrop-blur-xl text-slate-800">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 animate-in fade-in duration-200">
+          <div className="bg-white border border-slate-200/80 rounded-3xl w-full max-w-sm p-6 shadow-2xl text-slate-800">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
                 <span className="p-1.5 rounded-xl bg-amber-50 text-amber-500 border border-amber-200/60">
@@ -2007,6 +2130,227 @@ Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💪`;
             {/* Grid Overlay for CRT effect */}
             <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_4px,3px_100%] opacity-20"></div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal Popup Balas Chat WhatsApp (Pesan Suara / Voice Note PTT) */}
+      <AnimatePresence>
+        {replyTargetMsg && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/70">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              transition={{ duration: 0.18 }}
+              className="bg-white rounded-3xl shadow-2xl border border-slate-200/90 w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]"
+            >
+              {/* Header Modal */}
+              <div className="px-5 py-4 bg-linear-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white flex items-center justify-between shrink-0 shadow-xs">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
+                    <Mic size={18} className="text-white" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm tracking-wide">Balas Chat Pelanggan (Voice Note)</h3>
+                    <p className="text-[11px] text-emerald-100">Kirim pesan suara resmi WhatsApp dengan sapaan ramah</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setReplyTargetMsg(null)}
+                  className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/25 flex items-center justify-center transition-all cursor-pointer text-white/90 hover:text-white"
+                  title="Tutup Modal"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="p-5 overflow-y-auto space-y-4">
+                {/* 1. Detail Pengirim & Pesan Terakhir */}
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 font-bold text-xs flex items-center justify-center border border-emerald-200">
+                        {replyTargetMsg.senderName ? replyTargetMsg.senderName.charAt(0).toUpperCase() : 'W'}
+                      </div>
+                      <div>
+                        <div className="font-bold text-xs text-slate-800">
+                          {replyTargetMsg.senderName}
+                        </div>
+                        {replyTargetMsg.senderNumber && (
+                          <div className="text-[10px] text-slate-500 font-mono">
+                            +{replyTargetMsg.senderNumber}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded-full font-bold border border-emerald-200/60">
+                      Pelanggan WA
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-700 bg-white p-2.5 rounded-xl border border-slate-200/70 leading-relaxed italic">
+                    "{replyTargetMsg.text}"
+                  </div>
+                </div>
+
+                {/* 2. Pilihan Mode Balasan */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1.5">
+                    Metode Pengiriman:
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setReplyMode('vn')}
+                      className={`p-2.5 rounded-xl border flex items-center justify-center gap-2 font-bold text-xs transition-all cursor-pointer ${
+                        replyMode === 'vn'
+                          ? 'bg-emerald-50 border-emerald-500 text-emerald-800 shadow-2xs'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      <Mic size={15} className={replyMode === 'vn' ? 'text-emerald-600' : 'text-slate-400'} />
+                      <span>Pesan Suara (VN)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReplyMode('text')}
+                      className={`p-2.5 rounded-xl border flex items-center justify-center gap-2 font-bold text-xs transition-all cursor-pointer ${
+                        replyMode === 'text'
+                          ? 'bg-blue-50 border-blue-500 text-blue-800 shadow-2xs'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      <MessageSquare size={15} className={replyMode === 'text' ? 'text-blue-600' : 'text-slate-400'} />
+                      <span>Teks Biasa</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 3. Input Balasan & Otomatisasi Panggilan Ramah */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold text-slate-700">
+                      Kata-Kata Balasan Admin:
+                    </label>
+                    <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                      Otomatis: "Halo kakk {replyTargetMsg.senderName},"
+                    </span>
+                  </div>
+                  <textarea
+                    rows={3}
+                    value={replyText}
+                    onChange={(e) => setReplyText(e.target.value)}
+                    placeholder="Ketik apa yang ingin Anda balas di sini... (contoh: pesanan pulsa sudah berhasil masuk ya, terima kasih banyak)"
+                    className="w-full p-3 rounded-2xl border border-slate-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 text-xs text-slate-800 outline-none transition-all resize-none shadow-2xs"
+                  />
+                  
+                  {/* Live Preview Kalimat Lengkap */}
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/90 text-[11px] space-y-1">
+                    <span className="font-bold text-slate-500 text-[10px] uppercase tracking-wider block">
+                      {replyMode === 'vn' ? '🎙️ Kalimat yang Akan Diucapkan Suara VN:' : '💬 Pesan yang Akan Terkirim:'}
+                    </span>
+                    <p className="font-semibold text-slate-800 italic">
+                      "Halo kakk {replyTargetMsg.senderName}, {replyText.trim() || '...'}"
+                    </p>
+                  </div>
+                </div>
+
+                {/* 4. Fitur Preview Audio (Dengarkan Sebelum Kirim) */}
+                {replyMode === 'vn' && (
+                  <div className="flex items-center justify-between p-3 rounded-2xl bg-indigo-50/80 border border-indigo-200/80">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                        <Volume2 size={16} />
+                      </div>
+                      <div>
+                        <span className="font-bold text-indigo-950 text-xs block">Dengarkan Sebelum Kirim</span>
+                        <span className="text-indigo-600 text-[10px]">Tes intonasi suara AI perempuan ramah</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={isPreviewingAudio || !replyText.trim()}
+                      onClick={handlePreviewAudio}
+                      className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-[11px] inline-flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs active:scale-95"
+                    >
+                      {isPreviewingAudio ? (
+                        <>
+                          <Loader2 size={12} className="animate-spin" />
+                          <span>Memutar Suara...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Volume2 size={12} />
+                          <span>Dengarkan Preview VN</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+
+                {/* Alert Respon */}
+                {replyAlert && (
+                  <div className={`p-3 rounded-xl text-xs flex items-start gap-2 ${
+                    replyAlert.type === 'success'
+                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                      : 'bg-rose-50 text-rose-800 border border-rose-200'
+                  }`}>
+                    {replyAlert.type === 'success' ? (
+                      <CheckCircle2 size={15} className="text-emerald-600 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertCircle size={15} className="text-rose-600 shrink-0 mt-0.5" />
+                    )}
+                    <span>{replyAlert.message}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer Aksi */}
+              <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReplyTargetMsg(null);
+                    onNavigate('bot');
+                  }}
+                  className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 underline cursor-pointer"
+                >
+                  Buka Menu Bot WA
+                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setReplyTargetMsg(null)}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-200 transition-all cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSendingReply || !replyText.trim()}
+                    onClick={handleSendReply}
+                    className={`px-5 py-2 rounded-xl text-xs font-bold text-white transition-all cursor-pointer shadow-md inline-flex items-center gap-1.5 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
+                      replyMode === 'vn'
+                        ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20'
+                        : 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/20'
+                    }`}
+                  >
+                    {isSendingReply ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        <span>{replyMode === 'vn' ? 'Membuat Audio & Mengirim VN...' : 'Mengirim Teks...'}</span>
+                      </>
+                    ) : (
+                      <>
+                        {replyMode === 'vn' ? <Mic size={14} /> : <Send size={14} />}
+                        <span>{replyMode === 'vn' ? 'Kirim Voice Note (PTT)' : 'Kirim Teks Balasan'}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

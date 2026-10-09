@@ -4,4 +4,17 @@ html, body {
   background-color: #f8fafc;
   color: #1e293b;
   min-height: 100vh;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}
+
+/* Akselerasi grafis pergeseran layar STB Armbian */
+* {
+  -webkit-font-smoothing: antialiased;
+}
+
+.stb-accelerated-scroll {
+  -webkit-overflow-scrolling: touch;
+  will-change: scroll-position;
+  transform: translateZ(0);
 }

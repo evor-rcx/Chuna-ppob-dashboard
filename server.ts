@@ -3738,6 +3738,157 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
     res.json({ success: true, unreadCount });
   });
 
+  // --- WA Bot Reply & Voice Note (TTS) API Routes ---
+  app.post("/api/wa/tts-preview", express.json(), async (req, res) => {
+    try {
+      const { text } = req.body || {};
+      if (!text || !String(text).trim()) {
+        return res.status(400).json({ success: false, error: "Teks tidak boleh kosong" });
+      }
+      const spokenText = transliterateForTts(String(text).trim()) || String(text).trim();
+      const tmpMp3 = path.join(process.cwd(), `tmp_prev_${Date.now()}_${Math.floor(Math.random() * 1000)}.mp3`);
+      try {
+        const tts = new EdgeTTS({ voice: 'id-ID-GadisNeural', lang: 'id-ID', outputFormat: 'audio-24khz-48kbitrate-mono-mp3', pitch: '+15Hz', rate: '+10%' });
+        await tts.ttsPromise(spokenText, tmpMp3);
+        if (fs.existsSync(tmpMp3)) {
+          const audioBuf = fs.readFileSync(tmpMp3);
+          try { fs.unlinkSync(tmpMp3); } catch (e) {}
+          res.setHeader("Content-Type", "audio/mpeg");
+          return res.send(audioBuf);
+        }
+      } catch (edgeErr) {
+        // Fallback to Google TTS
+        const cleanTxt = encodeURIComponent(spokenText.substring(0, 200));
+        const gUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=id&client=tw-ob&q=${cleanTxt}`;
+        const fRes = await fetch(gUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
+        if (fRes.ok) {
+          const ab = await fRes.arrayBuffer();
+          res.setHeader("Content-Type", "audio/mpeg");
+          return res.send(Buffer.from(ab));
+        }
+      }
+      res.status(500).json({ success: false, error: "Gagal membuat audio suara" });
+    } catch (err: any) {
+      console.error("TTS preview error:", err);
+      res.status(500).json({ success: false, error: err.message || "Gagal membuat preview audio" });
+    }
+  });
+
+  app.post("/api/wa/send-reply", express.json(), async (req, res) => {
+    try {
+      const { msgId, senderJid, senderName, replyText, mode } = req.body || {};
+      if (!senderJid) {
+        return res.status(400).json({ success: false, error: "Nomor tujuan WhatsApp tidak valid" });
+      }
+      if (!replyText || !String(replyText).trim()) {
+        return res.status(400).json({ success: false, error: "Pesan balasan tidak boleh kosong" });
+      }
+
+      if (!waSocket || !waStatus.includes("Connected")) {
+        return res.status(503).json({ 
+          success: false, 
+          error: "WhatsApp Bot belum terhubung! Silakan aktifkan dan pairing bot terlebih dahulu di menu Bot WA." 
+        });
+      }
+
+      const rawName = String(senderName || "").trim();
+      const spokenName = transliterateForTts(rawName) || rawName || "Kakak";
+      const displayName = rawName || "Kakak";
+      
+      const cleanJid = senderJid.includes("@") ? senderJid : `${senderJid.replace(/\D/g, '')}@s.whatsapp.net`;
+      const cleanReply = String(replyText).trim();
+      const spokenText = `Halo kakk ${spokenName}, ${cleanReply}`;
+      const textMessage = `Halo kakk ${displayName}, ${cleanReply}`;
+
+      if (mode === "text") {
+        await waSocket.sendPresenceUpdate("composing", cleanJid);
+        await new Promise(r => setTimeout(r, 1000));
+        await waSocket.sendPresenceUpdate("paused", cleanJid);
+        await waSocket.sendMessage(cleanJid, { text: textMessage });
+      } else {
+        // Voice Note (PTT)
+        const baseVnName = path.join(process.cwd(), `tmp_reply_vn_${Date.now()}_${Math.floor(Math.random() * 1000)}`);
+        const vnPathMp3 = `${baseVnName}.mp3`;
+        const vnPathOgg = `${baseVnName}.ogg`;
+
+        try {
+          const tts = new EdgeTTS({ voice: 'id-ID-GadisNeural', lang: 'id-ID', outputFormat: 'audio-24khz-48kbitrate-mono-mp3', pitch: '+15Hz', rate: '+10%' });
+          await tts.ttsPromise(spokenText, vnPathMp3);
+        } catch (ttsErr: any) {
+          // Fallback to Google TTS if EdgeTTS hits rate limit/network issue
+          const gUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=id&client=tw-ob&q=${encodeURIComponent(spokenText.substring(0, 200))}`;
+          const fRes = await fetch(gUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
+          if (!fRes.ok) throw new Error("Gagal mengenerate suara TTS");
+          const ab = await fRes.arrayBuffer();
+          fs.writeFileSync(vnPathMp3, Buffer.from(ab));
+        }
+
+        const { exec } = await import('child_process');
+        await new Promise((resolve, reject) => {
+          exec(`ffmpeg -y -i ${vnPathMp3} -c:a libopus -b:a 48k -vbr on -compression_level 10 -frame_duration 20 -application voip ${vnPathOgg}`, (error) => {
+            if (error) {
+              console.error("FFmpeg VN error:", error);
+              reject(error);
+            } else {
+              resolve(true);
+            }
+          });
+        });
+
+        await waSocket.sendPresenceUpdate("recording", cleanJid);
+        await new Promise(r => setTimeout(r, 2000));
+        await waSocket.sendPresenceUpdate("paused", cleanJid);
+
+        let sent = false;
+        for (let i = 0; i < 3; i++) {
+          try {
+            const audioBuffer = fs.readFileSync(vnPathOgg);
+            await waSocket.sendMessage(cleanJid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
+            sent = true;
+            break;
+          } catch (err: any) {
+            console.log("VN upload attempt failed:", err.message);
+            await new Promise(r => setTimeout(r, 1500));
+          }
+        }
+
+        setTimeout(() => {
+          try { if (fs.existsSync(vnPathMp3)) fs.unlinkSync(vnPathMp3); } catch (e) {}
+          try { if (fs.existsSync(vnPathOgg)) fs.unlinkSync(vnPathOgg); } catch (e) {}
+        }, 5000);
+
+        if (!sent) {
+          throw new Error("Gagal mengirim Voice Note setelah 3 kali percobaan");
+        }
+      }
+
+      // Mark message as read and replied in DB
+      if (db.recentWaMessages && Array.isArray(db.recentWaMessages)) {
+        db.recentWaMessages.forEach((m: any) => {
+          if (m.id === msgId || m.senderJid === cleanJid) {
+            m.isRead = true;
+            m.replied = true;
+            m.lastReplyAt = Date.now();
+            m.lastReplyText = cleanReply;
+            m.lastReplyMode = mode || "vn";
+          }
+        });
+        writeDB(db);
+      }
+
+      res.json({
+        success: true,
+        message: mode === 'text' 
+          ? `Teks berhasil dikirim ke ${displayName}` 
+          : `Voice Note (Pesan Suara) berhasil dikirim ke ${displayName}!`,
+        spokenText
+      });
+    } catch (err: any) {
+      console.error("Send reply error:", err);
+      res.status(500).json({ success: false, error: err.message || "Gagal membalas pesan" });
+    }
+  });
+
   app.post("/api/wa/reset", async (req, res) => {
     try {
       if (waSocket) {
