@@ -3945,6 +3945,16 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
 
     const originalWaSendMessage = waSocket.sendMessage.bind(waSocket);
     waSocket.sendMessage = async (jid, content, options) => {
+        // Otomatis tandai pesan masuk menjadi centang biru (read receipt) jika bot membalas via Reply (quoted message)
+        const targetQuotedKey: any = (options?.quoted as any)?.key || options?.quoted;
+        if (targetQuotedKey && targetQuotedKey.id && !targetQuotedKey.fromMe) {
+            try {
+                await waSocket.readMessages([targetQuotedKey]);
+            } catch (readErr: any) {
+                console.warn("[WA Bot] Gagal mengirim status centang biru (read receipt):", readErr?.message || readErr);
+            }
+        }
+
         if (jid && !jid.includes('status@broadcast')) {
             try {
                 await waSocket.presenceSubscribe(jid);
@@ -4747,6 +4757,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                         const vnPathMp3 = `${baseVnName}.mp3`;
                         const vnPathOgg = `${baseVnName}.ogg`;
                         const tts = new EdgeTTS({ voice: 'id-ID-GadisNeural', lang: 'id-ID', outputFormat: 'audio-24khz-48kbitrate-mono-mp3', pitch: '+20Hz', rate: '+15%' });
+                        await waSocket.readMessages([msg.key]).catch(() => {});
                         await tts.ttsPromise(vnText, vnPathMp3);
                         await waSocket.sendPresenceUpdate("recording", jid);
                         await new Promise(r => setTimeout(r, 4500));
@@ -4817,6 +4828,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                         const vnPathMp3 = `${baseVnName}.mp3`;
                         const vnPathOgg = `${baseVnName}.ogg`;
                         const tts = new EdgeTTS({ voice: 'id-ID-GadisNeural', lang: 'id-ID', outputFormat: 'audio-24khz-48kbitrate-mono-mp3', pitch: '+20Hz', rate: '+15%' });
+                        await waSocket.readMessages([msg.key]).catch(() => {});
                         await tts.ttsPromise(vnText, vnPathMp3);
                         await waSocket.sendPresenceUpdate("recording", jid);
                         await new Promise(r => setTimeout(r, 4500));
