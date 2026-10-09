@@ -9233,7 +9233,13 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
         
         if (!isOwner) {
              userStates[ctx.from?.id || 0] = { step: 'ASK_PIN_PREPAID', data: { ...state.data, method, sku } };
-             return ctx.reply("🔐 *Masukan PIN Keamanan Transaksi*Silakan ketik PIN Anda untuk melanjutkan transaksi ini.", { parse_mode: 'Markdown' });
+             return ctx.reply("🔐 *Masukan PIN Keamanan Transaksi*\n\nSilakan ketik PIN Anda untuk melanjutkan transaksi ini.", {
+                 parse_mode: 'Markdown',
+                 reply_markup: {
+                     keyboard: getCustomerMenuKeyboard(false),
+                     resize_keyboard: true
+                 }
+             });
         }
         
         await processPrepaidPayment(ctx, sku, method, state.data, state.data.memberId || `MBR-${ctx.from?.id}`);
@@ -9255,7 +9261,13 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
         
         if (!isOwner) {
              userStates[ctx.from?.id || 0] = { step: 'ASK_PIN_PASCA', data: { ...state.data, method, ref_id } };
-             return ctx.reply("🔐 *Masukan PIN Keamanan Transaksi*Silakan ketik PIN Anda untuk melanjutkan transaksi ini.", { parse_mode: 'Markdown' });
+             return ctx.reply("🔐 *Masukan PIN Keamanan Transaksi*\n\nSilakan ketik PIN Anda untuk melanjutkan transaksi ini.", {
+                 parse_mode: 'Markdown',
+                 reply_markup: {
+                     keyboard: getCustomerMenuKeyboard(false),
+                     resize_keyboard: true
+                 }
+             });
         }
         
         await processPascaPayment(ctx, ref_id, method, state.data, state.data.memberId || `MBR-${ctx.from?.id}`);
@@ -10865,7 +10877,13 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                 }
                 if (!isOwner) {
                     userStates[userId] = { step: 'ASK_PIN_PREPAID', data: { ...state.data, method, sku: state.data.skuToPay } };
-                    return ctx.reply("🔐 *Masukan PIN Keamanan Transaksi*Silakan ketik PIN Anda untuk melanjutkan transaksi ini.", { parse_mode: 'Markdown' });
+                    return ctx.reply("🔐 *Masukan PIN Keamanan Transaksi*\n\nSilakan ketik PIN Anda untuk melanjutkan transaksi ini.", {
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            keyboard: getCustomerMenuKeyboard(false),
+                            resize_keyboard: true
+                        }
+                    });
                 }
                 await processPrepaidPayment(ctx, state.data.skuToPay, method, state.data, state.data.memberId || `MBR-${ctx.from?.id}`);
                 break;
@@ -11052,7 +11070,13 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                 }
                 if (!isOwner) {
                     userStates[userId] = { step: 'ASK_PIN_PASCA', data: { ...state.data, method, ref_id: state.data.ref_id } };
-                    return ctx.reply("🔐 *Masukan PIN Keamanan Transaksi*Silakan ketik PIN Anda untuk melanjutkan transaksi ini.", { parse_mode: 'Markdown' });
+                    return ctx.reply("🔐 *Masukan PIN Keamanan Transaksi*\n\nSilakan ketik PIN Anda untuk melanjutkan transaksi ini.", {
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            keyboard: getCustomerMenuKeyboard(false),
+                            resize_keyboard: true
+                        }
+                    });
                 }
                 await processPascaPayment(ctx, state.data.ref_id, method, state.data, state.data.memberId || `MBR-${ctx.from?.id}`);
                 break;
