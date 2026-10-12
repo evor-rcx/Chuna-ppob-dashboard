@@ -1,6 +1,6 @@
 import { PageContainer } from '../PageContainer';
 import { useState, useEffect } from 'react';
-import { X, CheckCircle, XCircle, Clock, Image as ImageIcon, ShieldCheck, RefreshCw } from 'lucide-react';
+import { X, CheckCircle, XCircle, Clock, Image as ImageIcon, ShieldCheck, RefreshCw, User, Phone, Send } from 'lucide-react';
 
 export function Saldo({ onBack }: { onBack: () => void }) {
   const [members, setMembers] = useState<any[]>([]);
@@ -143,6 +143,21 @@ export function Saldo({ onBack }: { onBack: () => void }) {
       }
     } catch (err) {
       alert("Error updating member type");
+    }
+  };
+
+  const handleSyncWaProfile = async (memberId: string) => {
+    try {
+      const res = await fetch(`/api/members/${memberId}/sync-photo`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        alert(`✅ Profil WhatsApp berhasil disinkronkan!\n\nNama Profil: ${data.waProfileName || '-'}\nLID: ${data.lid || '-'}\nFoto: ${data.photoUrl ? 'Ditemukan' : 'Privat/Tidak Ada'}`);
+        fetchMembers();
+      } else {
+        alert(data.error || "Gagal menarik profil WhatsApp.");
+      }
+    } catch (err: any) {
+      alert("Gagal menghubungi server WhatsApp: " + err.message);
     }
   };
 
@@ -418,15 +433,15 @@ export function Saldo({ onBack }: { onBack: () => void }) {
         </div>
       ) : (
         /* Member Table */
-        <div className="-mx-6">
+        <div className="-mx-6 overflow-x-auto">
           <table className="w-full text-left">
             <thead>
               <tr className="text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-800/50 bg-slate-800/20">
                 <th className="px-6 py-3 font-semibold">ID Registrasi</th>
-                <th className="px-6 py-3 font-semibold">Username</th>
+                <th className="px-6 py-3 font-semibold">Username Member</th>
                 <th className="px-6 py-3 font-semibold text-center">Tipe Member</th>
-                <th className="px-6 py-3 font-semibold">Nomor WhatsApp</th>
-                <th className="px-6 py-3 font-semibold">ID Telegram</th>
+                <th className="px-6 py-3 font-semibold">Profil WhatsApp</th>
+                <th className="px-6 py-3 font-semibold">Profil Telegram</th>
                 <th className="px-6 py-3 font-semibold text-right">Sisa Saldo</th>
                 <th className="px-6 py-3 font-semibold text-right">Aksi</th>
               </tr>
@@ -434,8 +449,17 @@ export function Saldo({ onBack }: { onBack: () => void }) {
             <tbody className="divide-y divide-slate-800/30">
               {members.map((m) => (
                 <tr key={m.id} className="hover:bg-slate-700/10 transition-colors">
-                  <td className="px-6 py-4 text-sm font-mono text-slate-400">{m.id}</td>
-                  <td className="px-6 py-4 text-sm text-slate-200">{m.name}</td>
+                  <td className="px-6 py-4 text-xs font-mono text-slate-400">{m.id}</td>
+                  
+                  {/* Username Member */}
+                  <td className="px-6 py-4">
+                    <div className="text-sm font-semibold text-slate-200">{m.name}</div>
+                    {m.gmail && (
+                      <div className="text-[11px] text-slate-500 font-mono mt-0.5">{m.gmail}</div>
+                    )}
+                  </td>
+
+                  {/* Tipe Member */}
                   <td className="px-6 py-4 text-center">
                     <select
                       value={m.type}
@@ -446,21 +470,124 @@ export function Saldo({ onBack }: { onBack: () => void }) {
                       <option value="VIP" className="text-slate-900">VIP</option>
                     </select>
                   </td>
-                  <td className="px-6 py-4 text-sm text-slate-400">{m.whatsapp}</td>
-                  <td className="px-6 py-4 text-sm text-sky-400 cursor-pointer hover:underline" onClick={() => handleTelegramChange(m.id, m.telegram)} title="Klik untuk mengubah ID Telegram">
-                    {m.telegram} ✏️
+
+                  {/* Profil WhatsApp (Foto, Nama, LID, Nomor) */}
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-2.5">
+                      {/* Avatar Bulat Foto Profil WhatsApp */}
+                      <div className="relative shrink-0">
+                        {m.photoUrl ? (
+                          <img
+                            src={m.photoUrl}
+                            alt={m.waProfileName || m.name}
+                            className="w-9 h-9 rounded-full object-cover border border-emerald-500/40 shadow-xs ring-1 ring-emerald-500/20"
+                            onError={(e) => {
+                              (e.currentTarget as HTMLElement).style.display = 'none';
+                              const fallback = (e.currentTarget.nextElementSibling as HTMLElement);
+                              if (fallback) fallback.style.display = 'flex';
+                            }}
+                          />
+                        ) : null}
+                        <div
+                          style={{ display: m.photoUrl ? 'none' : 'flex' }}
+                          className="w-9 h-9 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 items-center justify-center font-bold text-xs shadow-xs shrink-0 select-none"
+                          title="Foto WhatsApp tidak tersedia / privat"
+                        >
+                          {m.waProfileName && m.waProfileName.trim()
+                            ? m.waProfileName.trim().charAt(0).toUpperCase()
+                            : <User size={15} />}
+                        </div>
+                      </div>
+
+                      <div className="min-w-0 space-y-0.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-200 truncate" title="Nama Profil WhatsApp">
+                            {m.waProfileName || m.name}
+                          </span>
+                        </div>
+                        <div className="text-[11px] font-mono text-emerald-400 flex items-center gap-1">
+                          <Phone size={10} className="text-emerald-500" />
+                          <span>{m.whatsapp || '-'}</span>
+                        </div>
+                        {m.lid ? (
+                          <div className="pt-0.5">
+                            <span 
+                              className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-sky-500/10 text-sky-400 border border-sky-500/30 text-[10px] font-mono select-all" 
+                              title="LID WhatsApp Resmi"
+                            >
+                              🆔 {m.lid.replace(/@.*$/, '')}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-slate-500 italic">LID belum ada</span>
+                        )}
+                      </div>
+                    </div>
                   </td>
-                  <td className="px-6 py-4 text-sm text-slate-200 font-medium text-right cursor-pointer hover:underline" onClick={() => handleBalanceChange(m.id, m.balance)} title="Klik untuk mengubah Saldo">
+
+                  {/* Profil Telegram (Foto & Nama Display) */}
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-2.5">
+                      <div className="relative shrink-0">
+                        {m.telegramPhotoUrl ? (
+                          <img
+                            src={m.telegramPhotoUrl}
+                            alt="Telegram Avatar"
+                            className="w-8 h-8 rounded-full object-cover border border-sky-500/30 shadow-xs"
+                            onError={(e) => {
+                              (e.currentTarget as HTMLElement).style.display = 'none';
+                              const fallback = (e.currentTarget.nextElementSibling as HTMLElement);
+                              if (fallback) fallback.style.display = 'flex';
+                            }}
+                          />
+                        ) : null}
+                        <div
+                          style={{ display: m.telegramPhotoUrl ? 'none' : 'flex' }}
+                          className="w-8 h-8 rounded-full bg-sky-500/15 text-sky-400 border border-sky-500/30 items-center justify-center font-bold text-xs shrink-0 select-none"
+                          title="Foto Telegram tidak tersedia"
+                        >
+                          <Send size={13} />
+                        </div>
+                      </div>
+
+                      <div className="min-w-0">
+                        {m.telegramName && (
+                          <div className="text-xs font-semibold text-slate-200 truncate leading-tight">
+                            {m.telegramName}
+                          </div>
+                        )}
+                        <div
+                          className="text-xs text-sky-400 cursor-pointer hover:underline font-mono mt-0.5"
+                          onClick={() => handleTelegramChange(m.id, m.telegram)}
+                          title="Klik untuk mengubah ID Telegram"
+                        >
+                          {m.telegram} ✏️
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+
+                  {/* Sisa Saldo */}
+                  <td className="px-6 py-4 text-sm text-slate-200 font-bold text-right cursor-pointer hover:underline" onClick={() => handleBalanceChange(m.id, m.balance)} title="Klik untuk mengubah Saldo">
                     {formatRupiah(m.balance)} ✏️
                   </td>
+
+                  {/* Aksi */}
                   <td className="px-6 py-4 text-right">
-                    <div className="flex gap-2 justify-end">
+                    <div className="flex gap-1.5 justify-end flex-wrap">
+                      <button
+                        onClick={() => handleSyncWaProfile(m.id)}
+                        className="bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 font-medium py-1 px-2 rounded-lg cursor-pointer transition-colors text-[11px] uppercase tracking-wider flex items-center gap-1 border border-emerald-500/20"
+                        title="Tarik Foto Profil, Nama, dan LID dari WhatsApp"
+                      >
+                        <RefreshCw size={11} /> Tarik WA
+                      </button>
                       <button 
                         onClick={() => setTopupModal({ isOpen: true, memberId: m.id })}
-                        className="bg-sky-500/10 text-sky-400 hover:bg-sky-500/20 font-medium py-1.5 px-3 rounded-lg cursor-pointer transition-colors text-xs uppercase tracking-wider"
+                        className="bg-sky-500/10 text-sky-400 hover:bg-sky-500/20 font-medium py-1 px-2 rounded-lg cursor-pointer transition-colors text-[11px] uppercase tracking-wider"
                         title="Topup Saldo Manual"
                       >
-                        Topup Manual
+                        Topup
                       </button>
                       <button 
                         onClick={() => {
@@ -476,7 +603,7 @@ export function Saldo({ onBack }: { onBack: () => void }) {
                             });
                           }
                         }}
-                        className="bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 font-medium py-1.5 px-3 rounded-lg cursor-pointer transition-colors text-xs uppercase tracking-wider"
+                        className="bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 font-medium py-1 px-2 rounded-lg cursor-pointer transition-colors text-[11px] uppercase tracking-wider"
                         title="Reset PIN"
                       >
                         PIN
@@ -496,7 +623,7 @@ export function Saldo({ onBack }: { onBack: () => void }) {
                             });
                           }
                         }}
-                        className="bg-red-500/10 text-red-400 hover:bg-red-500/20 font-medium py-1.5 px-3 rounded-lg cursor-pointer transition-colors text-xs uppercase tracking-wider"
+                        className="bg-red-500/10 text-red-400 hover:bg-red-500/20 font-medium py-1 px-2 rounded-lg cursor-pointer transition-colors text-[11px] uppercase tracking-wider"
                         title="Hapus Member"
                       >
                         Hapus

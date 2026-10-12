@@ -1,4 +1,4 @@
-import { BarChart3, ShoppingCart, FileText, Settings, Bot, Send, Users, Store, Lock, ShieldAlert, Sparkles, CheckCircle2, AlertCircle, RefreshCw, Bell, Eye, EyeOff, MessageSquare, Clock, ArrowRight, ExternalLink, CheckCheck, Mic, Volume2, VolumeX, X, Loader2 } from 'lucide-react';
+import { BarChart3, ShoppingCart, FileText, Settings, Bot, Send, Users, Store, Lock, ShieldAlert, Sparkles, CheckCircle2, AlertCircle, RefreshCw, Bell, Eye, EyeOff, MessageSquare, Clock, ArrowRight, ExternalLink, CheckCheck, Mic, Volume2, VolumeX, X, Loader2, User } from 'lucide-react';
 import { Page } from '../../types';
 import { ReactNode, useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -53,6 +53,7 @@ export function Menu({ onNavigate }: MenuProps) {
     senderJid?: string;
     senderNumber: string;
     senderName: string;
+    photoUrl?: string | null;
     text: string;
     timestamp: number;
     isRead: boolean;
@@ -776,18 +777,44 @@ export function Menu({ onNavigate }: MenuProps) {
                         }`}
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            {!msg.isRead && (
-                              <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0 animate-pulse" title="Pesan Belum Dibaca" />
-                            )}
-                            <span className="font-bold text-slate-800 truncate text-[11px]">
-                              {msg.senderName}
-                            </span>
-                            {msg.senderNumber && (
-                              <span className="text-[10px] text-slate-500 font-mono bg-white/80 px-1.5 py-0.2 rounded border border-slate-200/60 shrink-0">
-                                +{msg.senderNumber}
+                          <div className="flex items-center gap-2 min-w-0">
+                            {/* Avatar Foto Profil WhatsApp */}
+                            <div className="relative shrink-0">
+                              {msg.photoUrl ? (
+                                <img
+                                  src={msg.photoUrl}
+                                  alt={msg.senderName}
+                                  className="w-7 h-7 rounded-full object-cover border border-slate-200/90 shadow-2xs"
+                                  onError={(e) => {
+                                    (e.currentTarget as HTMLElement).style.display = 'none';
+                                    const fallback = (e.currentTarget.nextElementSibling as HTMLElement);
+                                    if (fallback) fallback.style.display = 'flex';
+                                  }}
+                                />
+                              ) : null}
+                              <div
+                                style={{ display: msg.photoUrl ? 'none' : 'flex' }}
+                                className="w-7 h-7 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200/80 items-center justify-center font-black text-[11px] shadow-2xs shrink-0 select-none"
+                              >
+                                {msg.senderName && msg.senderName.trim()
+                                  ? msg.senderName.trim().charAt(0).toUpperCase()
+                                  : <User size={13} />}
+                              </div>
+                              {!msg.isRead && (
+                                <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-blue-600 ring-2 ring-white animate-pulse" title="Pesan Belum Dibaca" />
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="font-bold text-slate-800 truncate text-[11px]">
+                                {msg.senderName}
                               </span>
-                            )}
+                              {msg.senderNumber && (
+                                <span className="text-[10px] text-slate-500 font-mono bg-white/80 px-1.5 py-0.2 rounded border border-slate-200/60 shrink-0">
+                                  +{msg.senderNumber}
+                                </span>
+                              )}
+                            </div>
                           </div>
                           <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap shrink-0">
                             {formatRelativeTime(msg.timestamp)}

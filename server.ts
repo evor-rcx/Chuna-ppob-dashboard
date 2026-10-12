@@ -1677,6 +1677,71 @@ function saveWaLid(rawJidOrPhone: string, lid?: string | null) {
     }
 }
 
+// Resolver cerdas untuk mengubah LID WhatsApp atau nomor telepon mentah ke nomor HP terhubung
+function resolveSenderWaPhone(senderJid?: string, senderNumber?: string): string {
+    const raw = String(senderJid || senderNumber || '').trim();
+    if (!raw) return '';
+    const cleanDigits = raw.replace(/@.*$/, '').replace(/:\d+$/, '').replace(/\D/g, '');
+    const isLid = raw.endsWith('@lid') || (!raw.includes('@s.whatsapp.net') && cleanDigits.length >= 14);
+    if (isLid) {
+        const linkedPhone = db.waLids?.[raw] || db.waLids?.[cleanDigits] || '';
+        if (linkedPhone) return cleanWaPhone(linkedPhone);
+        if (Array.isArray(db.members)) {
+            const found = db.members.find((m: any) => m.lid && (m.lid === raw || cleanWaPhone(m.lid) === cleanDigits));
+            if (found && found.whatsapp) {
+                return cleanWaPhone(found.whatsapp);
+            }
+        }
+    }
+    return cleanWaPhone(cleanDigits || raw);
+}
+
+// Menarik atau mendapatkan tautan undangan Grup WhatsApp Resmi E4 Store secara dinamis
+async function getOfficialWaGroupInviteLink(): Promise<string> {
+    if (db.waGroupInviteLink && String(db.waGroupInviteLink).trim()) {
+        return String(db.waGroupInviteLink).trim();
+    }
+    if (waSocket) {
+        try {
+            // 1. Coba gunakan grup target pengumuman jika ada
+            if (db.waAnnouncementTarget && db.waAnnouncementTarget.endsWith('@g.us')) {
+                const inviteCode = await (waSocket as any).groupInviteCode(db.waAnnouncementTarget).catch(() => null);
+                if (inviteCode) {
+                    const fullLink = `https://chat.whatsapp.com/${inviteCode}`;
+                    db.waGroupInviteLink = fullLink;
+                    writeDB(db);
+                    return fullLink;
+                }
+            }
+            // 2. Jika belum, cari dari semua grup yang diikuti oleh Bot WhatsApp
+            if ((waSocket as any).groupFetchAllParticipating) {
+                const allGroups = await (waSocket as any).groupFetchAllParticipating().catch(() => ({}));
+                const groupList = Object.values(allGroups || {}) as any[];
+                // Cari grup E4 Store atau grup di mana bot adalah admin
+                const myBotPn = (waSocket as any)?.user?.id ? (waSocket as any).user.id.replace(/:\d+@.*$/, '').replace(/@.*$/, '') : '6285169949218';
+                const targetGroup = groupList.find(g => 
+                    (g.subject && /e4\s*store/i.test(g.subject)) ||
+                    (Array.isArray(g.participants) && g.participants.some((p: any) => p.admin && (p.id?.includes(myBotPn) || p.id?.includes('6285169949218'))))
+                ) || groupList[0];
+
+                if (targetGroup && targetGroup.id) {
+                    const inviteCode = await (waSocket as any).groupInviteCode(targetGroup.id).catch(() => null);
+                    if (inviteCode) {
+                        const fullLink = `https://chat.whatsapp.com/${inviteCode}`;
+                        db.waGroupInviteLink = fullLink;
+                        if (!db.waAnnouncementTarget) db.waAnnouncementTarget = targetGroup.id;
+                        writeDB(db);
+                        return fullLink;
+                    }
+                }
+            }
+        } catch (e) {
+            console.error("Gagal menarik link grup WhatsApp otomatis:", e);
+        }
+    }
+    return db.waGroupInviteLink || "https://chat.whatsapp.com/E4StoreOfficial";
+}
+
 async function getCustomerWaDetails(member: any, telegramUserId?: any, targetPhone?: string) {
     let rawWa = targetPhone || member?.whatsapp || (telegramUserId ? (registeredUsers[telegramUserId]?.wa || registeredUsers[Number(telegramUserId)]?.wa) : '') || '';
     let waPhone = rawWa || '-';
@@ -3710,12 +3775,70 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
     res.json({ status: waStatus, pairingCode: waPairingCode, phone: globalWaPhoneNumber });
   });
 
-  app.get("/api/wa/messages", (req, res) => {
-    const messages = db.recentWaMessages || [];
-    const unreadCount = messages.filter((m: any) => !m.isRead).length;
+  app.get("/api/wa/messages", async (req, res) => {
+    const rawMessages = db.recentWaMessages || [];
+    let dbUpdated = false;
+    const messages = await Promise.all(
+      rawMessages.slice(0, 15).map(async (m: any) => {
+        const resolvedPhone = resolveSenderWaPhone(m.senderJid, m.senderNumber);
+        const cleanSender = m.senderNumber ? String(m.senderNumber).trim() : '';
+
+        let photoUrl = m.photoUrl ||
+          (db.waProfilePhotos && resolvedPhone ? db.waProfilePhotos[resolvedPhone] : null) ||
+          (db.waProfilePhotos && cleanSender ? db.waProfilePhotos[cleanSender] : null) ||
+          (db.waProfilePhotos && m.senderJid ? db.waProfilePhotos[m.senderJid] : null);
+
+        if (!photoUrl && waSocket) {
+          // 1. Coba ambil menggunakan format nomor telepon (@s.whatsapp.net)
+          if (resolvedPhone && resolvedPhone.length >= 8) {
+            try {
+              const phoneJid = `${resolvedPhone}@s.whatsapp.net`;
+              const fetched = await waSocket.profilePictureUrl(phoneJid, 'image').catch(() => null);
+              if (fetched) {
+                photoUrl = fetched;
+                if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                db.waProfilePhotos[resolvedPhone] = fetched;
+                if (cleanSender) db.waProfilePhotos[cleanSender] = fetched;
+              }
+            } catch (e) {}
+          }
+
+          // 2. Jika belum dapat, coba ambil menggunakan format JID asli pengirim (termasuk format @lid)
+          if (!photoUrl && m.senderJid && m.senderJid.includes('@')) {
+            try {
+              const fetched = await waSocket.profilePictureUrl(m.senderJid, 'image').catch(() => null);
+              if (fetched) {
+                photoUrl = fetched;
+                if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                db.waProfilePhotos[m.senderJid] = fetched;
+                if (cleanSender) db.waProfilePhotos[cleanSender] = fetched;
+                if (resolvedPhone) db.waProfilePhotos[resolvedPhone] = fetched;
+              }
+            } catch (e) {}
+          }
+        }
+
+        if (photoUrl && m.photoUrl !== photoUrl) {
+          m.photoUrl = photoUrl;
+          dbUpdated = true;
+        }
+
+        return {
+          ...m,
+          displayNumber: resolvedPhone || cleanSender,
+          photoUrl: photoUrl || null
+        };
+      })
+    );
+
+    if (dbUpdated) {
+      try { writeDB(db); } catch (e) {}
+    }
+
+    const unreadCount = rawMessages.filter((m: any) => !m.isRead).length;
     res.json({
       success: true,
-      messages: messages.slice(0, 15),
+      messages,
       unreadCount
     });
   });
@@ -4123,17 +4246,22 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
             "Pesan masuk";
 
           const cleanSender = normalizeWaNumber(senderJid);
-          const name = pushName || (db.waProfiles && db.waProfiles[cleanSender]) || (cleanSender ? `+${cleanSender}` : 'Pelanggan WA');
+          const resolvedPhone = resolveSenderWaPhone(senderJid, cleanSender);
+          const name = pushName || (db.waProfiles && resolvedPhone && db.waProfiles[resolvedPhone]) || (db.waProfiles && db.waProfiles[cleanSender]) || (resolvedPhone ? `+${resolvedPhone}` : (cleanSender ? `+${cleanSender}` : 'Pelanggan WA'));
           const msgId = String(msgItem.key?.id || `${Date.now()}-${Math.random()}`);
 
           if (!db.recentWaMessages) db.recentWaMessages = [];
           const exists = db.recentWaMessages.some((item: any) => item.id === msgId);
           if (!exists && rawText) {
+            const cachedPhoto = (db.waProfilePhotos && resolvedPhone ? db.waProfilePhotos[resolvedPhone] : null) ||
+                                (db.waProfilePhotos && db.waProfilePhotos[cleanSender]) ||
+                                (db.waProfilePhotos && senderJid ? db.waProfilePhotos[senderJid] : null) || null;
             db.recentWaMessages.unshift({
               id: msgId,
               senderJid,
-              senderNumber: cleanSender,
+              senderNumber: resolvedPhone || cleanSender,
               senderName: name,
+              photoUrl: cachedPhoto,
               text: String(rawText).trim().substring(0, 160),
               timestamp: msgItem.messageTimestamp ? Number(msgItem.messageTimestamp) * 1000 : Date.now(),
               isRead: false
@@ -4142,6 +4270,31 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
               db.recentWaMessages = db.recentWaMessages.slice(0, 50);
             }
             writeDB(db);
+
+            // Fetch photo asynchronously if not cached
+            if (!cachedPhoto && waSocket) {
+              const tryFetchPhoto = async () => {
+                let fetchedUrl: string | null = null;
+                // 1. Coba format nomor HP jika tersedia
+                if (resolvedPhone && resolvedPhone.length >= 8) {
+                  fetchedUrl = await waSocket.profilePictureUrl(`${resolvedPhone}@s.whatsapp.net`, 'image').catch(() => null);
+                }
+                // 2. Coba format senderJid asli (misal @lid)
+                if (!fetchedUrl && senderJid && senderJid.includes('@')) {
+                  fetchedUrl = await waSocket.profilePictureUrl(senderJid, 'image').catch(() => null);
+                }
+                if (fetchedUrl) {
+                  if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                  if (resolvedPhone) db.waProfilePhotos[resolvedPhone] = fetchedUrl;
+                  if (cleanSender) db.waProfilePhotos[cleanSender] = fetchedUrl;
+                  if (senderJid) db.waProfilePhotos[senderJid] = fetchedUrl;
+                  const targetMsg = db.recentWaMessages?.find((item: any) => item.id === msgId);
+                  if (targetMsg) targetMsg.photoUrl = fetchedUrl;
+                  writeDB(db);
+                }
+              };
+              tryFetchPhoto().catch(() => {});
+            }
           }
         }
       }
@@ -6142,9 +6295,91 @@ Chuna – E4 Store`;
     }
   });
 
-  app.get("/api/members", (req, res) => {
+  app.get("/api/telegram-avatar/:userId", async (req, res) => {
+    const { userId } = req.params;
+    try {
+      if (!bot) return res.status(503).json({ error: "Bot telegram offline" });
+      const numericId = Number(userId.replace(/\D/g, ''));
+      if (!numericId) return res.status(400).json({ error: "Invalid user ID" });
+      const photos = await bot.telegram.getUserProfilePhotos(numericId, 0, 1).catch(() => null);
+      if (photos && photos.total_count > 0 && photos.photos.length > 0 && photos.photos[0].length > 0) {
+        const fileId = photos.photos[0][0].file_id;
+        const fileLink = await bot.telegram.getFileLink(fileId);
+        const resp = await fetch(fileLink.href);
+        const arrayBuffer = await resp.arrayBuffer();
+        res.setHeader('Content-Type', 'image/jpeg');
+        return res.send(Buffer.from(arrayBuffer));
+      }
+      return res.status(404).json({ error: "No profile photo found" });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/members", async (req, res) => {
     const onlineMembers = members.filter(m => m.telegram && m.telegram.startsWith('ID:'));
-    res.json({ success: true, members: onlineMembers });
+    const enriched = await Promise.all(
+      onlineMembers.map(async (m) => {
+        const cleanPhone = cleanWaPhone(m.whatsapp || '');
+        const localPhone = cleanPhone ? "0" + cleanPhone.replace(/^62/, '') : '';
+        const plainPhone = cleanPhone.replace(/^62/, '');
+
+        // 1. Resolusi LID
+        let lid = m.lid || (db.waLids && (db.waLids[cleanPhone] || db.waLids[localPhone] || db.waLids[plainPhone])) || null;
+
+        // 2. Resolusi Nama Profil WA
+        let waProfileName = (m.waProfileName && m.waProfileName !== '-') ? m.waProfileName : null;
+        if (!waProfileName && db.waProfiles) {
+          waProfileName = db.waProfiles[cleanPhone] || db.waProfiles[localPhone] || db.waProfiles[plainPhone] || (lid && db.waProfiles[lid]) || null;
+        }
+
+        // 3. Resolusi Foto Profil WA
+        let photoUrl = m.photoUrl || (db.waProfilePhotos && (db.waProfilePhotos[cleanPhone] || db.waProfilePhotos[localPhone] || db.waProfilePhotos[plainPhone] || (lid && db.waProfilePhotos[lid]))) || null;
+
+        if (!photoUrl && waSocket && cleanPhone && cleanPhone.length >= 8) {
+          try {
+            const jid = `${cleanPhone}@s.whatsapp.net`;
+            const fetched = await waSocket.profilePictureUrl(jid, 'image').catch(() => null);
+            if (fetched) {
+              photoUrl = fetched;
+              if (!db.waProfilePhotos) db.waProfilePhotos = {};
+              db.waProfilePhotos[cleanPhone] = fetched;
+              m.photoUrl = fetched;
+            }
+          } catch (e) {}
+        }
+
+        // 4. Resolusi Data Telegram (Foto & Nama Display)
+        const tgIdStr = String(m.telegram || '').replace(/^ID:/i, '').trim();
+        const numericTgId = Number(tgIdStr);
+        let telegramPhotoUrl: string | null = null;
+        let telegramName: string | null = null;
+
+        if (numericTgId) {
+          telegramPhotoUrl = `/api/telegram-avatar/${numericTgId}`;
+          if (bot) {
+            try {
+              const chatMember = await bot.telegram.getChat(numericTgId).catch(() => null);
+              if (chatMember) {
+                const fn = (chatMember as any).first_name || '';
+                const ln = (chatMember as any).last_name || '';
+                telegramName = [fn, ln].filter(Boolean).join(' ') || (chatMember as any).username || null;
+              }
+            } catch (e) {}
+          }
+        }
+
+        return {
+          ...m,
+          lid: lid || null,
+          waProfileName: waProfileName || null,
+          photoUrl: photoUrl || null,
+          telegramPhotoUrl: telegramPhotoUrl || null,
+          telegramName: telegramName || null
+        };
+      })
+    );
+    res.json({ success: true, members: enriched });
   });
 
   app.get("/api/topup-requests", (req, res) => {
@@ -11310,13 +11545,20 @@ _Data member telah berhasil tersimpan dan akun otomatis aktif._`;
                   console.error("Error saat memproses notifikasi owner pendaftaran:", notifErr);
                 }
 
-                await ctx.reply(`Yeayyy! Selamat datang di keluarga E4 Store kak ${state.data.username}! 🥳Sekarang kakak udah bisa nikmatin semua fitur keren dari Chuna.Ketik /menu buat mulai ya kak!`, {
+                // Tarik tautan Grup WhatsApp Resmi E4 Store
+                const waGroupLink = await getOfficialWaGroupInviteLink();
+                const userName = state.data.username || 'Pelanggan';
+
+                const welcomeMsg = `Selamat datang di E4 Store, Kak ${userName}. 🥳\nAkun Telegram Kakak telah resmi aktif.\n\n📢 *Informasi Penting*\n\nSilakan bergabung ke Grup WhatsApp Resmi E4 Store untuk mendapatkan:\n\n✅ Update harga naik & turun secara real-time\n✅ Notifikasi gangguan atau produk tutup sementara\n✅ Event promo & diskon harian\n\n👉 *Link grup WhatsApp:*\n${waGroupLink}\n\nTerima kasih telah bergabung. 😊`;
+
+                await ctx.reply(welcomeMsg, {
+                  parse_mode: 'Markdown',
                   reply_markup: {
                     keyboard: [
                       [{ text: "💵 Cek Saldo" }],
-                  [{ text: "🧾 Cek Tagihan" }],
-                  [{ text: "📋 Menu Produk" }],
-                  [{ text: "📥 Fitur Download" }]
+                      [{ text: "🧾 Cek Tagihan" }],
+                      [{ text: "📋 Menu Produk" }],
+                      [{ text: "📥 Fitur Download" }]
                     ],
                     resize_keyboard: true
                   }
