@@ -1696,50 +1696,56 @@ function resolveSenderWaPhone(senderJid?: string, senderNumber?: string): string
     return cleanWaPhone(cleanDigits || raw);
 }
 
-// Menarik atau mendapatkan tautan undangan Grup WhatsApp Resmi E4 Store secara dinamis
+// Menarik atau mendapatkan tautan undangan Grup WhatsApp Resmi E4 Store secara real-time
 async function getOfficialWaGroupInviteLink(): Promise<string> {
-    if (db.waGroupInviteLink && String(db.waGroupInviteLink).trim()) {
-        return String(db.waGroupInviteLink).trim();
-    }
+    // 1. Coba tarik link segar secara live dari Baileys socket jika bot WhatsApp online
     if (waSocket) {
         try {
-            // 1. Coba gunakan grup target pengumuman jika ada
+            // Prioritas 1: Ambil dari target grup yang sudah ditentukan
             if (db.waAnnouncementTarget && db.waAnnouncementTarget.endsWith('@g.us')) {
                 const inviteCode = await (waSocket as any).groupInviteCode(db.waAnnouncementTarget).catch(() => null);
                 if (inviteCode) {
-                    const fullLink = `https://chat.whatsapp.com/${inviteCode}`;
-                    db.waGroupInviteLink = fullLink;
+                    const freshLink = `https://chat.whatsapp.com/${inviteCode}`;
+                    db.waGroupInviteLink = freshLink;
                     writeDB(db);
-                    return fullLink;
+                    return freshLink;
                 }
             }
-            // 2. Jika belum, cari dari semua grup yang diikuti oleh Bot WhatsApp
+
+            // Prioritas 2: Cari grup E4 Store dari semua grup yang diikuti bot
             if ((waSocket as any).groupFetchAllParticipating) {
                 const allGroups = await (waSocket as any).groupFetchAllParticipating().catch(() => ({}));
                 const groupList = Object.values(allGroups || {}) as any[];
-                // Cari grup E4 Store atau grup di mana bot adalah admin
                 const myBotPn = (waSocket as any)?.user?.id ? (waSocket as any).user.id.replace(/:\d+@.*$/, '').replace(/@.*$/, '') : '6285169949218';
+
+                // Cari grup dengan nama E4 Store atau di mana bot menjadi admin
                 const targetGroup = groupList.find(g => 
                     (g.subject && /e4\s*store/i.test(g.subject)) ||
                     (Array.isArray(g.participants) && g.participants.some((p: any) => p.admin && (p.id?.includes(myBotPn) || p.id?.includes('6285169949218'))))
-                ) || groupList[0];
+                ) || groupList.find(g => g.id && g.id.endsWith('@g.us'));
 
                 if (targetGroup && targetGroup.id) {
                     const inviteCode = await (waSocket as any).groupInviteCode(targetGroup.id).catch(() => null);
                     if (inviteCode) {
-                        const fullLink = `https://chat.whatsapp.com/${inviteCode}`;
-                        db.waGroupInviteLink = fullLink;
-                        if (!db.waAnnouncementTarget) db.waAnnouncementTarget = targetGroup.id;
+                        const freshLink = `https://chat.whatsapp.com/${inviteCode}`;
+                        db.waGroupInviteLink = freshLink;
+                        db.waAnnouncementTarget = targetGroup.id;
                         writeDB(db);
-                        return fullLink;
+                        return freshLink;
                     }
                 }
             }
         } catch (e) {
-            console.error("Gagal menarik link grup WhatsApp otomatis:", e);
+            console.error("Gagal menarik link grup WhatsApp otomatis secara live:", e);
         }
     }
-    return db.waGroupInviteLink || "https://chat.whatsapp.com/E4StoreOfficial";
+
+    // 2. Jika bot offline atau gagal menarik kode, gunakan link yang diatur Owner secara manual
+    if (db.waGroupInviteLink && String(db.waGroupInviteLink).trim() && !db.waGroupInviteLink.includes("E4StoreOfficial")) {
+        return String(db.waGroupInviteLink).trim();
+    }
+
+    return db.waGroupInviteLink || "https://chat.whatsapp.com/invite";
 }
 
 async function getCustomerWaDetails(member: any, telegramUserId?: any, targetPhone?: string) {
@@ -4212,10 +4218,6 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
               if (contact.id.endsWith('@s.whatsapp.net') && !db.waContacts.includes(contact.id)) {
                   db.waContacts.push(contact.id);
               }
-              const pName = (contact as any).pushName || (contact as any).notify || (contact as any).name || (contact as any).verifiedName;
-              if (pName) {
-                  saveWaProfile(contact.id, pName);
-              }
               if ((contact as any).lid && contact.id.endsWith('@s.whatsapp.net')) {
                   saveWaLid(contact.id, (contact as any).lid);
               }
@@ -4230,10 +4232,6 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
     waSocket.ev.on("contacts.update", (contacts) => {
       for (const contact of contacts) {
           if (contact.id) {
-              const pName = (contact as any).pushName || (contact as any).notify || (contact as any).name || (contact as any).verifiedName;
-              if (pName) {
-                  saveWaProfile(contact.id, pName);
-              }
               if ((contact as any).lid && contact.id.endsWith('@s.whatsapp.net')) {
                   saveWaLid(contact.id, (contact as any).lid);
               }
@@ -4250,10 +4248,6 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
           if (contact.id) {
               if (contact.id.endsWith('@s.whatsapp.net') && !db.waContacts.includes(contact.id)) {
                   db.waContacts.push(contact.id);
-              }
-              const pName = (contact as any).pushName || (contact as any).notify || (contact as any).name || (contact as any).verifiedName;
-              if (pName) {
-                  saveWaProfile(contact.id, pName);
               }
               if ((contact as any).lid && contact.id.endsWith('@s.whatsapp.net')) {
                   saveWaLid(contact.id, (contact as any).lid);
@@ -4307,6 +4301,22 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
     const waCustomerSessions: Record<string, { state: 'WAITING_PLN_NOMINAL' | 'IDLE'; meterNumber?: string; meterPhotoBuffer?: Buffer; timestamp: number }> = {};
     waSocket.ev.on("messages.upsert", async (m) => {
       for (const msgItem of m.messages || []) {
+        // Tangkap pushName jika ada notifikasi grup (misal stub message bergabung)
+        if (msgItem.messageStubType && msgItem.pushName && msgItem.key?.remoteJid?.endsWith("@g.us")) {
+          const rawParams = msgItem.messageStubParameters || [];
+          for (const rawP of rawParams) {
+            try {
+              const parsed = typeof rawP === "string" && rawP.startsWith("{") ? JSON.parse(rawP) : rawP;
+              const pJid = typeof parsed === "object" ? (parsed.phoneNumber || parsed.id) : String(parsed || "");
+              if (pJid) {
+                const cleanP = cleanWaPhone(pJid);
+                if (cleanP) saveWaProfile(cleanP, msgItem.pushName);
+                saveWaProfile(pJid, msgItem.pushName);
+              }
+            } catch (e) {}
+          }
+        }
+
         const senderJid = msgItem.key?.participant || msgItem.key?.remoteJid || '';
         const pushName = msgItem.pushName;
         const rJid = String(msgItem.key?.remoteJid || '');
@@ -5141,11 +5151,105 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
       }
     });
 
-    // 5. Sambutan Otomatis Anggota Baru di Grup WhatsApp
+    // Helper untuk generate Voice Note Sambutan Grup dengan Backsound intonasi suara.mp3
+async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | null> {
+  try {
+    const bgPath = path.resolve(process.cwd(), "intonasi suara.mp3");
+    if (!fs.existsSync(bgPath)) {
+      console.warn("[Welcome VN] File intonasi suara.mp3 tidak ditemukan");
+      return null;
+    }
+
+    // 1. Tentukan Salam Berdasarkan Jam (Waktu Indonesia)
+    const now = new Date();
+    // Gunakan offset WIB (UTC+7)
+    const utcHours = now.getUTCHours();
+    const wibHour = (utcHours + 7) % 24;
+
+    let greetingTime = "Selamat pagi";
+    if (wibHour >= 4 && wibHour < 11) {
+      greetingTime = "Selamat pagi";
+    } else if (wibHour >= 11 && wibHour < 15) {
+      greetingTime = "Selamat siang";
+    } else if (wibHour >= 15 && wibHour < 18.5) {
+      greetingTime = "Selamat sore";
+    } else {
+      greetingTime = "Selamat malam";
+    }
+
+    // Bersihkan nama pengguna agar terdengar sopan dan natural saat dibaca TTS
+    let cleanPronounceName = String(name || "Kakak").replace(/^[~\-\s]+/, "").trim();
+    if (!cleanPronounceName || cleanPronounceName === "Member Baru") {
+      cleanPronounceName = "Kakak";
+    }
+
+    // 2. Susun Naskah Suara Sambutan dengan jeda tanda baca yang santai & rapi
+    const narrationText = `${greetingTime} kepada seluruh penghuni grup yang terhormat, dan selamat datang, ${cleanPronounceName}! Terima kasih sudah bergabung di grup ini.\n\n` +
+      `Diharapkan untuk membaca panduan yang ada di Informasi Grup terlebih dahulu.\n\n` +
+      `Informasi Grup:\n` +
+      `Satu. Pantau perubahan harga naik dan turun secara real-time.\n` +
+      `Dua. Update notifikasi gangguan dan produk close sementara.\n` +
+      `Tiga. Dapatkan event promo, flash sale, dan diskon harian.\n\n` +
+      `Grup ini tidak menerima spam, jadi chat hanya untuk notifikasi saja. Gunakan bot dengan sewajarnya. Terima kasih.\n\n` +
+      `Selamat berbelanja dan semoga harimu menyenangkan!`;
+
+    const tmpNarration = path.join("/tmp", `tts_welcome_${Date.now()}_${Math.random().toString(36).substring(7)}.mp3`);
+    const tmpVnOutput = path.join("/tmp", `vn_welcome_${Date.now()}_${Math.random().toString(36).substring(7)}.ogg`);
+
+    // 3. Generate Suara AI Wanita Indonesia Ramah Natural menggunakan EdgeTTS
+    const tts = new EdgeTTS({
+      voice: "id-ID-GadisNeural",
+      lang: "id-ID",
+      outputFormat: "audio-24khz-48kbitrate-mono-mp3",
+      pitch: "+0Hz",
+      rate: "+0%"
+    });
+    await tts.ttsPromise(narrationText, tmpNarration);
+
+    if (!fs.existsSync(tmpNarration) || fs.statSync(tmpNarration).size === 0) {
+      return null;
+    }
+
+    // 4. Hitung durasi suara narator menggunakan ffprobe
+    const { execSync } = require("child_process");
+    const durOutput = execSync(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${tmpNarration}"`).toString().trim();
+    const narrationDuration = parseFloat(durOutput) || 20;
+
+    // Durasi total = jeda awal intro 4 detik + durasi narasi + sisa outro 3 detik
+    const totalDuration = (4 + narrationDuration + 3).toFixed(2);
+    const fadeOutStart = (4 + narrationDuration).toFixed(2);
+
+    // 5. Gabungkan Backsound + Narasi dengan FFmpeg:
+    // - adelay=4000|4000: narasi baru mulai di detik ke-4 setelah bel/intro awal
+    // - volume=0.22: musik latar dipelankan ke 22% agar suara narator jernih dominan
+    // - afade=t=out:st=...:d=3: efek pudar keluar halus di 3 detik terakhir
+    // - -c:a libopus: encode ke format opus standar Voice Note WhatsApp resmi
+    const ffmpegCmd = `ffmpeg -y -i "${bgPath}" -i "${tmpNarration}" -filter_complex "[0:a]volume=0.22,afade=t=out:st=${fadeOutStart}:d=3[bg];[1:a]adelay=4000|4000[voice];[bg][voice]amix=inputs=2:duration=first:dropout_transition=2[mixed]" -map "[mixed]" -t ${totalDuration} -c:a libopus -b:a 48k "${tmpVnOutput}"`;
+    execSync(ffmpegCmd);
+
+    let vnBuffer: Buffer | null = null;
+    if (fs.existsSync(tmpVnOutput)) {
+      vnBuffer = fs.readFileSync(tmpVnOutput);
+      try { fs.unlinkSync(tmpVnOutput); } catch (e) {}
+    }
+    try { fs.unlinkSync(tmpNarration); } catch (e) {}
+
+    return vnBuffer;
+  } catch (err) {
+    console.error("[Welcome VN] Gagal membuat voice note sambutan:", err);
+    return null;
+  }
+}
+
+    // 5. Sambutan Otomatis Anggota Baru di Grup WhatsApp (100% PURE PUSHNAME / NOTIFY RESMI)
     waSocket.ev.on("group-participants.update", async (event: any) => {
       try {
-        const { id: groupJid, participants, action } = event;
+        const { id: groupJid, participants, action, author } = event;
         if (action !== "add" || !Array.isArray(participants) || participants.length === 0) return;
+
+        // Nomor bot WhatsApp sendiri
+        const myBotJid = (waSocket as any)?.user?.id || "";
+        const myBotClean = myBotJid.replace(/@.*$/, "").replace(/:\d+$/, "").replace(/\D/g, "");
 
         // Simpan target pengumuman/grup resmi jika belum ada
         if (!db.waAnnouncementTarget && groupJid.endsWith("@g.us")) {
@@ -5153,54 +5257,78 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
           writeDB(db);
         }
 
-        for (const participant of participants) {
+        for (const p of participants) {
           try {
-            const rawParticipant = String(participant || "").trim();
+            // Ekstraksi data baik dari Object Baileys maupun String
+            const isObj = typeof p === "object" && p !== null;
+            const pId = isObj ? (p.phoneNumber || p.id || "") : String(p || "");
+            const pLid = isObj ? (p.lid || "") : "";
+            
+            // WAJIB & MUTLAK: Ambil murni notify / pushName publik resmi akun WhatsApp pengguna (BUKAN nama kontak telepon)
+            let pNotify = isObj ? (p.notify || (p as any).pushName || p.verifiedName || "") : "";
+            const pImg = isObj ? (p.imgUrl || null) : null;
+
+            const rawParticipant = String(pId || "").trim();
             const cleanDigits = rawParticipant.replace(/@.*$/, "").replace(/:\d+$/, "").replace(/\D/g, "");
-            const cleanPn = resolveSenderWaPhone(rawParticipant, cleanDigits);
-            const mentionJid = cleanPn ? `${cleanPn}@s.whatsapp.net` : rawParticipant;
 
-            // 1. Tarik Nama Profil WhatsApp
-            let participantName = "";
-            if (db.waProfiles) {
-              participantName = db.waProfiles[cleanPn] || db.waProfiles[cleanDigits] || db.waProfiles[rawParticipant] || "";
-            }
-            if (!participantName) {
-              const matchedMember = (db.members || []).find((m: any) => 
-                (m.whatsapp && cleanWaPhone(m.whatsapp) === cleanPn) || 
-                (m.lid && (m.lid === rawParticipant || cleanWaPhone(m.lid) === cleanDigits))
-              );
-              if (matchedMember) {
-                participantName = matchedMember.waProfileName || matchedMember.name || "";
-              }
+            // Abaikan jika yang masuk adalah bot sendiri
+            if (cleanDigits && myBotClean && (cleanDigits === myBotClean || rawParticipant.includes(myBotClean))) {
+              continue;
             }
 
-            // 2. Tarik Foto Profil WhatsApp Asli
-            let photoUrl = (db.waProfilePhotos && (db.waProfilePhotos[cleanPn] || db.waProfilePhotos[cleanDigits] || db.waProfilePhotos[rawParticipant])) || null;
+            // Resolusi nomor HP bersih dari peserta (bukan bot/owner)
+            let cleanPn = cleanDigits;
+            if (pLid) {
+              const resFromLid = resolveSenderWaPhone(pLid, pLid.replace(/\D/g, ""));
+              if (resFromLid && resFromLid !== myBotClean) cleanPn = resFromLid;
+            }
+            if (!cleanPn || cleanPn.length >= 14) {
+              const resFromRaw = resolveSenderWaPhone(rawParticipant, cleanDigits);
+              if (resFromRaw && resFromRaw !== myBotClean) cleanPn = resFromRaw;
+            }
+
+            if (cleanPn === myBotClean) continue;
+
+            const mentionJid = cleanPn ? `${cleanPn}@s.whatsapp.net` : (rawParticipant.includes("@") ? rawParticipant : `${rawParticipant}@s.whatsapp.net`);
+
+            // 1. Ekstraksi Nama Profil Asli WhatsApp (pushName / notify)
+            // PERHATIAN: DILARANG KERAS mengecek ke db.waProfiles atau buku kontak HP apa pun!
+            let participantName = pNotify || "";
+
+            // Bersihkan simbol gelombang ~ jika ada di pushName bawaan WhatsApp (contoh: ~ オニカーン -> オニカーン)
+            if (participantName) {
+              participantName = participantName.replace(/^[~\-\s]+/, "").trim();
+            }
+
+            // 2. Tarik Foto Profil WhatsApp Asli Peserta Baru Secara Real-Time Langsung dari Server WhatsApp
+            let photoUrl: string | null = (pImg && typeof pImg === "string" && pImg.startsWith("http")) ? pImg : null;
+
             if (!photoUrl && waSocket) {
               try {
-                if (cleanPn && cleanPn.length >= 8) {
+                // Prioritas 1: Ambil foto langsung dari nomor peserta
+                if (cleanPn && cleanPn.length >= 8 && cleanPn !== myBotClean) {
                   photoUrl = await waSocket.profilePictureUrl(`${cleanPn}@s.whatsapp.net`, "image").catch(() => null);
                 }
-                if (!photoUrl && rawParticipant.includes("@")) {
+                // Prioritas 2: Ambil foto dari JID asli jika belum dapat
+                if (!photoUrl && rawParticipant && rawParticipant.includes("@") && !rawParticipant.includes(myBotClean)) {
                   photoUrl = await waSocket.profilePictureUrl(rawParticipant, "image").catch(() => null);
                 }
-                if (photoUrl) {
-                  if (!db.waProfilePhotos) db.waProfilePhotos = {};
-                  if (cleanPn) db.waProfilePhotos[cleanPn] = photoUrl;
-                  if (cleanDigits) db.waProfilePhotos[cleanDigits] = photoUrl;
-                  writeDB(db);
+                // Prioritas 3: Ambil foto dari LID
+                if (!photoUrl && pLid && pLid.includes("@")) {
+                  photoUrl = await waSocket.profilePictureUrl(pLid, "image").catch(() => null);
                 }
               } catch (e) {}
             }
 
-            const greetingDisplayName = participantName || (cleanPn ? `+${cleanPn}` : "Kakak");
+            // Nama yang dicetak ke banner: murni pushName asli pengguna atau nomor HP (+nomor) jika belum menyetel nama
+            const greetingDisplayName = participantName || (cleanPn ? `+${cleanPn}` : "Member Baru");
+            const phoneTag = cleanPn || cleanDigits;
 
-            // 3. Render Banner Sambutan Otomatis Menggunakan Template Mentahan
+            // 3. Render Banner Sambutan Otomatis Menggunakan Template Mentahan E4 Store
             const bannerBuffer = await generateWaGroupWelcomeBanner(greetingDisplayName, photoUrl);
 
             // 4. Caption Sambutan
-            const welcomeCaption = `🎉 *SELAMAT DATANG DI GRUP RESMI E4 STORE!* 🎉\n\nHalo Kak @${cleanPn || cleanDigits} 👋\nSelamat bergabung di komunitas resmi *E4 STORE*!\n\n📢 *Informasi Grup:*\n✅ Pantau perubahan harga naik & turun secara real-time\n✅ Update notifikasi gangguan & produk close sementara\n✅ Dapatkan event promo, flash sale & diskon harian\n\nSelamat berbelanja dan semoga harimu menyenangkan! ✨`;
+            const welcomeCaption = `🎉 *SELAMAT DATANG DI GRUP RESMI E4 STORE!* 🎉\n\nHalo Kak @${phoneTag} 👋\nSelamat bergabung di komunitas resmi *E4 STORE*!\n\n📢 *Informasi Grup:*\n✅ Pantau perubahan harga naik & turun secara real-time\n✅ Update notifikasi gangguan & produk close sementara\n✅ Dapatkan event promo, flash sale & diskon harian\n\nSelamat berbelanja dan semoga harimu menyenangkan! ✨`;
 
             if (bannerBuffer) {
               await waSocket.sendMessage(groupJid, {
@@ -5214,8 +5342,22 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                 mentions: [mentionJid]
               });
             }
+
+            // 5. Kirim Voice Note (VN Resmi WhatsApp) dengan Backsound intonasi suara.mp3
+            try {
+              const vnBuffer = await generateGroupWelcomeVoiceNote(greetingDisplayName);
+              if (vnBuffer && waSocket) {
+                await waSocket.sendMessage(groupJid, {
+                  audio: vnBuffer,
+                  mimetype: "audio/ogg; codecs=opus",
+                  ptt: true
+                });
+              }
+            } catch (vnErr) {
+              console.error("[Welcome VN] Gagal mengirim pesan suara sambutan:", vnErr);
+            }
           } catch (pErr) {
-            console.error("Gagal menyambut anggota baru:", participant, pErr);
+            console.error("Gagal menyambut anggota baru:", p, pErr);
           }
         }
       } catch (grpErr) {
@@ -5223,7 +5365,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
       }
     });
 
-    waSocket.ev.on("call", async (calls) => {
+        waSocket.ev.on("call", async (calls) => {
       for (const call of calls) {
         if (call.status === "offer") {
           try {
@@ -10037,6 +10179,23 @@ Target saat ini: ${db.waAnnouncementTarget || 'Belum Diatur'}`, {
       
 
       
+
+      bot.hears(/^\/setlinkgrupwa(?:\s+(.+))?$/i, async (ctx) => {
+          if (!db.owners.includes(ctx.from?.id)) return;
+          const inputLink = ctx.match[1]?.trim();
+          if (!inputLink) {
+              const currentLink = db.waGroupInviteLink || "Belum diatur (masih auto-detect)";
+              return ctx.reply(`🔗 *PENGATURAN LINK GRUP WHATSAPP RESMI*\n\nLink saat ini:\n${currentLink}\n\n💡 *Cara mengganti:*\nKetik: \`/setlinkgrupwa https://chat.whatsapp.com/KodeGrupKamu\``, { parse_mode: 'Markdown' });
+          }
+
+          if (!inputLink.includes("chat.whatsapp.com/")) {
+              return ctx.reply("❌ Format tautan tidak valid! Harus berupa tautan resmi WhatsApp, contoh:\n`https://chat.whatsapp.com/xxxxxxxxxxxx`", { parse_mode: 'Markdown' });
+          }
+
+          db.waGroupInviteLink = inputLink;
+          writeDB(db);
+          await ctx.reply(`✅ *BERHASIL MEMPERBARUI LINK GRUP WHATSAPP!*\n\nLink grup resmi E4 Store sekarang:\n${inputLink}\n\nSemua pelanggan baru di Telegram akan otomatis mendapatkan tautan ini saat mendaftar.`, { parse_mode: 'Markdown' });
+      });
 
       bot.hears("🎯 Set Target WA", async (ctx) => {
           if (!db.owners.includes(ctx.from.id)) return;
