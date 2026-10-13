@@ -2688,7 +2688,7 @@ async function generateWaGroupWelcomeBanner(userName: string, photoUrlOrBuffer?:
             // Inisial nama
             const initial = (userName && userName.trim()) ? userName.trim().charAt(0).toUpperCase() : 'E';
             ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 120px sans-serif';
+            ctx.font = 'bold 120px "Noto Sans SC", "Noto Sans JP", "Noto Sans CJK SC", "Segoe UI Emoji", Arial, sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(initial, avatarCenterX, avatarCenterY);
@@ -2726,7 +2726,7 @@ async function generateWaGroupWelcomeBanner(userName: string, photoUrlOrBuffer?:
         const cleanName = (userName || 'Member').trim();
         const displayName = cleanName.length > 15 ? cleanName.substring(0, 14) + '…' : cleanName;
 
-        ctx.font = 'italic bold 48px sans-serif';
+        ctx.font = 'bold 44px "Noto Sans SC", "Noto Sans JP", "Noto Sans CJK SC", "Segoe UI Emoji", Arial, sans-serif';
         ctx.fillStyle = '#38bdf8';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -5415,7 +5415,7 @@ async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | nul
             }
 
             // Nama yang dicetak ke banner: murni pushName asli pengguna atau nomor HP (+nomor) jika belum menyetel nama
-            const greetingDisplayName = participantName || (cleanPn ? `+${cleanPn}` : "Member Baru");
+            const greetingDisplayName = participantName || (cleanPn ? `+${cleanPn}` : "Member");
             const phoneTag = cleanPn || cleanDigits;
 
             // 3. Render Banner Sambutan & Voice Note Secara Paralel di Awal (Pre-render)
