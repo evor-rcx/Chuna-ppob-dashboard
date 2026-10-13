@@ -5341,8 +5341,11 @@ async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | nul
             const greetingDisplayName = participantName || (cleanPn ? `+${cleanPn}` : "Member Baru");
             const phoneTag = cleanPn || cleanDigits;
 
-            // 3. Render Banner Sambutan Otomatis Menggunakan Template Mentahan E4 Store
-            const bannerBuffer = await generateWaGroupWelcomeBanner(greetingDisplayName, photoUrl);
+            // 3. Render Banner Sambutan & Voice Note Secara Paralel di Awal (Pre-render)
+            const [bannerBuffer, vnBuffer] = await Promise.all([
+              generateWaGroupWelcomeBanner(greetingDisplayName, photoUrl),
+              generateGroupWelcomeVoiceNote(greetingDisplayName)
+            ]);
 
             // 4. Caption Sambutan
             const welcomeCaption = `🎉 *SELAMAT DATANG DI GRUP RESMI E4 STORE!* 🎉\n\nHalo Kak @${phoneTag} 👋\nSelamat bergabung di komunitas resmi *E4 STORE*!\n\n📢 *Informasi Grup:*\n✅ Pantau perubahan harga naik & turun secara real-time\n✅ Update notifikasi gangguan & produk close sementara\n✅ Dapatkan event promo, flash sale & diskon harian\n\nSelamat berbelanja dan semoga harimu menyenangkan! ✨`;
@@ -5360,18 +5363,27 @@ async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | nul
               });
             }
 
-            // 5. Kirim Voice Note (VN Resmi WhatsApp) dengan Backsound intonasi suara.mp3
-            try {
-              const vnBuffer = await generateGroupWelcomeVoiceNote(greetingDisplayName);
-              if (vnBuffer && waSocket) {
+            // 5. Langsung Kirimkan Voice Note (VN Resmi WhatsApp) Berdampingan Tanpa Jeda Macet
+            if (vnBuffer && waSocket) {
+              try {
+                // Jeda singkat 0.8 detik agar gambar selesai terdorong ke chat sebelum audio
+                await new Promise(r => setTimeout(r, 800));
+
+                // Gunakan Uint8Array resmi untuk Baileys Protobuf Waveform
+                const fakeWaveform = new Uint8Array(Array.from({ length: 64 }, (_, i) => Math.floor(Math.sin(i / 4) * 35 + 45)));
+
+                console.log(`[Welcome VN] 🚀 Mengirimkan Voice Note sambutan ke grup ${groupJid}...`);
                 await waSocket.sendMessage(groupJid, {
                   audio: vnBuffer,
                   mimetype: "audio/ogg; codecs=opus",
-                  ptt: true
-                });
+                  ptt: true,
+                  seconds: 55,
+                  waveform: fakeWaveform
+                } as any);
+                console.log(`[Welcome VN] ✅ Voice Note sambutan BERHASIL terkirim ke grup!`);
+              } catch (vnErr: any) {
+                console.error(`[Welcome VN] ❌ Gagal mengirim Voice Note sambutan:`, vnErr?.message || vnErr);
               }
-            } catch (vnErr) {
-              console.error("[Welcome VN] Gagal mengirim pesan suara sambutan:", vnErr);
             }
           } catch (pErr) {
             console.error("Gagal menyambut anggota baru:", p, pErr);
