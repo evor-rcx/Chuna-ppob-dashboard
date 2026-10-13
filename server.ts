@@ -2623,6 +2623,119 @@ async function legacyCanvasDebtReceipt(member: any, utangTxs: any[]): Promise<Bu
     }
 }
 
+// Banner Sambutan Otomatis Grup WhatsApp Menggunakan Template Gambar Mentahan
+async function generateWaGroupWelcomeBanner(userName: string, photoUrlOrBuffer?: string | Buffer | null): Promise<Buffer | null> {
+    try {
+        const templatePath = path.join(process.cwd(), "Picsart_26-10-13_07-52-29-570.jpg");
+        if (!fs.existsSync(templatePath)) {
+            console.error("Template gambar Picsart_26-10-13_07-52-29-570.jpg tidak ditemukan!");
+            return null;
+        }
+
+        const bgImg = await loadImage(templatePath);
+        const canvas = createCanvas(bgImg.width, bgImg.height);
+        const ctx = canvas.getContext('2d');
+
+        // 1. Gambar background mentahan template
+        ctx.drawImage(bgImg, 0, 0);
+
+        // Koordinat lingkaran avatar di template (resolusi 2848 x 1600)
+        const avatarCenterX = 1780;
+        const avatarCenterY = 1215;
+        const radius = 132;
+
+        // 2. Muat foto profil WhatsApp pengguna (atau fallback avatar keren)
+        let userAvatarImg: any = null;
+        if (photoUrlOrBuffer) {
+            try {
+                if (typeof photoUrlOrBuffer === 'string') {
+                    const resp = await fetch(photoUrlOrBuffer).catch(() => null);
+                    if (resp && resp.ok) {
+                        const arrBuf = await resp.arrayBuffer();
+                        userAvatarImg = await loadImage(Buffer.from(arrBuf)).catch(() => null);
+                    }
+                } else if (Buffer.isBuffer(photoUrlOrBuffer)) {
+                    userAvatarImg = await loadImage(photoUrlOrBuffer).catch(() => null);
+                }
+            } catch (err) {
+                console.error("Gagal load avatar foto sambutan:", err);
+            }
+        }
+
+        // Gambar avatar bulat di dalam bingkai lingkaran
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(avatarCenterX, avatarCenterY, radius, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.clip();
+
+        if (userAvatarImg) {
+            ctx.drawImage(userAvatarImg, avatarCenterX - radius, avatarCenterY - radius, radius * 2, radius * 2);
+        } else {
+            // Fallback avatar gradien modern
+            const grad = ctx.createLinearGradient(avatarCenterX - radius, avatarCenterY - radius, avatarCenterX + radius, avatarCenterY + radius);
+            grad.addColorStop(0, '#0f172a');
+            grad.addColorStop(1, '#0284c7');
+            ctx.fillStyle = grad;
+            ctx.fillRect(avatarCenterX - radius, avatarCenterY - radius, radius * 2, radius * 2);
+
+            // Inisial nama
+            const initial = (userName && userName.trim()) ? userName.trim().charAt(0).toUpperCase() : 'E';
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 120px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(initial, avatarCenterX, avatarCenterY);
+        }
+        ctx.restore();
+
+        // Cincin cahaya neon halus di sekeliling avatar
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(avatarCenterX, avatarCenterY, radius, 0, Math.PI * 2);
+        ctx.lineWidth = 6;
+        ctx.strokeStyle = '#38bdf8';
+        ctx.shadowColor = '#00e5ff';
+        ctx.shadowBlur = 12;
+        ctx.stroke();
+        ctx.restore();
+
+        // 3. Cetak Nama Profil WhatsApp di Bawah Lingkaran Avatar
+        const nameBoxX = 1520;
+        const nameBoxY = 1370;
+        const nameBoxW = 520;
+        const nameBoxH = 96;
+
+        ctx.save();
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+        ctx.beginPath();
+        ctx.roundRect(nameBoxX, nameBoxY, nameBoxW, nameBoxH, 22);
+        ctx.fill();
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.65)';
+        ctx.shadowColor = 'rgba(14, 165, 233, 0.5)';
+        ctx.shadowBlur = 10;
+        ctx.stroke();
+
+        const cleanName = (userName || 'Member').trim();
+        const displayName = cleanName.length > 15 ? cleanName.substring(0, 14) + '…' : cleanName;
+
+        ctx.font = 'italic bold 48px sans-serif';
+        ctx.fillStyle = '#38bdf8';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = '#0284c7';
+        ctx.shadowBlur = 12;
+        ctx.fillText(`- ${displayName} -`, nameBoxX + nameBoxW / 2, nameBoxY + nameBoxH / 2);
+        ctx.restore();
+
+        return canvas.toBuffer('image/jpeg');
+    } catch (err: any) {
+        console.error("Gagal generateWaGroupWelcomeBanner:", err);
+        return null;
+    }
+}
+
 let digiflazzUsername = db.digiflazzUsername || "";
 let digiflazzApiKey = db.digiflazzApiKey || "";
 let gopayStatus = "Disconnected";
@@ -4045,6 +4158,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
       waSocket.ev.removeAllListeners("connection.update");
       waSocket.ev.removeAllListeners("creds.update");
       waSocket.ev.removeAllListeners("messages.upsert");
+      waSocket.ev.removeAllListeners("group-participants.update");
     }
     
     const { state, saveCreds } = await useMultiFileAuthState(path.join(process.cwd(), "wa_auth"));
@@ -5024,6 +5138,88 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                 }
             }
         }
+      }
+    });
+
+    // 5. Sambutan Otomatis Anggota Baru di Grup WhatsApp
+    waSocket.ev.on("group-participants.update", async (event: any) => {
+      try {
+        const { id: groupJid, participants, action } = event;
+        if (action !== "add" || !Array.isArray(participants) || participants.length === 0) return;
+
+        // Simpan target pengumuman/grup resmi jika belum ada
+        if (!db.waAnnouncementTarget && groupJid.endsWith("@g.us")) {
+          db.waAnnouncementTarget = groupJid;
+          writeDB(db);
+        }
+
+        for (const participant of participants) {
+          try {
+            const rawParticipant = String(participant || "").trim();
+            const cleanDigits = rawParticipant.replace(/@.*$/, "").replace(/:\d+$/, "").replace(/\D/g, "");
+            const cleanPn = resolveSenderWaPhone(rawParticipant, cleanDigits);
+            const mentionJid = cleanPn ? `${cleanPn}@s.whatsapp.net` : rawParticipant;
+
+            // 1. Tarik Nama Profil WhatsApp
+            let participantName = "";
+            if (db.waProfiles) {
+              participantName = db.waProfiles[cleanPn] || db.waProfiles[cleanDigits] || db.waProfiles[rawParticipant] || "";
+            }
+            if (!participantName) {
+              const matchedMember = (db.members || []).find((m: any) => 
+                (m.whatsapp && cleanWaPhone(m.whatsapp) === cleanPn) || 
+                (m.lid && (m.lid === rawParticipant || cleanWaPhone(m.lid) === cleanDigits))
+              );
+              if (matchedMember) {
+                participantName = matchedMember.waProfileName || matchedMember.name || "";
+              }
+            }
+
+            // 2. Tarik Foto Profil WhatsApp Asli
+            let photoUrl = (db.waProfilePhotos && (db.waProfilePhotos[cleanPn] || db.waProfilePhotos[cleanDigits] || db.waProfilePhotos[rawParticipant])) || null;
+            if (!photoUrl && waSocket) {
+              try {
+                if (cleanPn && cleanPn.length >= 8) {
+                  photoUrl = await waSocket.profilePictureUrl(`${cleanPn}@s.whatsapp.net`, "image").catch(() => null);
+                }
+                if (!photoUrl && rawParticipant.includes("@")) {
+                  photoUrl = await waSocket.profilePictureUrl(rawParticipant, "image").catch(() => null);
+                }
+                if (photoUrl) {
+                  if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                  if (cleanPn) db.waProfilePhotos[cleanPn] = photoUrl;
+                  if (cleanDigits) db.waProfilePhotos[cleanDigits] = photoUrl;
+                  writeDB(db);
+                }
+              } catch (e) {}
+            }
+
+            const greetingDisplayName = participantName || (cleanPn ? `+${cleanPn}` : "Kakak");
+
+            // 3. Render Banner Sambutan Otomatis Menggunakan Template Mentahan
+            const bannerBuffer = await generateWaGroupWelcomeBanner(greetingDisplayName, photoUrl);
+
+            // 4. Caption Sambutan
+            const welcomeCaption = `🎉 *SELAMAT DATANG DI GRUP RESMI E4 STORE!* 🎉\n\nHalo Kak @${cleanPn || cleanDigits} 👋\nSelamat bergabung di komunitas resmi *E4 STORE*!\n\n📢 *Informasi Grup:*\n✅ Pantau perubahan harga naik & turun secara real-time\n✅ Update notifikasi gangguan & produk close sementara\n✅ Dapatkan event promo, flash sale & diskon harian\n\nSelamat berbelanja dan semoga harimu menyenangkan! ✨`;
+
+            if (bannerBuffer) {
+              await waSocket.sendMessage(groupJid, {
+                image: bannerBuffer,
+                caption: welcomeCaption,
+                mentions: [mentionJid]
+              });
+            } else {
+              await waSocket.sendMessage(groupJid, {
+                text: welcomeCaption,
+                mentions: [mentionJid]
+              });
+            }
+          } catch (pErr) {
+            console.error("Gagal menyambut anggota baru:", participant, pErr);
+          }
+        }
+      } catch (grpErr) {
+        console.error("Error pada group-participants.update:", grpErr);
       }
     });
 
