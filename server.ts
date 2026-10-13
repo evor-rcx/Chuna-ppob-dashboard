@@ -4661,6 +4661,51 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
         // ==========================================
         if (isSenderOwner && jid) {
             console.log(`[WA Bot] 👑 Pesan dari Owner WA terdeteksi: +${cleanSenderNum} -> "${text}"`);
+            // 0. Perintah Tambah Anggota ke Grup: add.nomor atau !add nomor
+            if (jid.endsWith("@g.us") && (lowerText.startsWith("add.") || lowerText.startsWith("!add ") || lowerText.startsWith("add "))) {
+                try {
+                    let targetRaw = "";
+                    if (lowerText.startsWith("add.")) targetRaw = text.slice(4).trim();
+                    else if (lowerText.startsWith("!add ")) targetRaw = text.slice(5).trim();
+                    else if (lowerText.startsWith("add ")) targetRaw = text.slice(4).trim();
+
+                    const targetClean = targetRaw.replace(/@.*$/, "").replace(/\D/g, "");
+                    let intlNum = targetClean;
+                    if (intlNum.startsWith("0")) intlNum = "62" + intlNum.slice(1);
+                    else if (intlNum.startsWith("8")) intlNum = "62" + intlNum;
+
+                    if (intlNum.length < 9) {
+                        await waSocket.sendMessage(jid, { text: "⚠️ *Format Salah!*\nContoh: *add.08123456789* atau *!add 08123456789*" }, { quoted: msg });
+                        return;
+                    }
+
+                    const targetJid = `${intlNum}@s.whatsapp.net`;
+                    console.log(`[WA Group] Menambahkan anggota ke ${jid}: ${targetJid}`);
+                    const res = await waSocket.groupParticipantsUpdate(jid, [targetJid], "add");
+                    const resItem = Array.isArray(res) && res.length > 0 ? res[0] : null;
+                    const statusCode = String(resItem?.status || "200");
+
+                    if (statusCode === "200") {
+                        await waSocket.sendMessage(jid, { text: `✅ *Berhasil!* Nomor +${intlNum} telah berhasil ditambahkan kembali ke grup.` }, { quoted: msg });
+                    } else if (statusCode === "403" || statusCode === "408") {
+                        let inviteLink = "";
+                        try {
+                            const code = await waSocket.groupInviteCode(jid);
+                            if (code) inviteLink = `https://chat.whatsapp.com/${code}`;
+                        } catch (e) {}
+                        const linkText = inviteLink ? `\n\n🔗 *Tautan Undangan Masuk Langsung:*\n${inviteLink}` : "";
+                        await waSocket.sendMessage(jid, { text: `⚠️ *Privasi Terkunci:* Nomor +${intlNum} menyetel privasi hanya kontak yang dapat menambahkannya ke grup.${linkText}` }, { quoted: msg });
+                    } else if (statusCode === "409") {
+                        await waSocket.sendMessage(jid, { text: `ℹ️ Nomor +${intlNum} sudah menjadi anggota di grup ini.` }, { quoted: msg });
+                    } else {
+                        await waSocket.sendMessage(jid, { text: `✅ Permintaan penambahan nomor +${intlNum} telah diproses (Status: ${statusCode}).` }, { quoted: msg });
+                    }
+                } catch (addErr: any) {
+                    console.error("[WA Group] Gagal menambah anggota:", addErr);
+                    await waSocket.sendMessage(jid, { text: `❌ *Gagal menambahkan nomor:* ${addErr?.message || addErr}` }, { quoted: msg });
+                }
+                return;
+            }
 
             // 1. Menu & Bantuan Owner
             if (
