@@ -5297,7 +5297,7 @@ async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | nul
     const totalDuration = (4 + narrationDuration + 3).toFixed(2);
     const fadeOutStart = (4 + narrationDuration).toFixed(2);
 
-    const ffmpegCmd = "ffmpeg -y -i \"" + bgPath + "\" -i \"" + combinedNarrationFile + "\" -filter_complex \"[0:a]volume=1.0,afade=t=out:st=" + fadeOutStart + ":d=3[bg];[1:a]adelay=4000|4000[voice];[bg][voice]amix=inputs=2:duration=first:dropout_transition=2[mixed]\" -map \"[mixed]\" -map_metadata -1 -t " + totalDuration + " -ar 48000 -ac 1 -c:a libopus -b:a 48k -vbr on -compression_level 10 -frame_duration 20 -application voip \"" + outputOggVn + "\"";
+    const ffmpegCmd = "ffmpeg -y -i \"" + bgPath + "\" -i \"" + combinedNarrationFile + "\" -filter_complex \"[0:a]volume=0.38,afade=t=out:st=" + fadeOutStart + ":d=3[bg];[1:a]adelay=4000|4000,volume=1.35[voice];[bg][voice]amix=inputs=2:duration=first:dropout_transition=2[mixed]\" -map \"[mixed]\" -map_metadata -1 -t " + totalDuration + " -ar 48000 -ac 1 -c:a libopus -b:a 48k -vbr on -compression_level 10 -frame_duration 20 -application voip \"" + outputOggVn + "\"";
     execSync(ffmpegCmd);
 
     let vnBuffer: Buffer | null = null;
@@ -5371,14 +5371,25 @@ async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | nul
             const mentionJid = cleanPn ? `${cleanPn}@s.whatsapp.net` : (rawParticipant.includes("@") ? rawParticipant : `${rawParticipant}@s.whatsapp.net`);
 
             // 1. Ekstraksi Nama Profil Asli WhatsApp (pushName / notify)
-            // 1. Ekstraksi Nama Profil Asli WhatsApp (pushName / notify)
+            // 1. Ekstraksi Lengkap Nama Profil Asli WhatsApp via LID & Nomor Telepon
             let participantName = pNotify || "";
+            // Prioritas 1: Cek nama profil langsung di bawah kunci LID (@lid)
+            if (!participantName && pLid && db.waProfiles && db.waProfiles[pLid] && !isPhoneNumberOrEmpty(db.waProfiles[pLid])) {
+              participantName = db.waProfiles[pLid];
+            }
+            // Prioritas 2: Cek nama profil dari nomor telepon yang terhubung dengan LID
+            if (!participantName && pLid && db.waLids && db.waLids[pLid] && db.waProfiles && db.waProfiles[db.waLids[pLid]] && !isPhoneNumberOrEmpty(db.waProfiles[db.waLids[pLid]])) {
+              participantName = db.waProfiles[db.waLids[pLid]];
+            }
+            // Prioritas 3: Cek via nomor HP bersih
             if (!participantName && cleanPn && db.waProfiles && db.waProfiles[cleanPn] && !isPhoneNumberOrEmpty(db.waProfiles[cleanPn])) {
               participantName = db.waProfiles[cleanPn];
             }
+            // Prioritas 4: Cek via raw participant JID
             if (!participantName && rawParticipant && db.waProfiles && db.waProfiles[rawParticipant] && !isPhoneNumberOrEmpty(db.waProfiles[rawParticipant])) {
               participantName = db.waProfiles[rawParticipant];
             }
+            // Bersihkan karakter tilde (~) di awal nama profil
             if (participantName) {
               participantName = participantName.replace(/^[~\-\s]+/, "").trim();
             }
@@ -5414,7 +5425,7 @@ async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | nul
             ]);
 
             // 4. Caption Sambutan
-            const welcomeCaption = `🎉 *SELAMAT DATANG DI GRUP RESMI E4 STORE!* 🎉\n\nHalo Kak @${phoneTag} 👋\nSelamat bergabung di komunitas resmi *E4 STORE*!\n\n📢 *Informasi Grup:*\n✅ Pantau perubahan harga naik & turun secara real-time\n✅ Update notifikasi gangguan & produk close sementara\n✅ Dapatkan event promo, flash sale & diskon harian\n\nSelamat berbelanja dan semoga harimu menyenangkan! ✨`;
+            const welcomeCaption = `🎉 *SELAMAT DATANG DI GRUP RESMI E4 STORE!* 🎉\n\nHalo Kak @${phoneTag} 👋\nSelamat bergabung di komunitas resmi *E4 STORE*!`;
 
             if (bannerBuffer) {
               await waSocket.sendMessage(groupJid, {
