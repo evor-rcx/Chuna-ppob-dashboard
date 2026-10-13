@@ -5176,10 +5176,13 @@ async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | nul
       greetingTime = "Selamat malam";
     }
 
-    let cleanPronounceName = String(name || "Kakak").replace(/^[~\-\s]+/, "").trim();
-    if (!cleanPronounceName || cleanPronounceName === "Member Baru") {
-      cleanPronounceName = "Kakak";
+    // Transliterasi nama profil WhatsApp agar fasih dibaca TTS (Jepang/Korea/Font Aesthetic)
+    let spokenName = transliterateForTts(name);
+    spokenName = String(spokenName || "").replace(/^[~\-\s]+/, "").trim();
+    if (!spokenName || isPhoneNumberOrEmpty(spokenName) || spokenName === "Member Baru" || /^\+?\d{8,}$/.test(spokenName)) {
+      spokenName = "Kakak";
     }
+    const cleanPronounceName = spokenName;
 
     const chunks = [
       greetingTime + " kepada seluruh penghuni grup yang terhormat, dan selamat datang, " + cleanPronounceName + "! Terima kasih sudah bergabung di grup ini.",
@@ -5235,7 +5238,7 @@ async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | nul
     const totalDuration = (4 + narrationDuration + 3).toFixed(2);
     const fadeOutStart = (4 + narrationDuration).toFixed(2);
 
-    const ffmpegCmd = "ffmpeg -y -i \"" + bgPath + "\" -i \"" + combinedNarrationFile + "\" -filter_complex \"[0:a]volume=0.22,afade=t=out:st=" + fadeOutStart + ":d=3[bg];[1:a]adelay=4000|4000[voice];[bg][voice]amix=inputs=2:duration=first:dropout_transition=2[mixed]\" -map \"[mixed]\" -map_metadata -1 -t " + totalDuration + " -ar 48000 -ac 1 -c:a libopus -b:a 48k -vbr on -compression_level 10 -frame_duration 20 -application voip \"" + outputOggVn + "\"";
+    const ffmpegCmd = "ffmpeg -y -i \"" + bgPath + "\" -i \"" + combinedNarrationFile + "\" -filter_complex \"[0:a]volume=1.0,afade=t=out:st=" + fadeOutStart + ":d=3[bg];[1:a]adelay=4000|4000[voice];[bg][voice]amix=inputs=2:duration=first:dropout_transition=2[mixed]\" -map \"[mixed]\" -map_metadata -1 -t " + totalDuration + " -ar 48000 -ac 1 -c:a libopus -b:a 48k -vbr on -compression_level 10 -frame_duration 20 -application voip \"" + outputOggVn + "\"";
     execSync(ffmpegCmd);
 
     let vnBuffer: Buffer | null = null;
