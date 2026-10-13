@@ -5151,18 +5151,17 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
       }
     });
 
-    // Helper untuk generate Voice Note Sambutan Grup dengan Backsound intonasi suara.mp3
+    // Helper untuk generate Voice Note Sambutan Grup dengan Backsound intonasi suara.mp3 (Fast Parallel Chunks)
 async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | null> {
   try {
     const bgPath = path.resolve(process.cwd(), "intonasi suara.mp3");
     if (!fs.existsSync(bgPath)) {
-      console.warn("[Welcome VN] File intonasi suara.mp3 tidak ditemukan");
+      console.warn("[Welcome VN] File intonasi suara.mp3 tidak ditemukan di root");
       return null;
     }
 
-    // 1. Tentukan Salam Berdasarkan Jam (Waktu Indonesia)
+    // 1. Tentukan Salam Berdasarkan Jam (WIB UTC+7)
     const now = new Date();
-    // Gunakan offset WIB (UTC+7)
     const utcHours = now.getUTCHours();
     const wibHour = (utcHours + 7) % 24;
 
@@ -5177,71 +5176,89 @@ async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | nul
       greetingTime = "Selamat malam";
     }
 
-    // Bersihkan nama pengguna agar terdengar sopan dan natural saat dibaca TTS
     let cleanPronounceName = String(name || "Kakak").replace(/^[~\-\s]+/, "").trim();
     if (!cleanPronounceName || cleanPronounceName === "Member Baru") {
       cleanPronounceName = "Kakak";
     }
 
-    // 2. Susun Naskah Suara Sambutan dengan jeda tanda baca yang santai & rapi
-    const narrationText = `${greetingTime} kepada seluruh penghuni grup yang terhormat, dan selamat datang, ${cleanPronounceName}! Terima kasih sudah bergabung di grup ini.\n\n` +
-      `Diharapkan untuk membaca panduan yang ada di Informasi Grup terlebih dahulu.\n\n` +
-      `Informasi Grup:\n` +
-      `Satu. Pantau perubahan harga naik dan turun secara real-time.\n` +
-      `Dua. Update notifikasi gangguan dan produk close sementara.\n` +
-      `Tiga. Dapatkan event promo, flash sale, dan diskon harian.\n\n` +
-      `Grup ini tidak menerima spam, jadi chat hanya untuk notifikasi saja. Gunakan bot dengan sewajarnya. Terima kasih.\n\n` +
-      `Selamat berbelanja dan semoga harimu menyenangkan!`;
+    const chunks = [
+      greetingTime + " kepada seluruh penghuni grup yang terhormat, dan selamat datang, " + cleanPronounceName + "! Terima kasih sudah bergabung di grup ini.",
+      "Diharapkan untuk membaca panduan yang ada di Informasi Grup terlebih dahulu.",
+      "Informasi Grup: Satu, Pantau perubahan harga naik dan turun secara real-time. Dua, Update notifikasi gangguan dan produk close sementara. Tiga, Dapatkan event promo, flash sale, dan diskon harian.",
+      "Grup ini tidak menerima spam, jadi chat hanya untuk notifikasi saja. Gunakan bot dengan sewajarnya. Terima kasih.",
+      "Selamat berbelanja dan semoga harimu menyenangkan!"
+    ];
 
-    const tmpNarration = path.join("/tmp", `tts_welcome_${Date.now()}_${Math.random().toString(36).substring(7)}.mp3`);
-    const tmpVnOutput = path.join("/tmp", `vn_welcome_${Date.now()}_${Math.random().toString(36).substring(7)}.ogg`);
-
-    // 3. Generate Suara AI Wanita Indonesia Ramah Natural menggunakan EdgeTTS
-    const tts = new EdgeTTS({
-      voice: "id-ID-GadisNeural",
-      lang: "id-ID",
-      outputFormat: "audio-24khz-48kbitrate-mono-mp3",
-      pitch: "+0Hz",
-      rate: "+0%"
-    });
-    await tts.ttsPromise(narrationText, tmpNarration);
-
-    if (!fs.existsSync(tmpNarration) || fs.statSync(tmpNarration).size === 0) {
+    const timestamp = Date.now();
+    const axios = require("axios");
+    const downloadPromises = chunks.map(async (textPart, idx) => {
+      const partPath = path.join("/tmp", "vn_chunk_" + timestamp + "_" + idx + ".mp3");
+      try {
+        const q = encodeURIComponent(textPart);
+        const url = "https://translate.google.com/translate_tts?ie=UTF-8&tl=id&client=tw-ob&q=" + q;
+        const resp = await axios.get(url, {
+          responseType: "arraybuffer",
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+          timeout: 5000
+        });
+        if (resp.data && resp.data.length > 0) {
+          fs.writeFileSync(partPath, Buffer.from(resp.data));
+          return { idx, path: partPath };
+        }
+      } catch (err) {
+        try {
+          const tts = new EdgeTTS({ voice: "id-ID-GadisNeural", lang: "id-ID", outputFormat: "audio-24khz-48kbitrate-mono-mp3", timeout: 5000 });
+          await tts.ttsPromise(textPart, partPath);
+          if (fs.existsSync(partPath)) {
+            return { idx, path: partPath };
+          }
+        } catch (e2) {}
+      }
       return null;
-    }
+    });
 
-    // 4. Hitung durasi suara narator menggunakan ffprobe
+    const results = await Promise.all(downloadPromises);
+    const validParts = results.filter((r): r is { idx: number; path: string } => r !== null).sort((a, b) => a.idx - b.idx);
+    if (validParts.length === 0) return null;
+
     const { execSync } = require("child_process");
-    const durOutput = execSync(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${tmpNarration}"`).toString().trim();
-    const narrationDuration = parseFloat(durOutput) || 20;
+    const concatListFile = path.join("/tmp", "concat_list_" + timestamp + ".txt");
+    const combinedNarrationFile = path.join("/tmp", "combined_voice_" + timestamp + ".mp3");
+    const outputOggVn = path.join("/tmp", "vn_final_" + timestamp + ".ogg");
 
-    // Durasi total = jeda awal intro 4 detik + durasi narasi + sisa outro 3 detik
+    fs.writeFileSync(concatListFile, validParts.map(p => "file '" + p.path + "'").join("\n"));
+    execSync("ffmpeg -y -f concat -safe 0 -i \"" + concatListFile + "\" -c copy \"" + combinedNarrationFile + "\"");
+
+    const durOutput = execSync("ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 \"" + combinedNarrationFile + "\"").toString().trim();
+    const narrationDuration = parseFloat(durOutput) || 25;
+
     const totalDuration = (4 + narrationDuration + 3).toFixed(2);
     const fadeOutStart = (4 + narrationDuration).toFixed(2);
 
-    // 5. Gabungkan Backsound + Narasi dengan FFmpeg:
-    // - adelay=4000|4000: narasi baru mulai di detik ke-4 setelah bel/intro awal
-    // - volume=0.22: musik latar dipelankan ke 22% agar suara narator jernih dominan
-    // - afade=t=out:st=...:d=3: efek pudar keluar halus di 3 detik terakhir
-    // - -c:a libopus: encode ke format opus standar Voice Note WhatsApp resmi
-    const ffmpegCmd = `ffmpeg -y -i "${bgPath}" -i "${tmpNarration}" -filter_complex "[0:a]volume=0.22,afade=t=out:st=${fadeOutStart}:d=3[bg];[1:a]adelay=4000|4000[voice];[bg][voice]amix=inputs=2:duration=first:dropout_transition=2[mixed]" -map "[mixed]" -t ${totalDuration} -c:a libopus -b:a 48k "${tmpVnOutput}"`;
+    const ffmpegCmd = "ffmpeg -y -i \"" + bgPath + "\" -i \"" + combinedNarrationFile + "\" -filter_complex \"[0:a]volume=0.22,afade=t=out:st=" + fadeOutStart + ":d=3[bg];[1:a]adelay=4000|4000[voice];[bg][voice]amix=inputs=2:duration=first:dropout_transition=2[mixed]\" -map \"[mixed]\" -t " + totalDuration + " -c:a libopus -b:a 48k \"" + outputOggVn + "\"";
     execSync(ffmpegCmd);
 
     let vnBuffer: Buffer | null = null;
-    if (fs.existsSync(tmpVnOutput)) {
-      vnBuffer = fs.readFileSync(tmpVnOutput);
-      try { fs.unlinkSync(tmpVnOutput); } catch (e) {}
+    if (fs.existsSync(outputOggVn)) {
+      vnBuffer = fs.readFileSync(outputOggVn);
+      try { fs.unlinkSync(outputOggVn); } catch (e) {}
     }
-    try { fs.unlinkSync(tmpNarration); } catch (e) {}
 
+    try { fs.unlinkSync(concatListFile); } catch (e) {}
+    try { fs.unlinkSync(combinedNarrationFile); } catch (e) {}
+    for (const p of validParts) {
+      try { fs.unlinkSync(p.path); } catch (e) {}
+    }
+
+    console.log("[Welcome VN] Voice Note sambutan berhasil dibuat! Ukuran:", vnBuffer?.length || 0);
     return vnBuffer;
   } catch (err) {
-    console.error("[Welcome VN] Gagal membuat voice note sambutan:", err);
+    console.error("[Welcome VN] Gagal menghasilkan Voice Note sambutan:", err);
     return null;
   }
 }
 
-    // 5. Sambutan Otomatis Anggota Baru di Grup WhatsApp (100% PURE PUSHNAME / NOTIFY RESMI)
+        // 5. Sambutan Otomatis Anggota Baru di Grup WhatsApp (100% PURE PUSHNAME / NOTIFY RESMI)
     waSocket.ev.on("group-participants.update", async (event: any) => {
       try {
         const { id: groupJid, participants, action, author } = event;
