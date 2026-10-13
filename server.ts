@@ -4224,6 +4224,11 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
               if ((contact as any).phoneNumber && contact.id.endsWith('@lid')) {
                   saveWaLid((contact as any).phoneNumber, contact.id);
               }
+              const rawProfileName = contact.notify || (contact as any).verifiedName || contact.name;
+              if (rawProfileName) {
+                  saveWaProfile(contact.id, rawProfileName);
+                  if ((contact as any).phoneNumber) saveWaProfile((contact as any).phoneNumber, rawProfileName);
+              }
           }
       }
       writeDB(db);
@@ -4238,10 +4243,15 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
               if ((contact as any).phoneNumber && contact.id.endsWith('@lid')) {
                   saveWaLid((contact as any).phoneNumber, contact.id);
               }
+              const rawProfileName = contact.notify || (contact as any).verifiedName || contact.name;
+              if (rawProfileName) {
+                  saveWaProfile(contact.id, rawProfileName);
+                  if ((contact as any).phoneNumber) saveWaProfile((contact as any).phoneNumber, rawProfileName);
+              }
           }
       }
     });
-    
+
     waSocket.ev.on("messaging-history.set", (history) => {
       if (!db.waContacts) db.waContacts = [];
       for (const contact of history.contacts || []) {
@@ -4255,12 +4265,16 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
               if ((contact as any).phoneNumber && contact.id.endsWith('@lid')) {
                   saveWaLid((contact as any).phoneNumber, contact.id);
               }
+              const rawProfileName = contact.notify || (contact as any).verifiedName || contact.name;
+              if (rawProfileName) {
+                  saveWaProfile(contact.id, rawProfileName);
+                  if ((contact as any).phoneNumber) saveWaProfile((contact as any).phoneNumber, rawProfileName);
+              }
           }
       }
       writeDB(db);
     });
 
-    
     waSocket.ev.on("connection.update", (update) => {
       const { connection, lastDisconnect } = update;
       if (connection === "close") {
