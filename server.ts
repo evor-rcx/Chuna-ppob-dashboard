@@ -2688,7 +2688,7 @@ async function generateWaGroupWelcomeBanner(userName: string, photoUrlOrBuffer?:
             // Inisial nama
             const initial = (userName && userName.trim()) ? userName.trim().charAt(0).toUpperCase() : 'E';
             ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 120px "Noto Sans SC", "Noto Sans JP", "Noto Sans CJK SC", "Segoe UI Emoji", Arial, sans-serif';
+            ctx.font = `bold 120px ${UNICODE_FONT_STACK}`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(initial, avatarCenterX, avatarCenterY);
@@ -2726,7 +2726,7 @@ async function generateWaGroupWelcomeBanner(userName: string, photoUrlOrBuffer?:
         const cleanName = (userName || 'Member').trim();
         const displayName = cleanName.length > 15 ? cleanName.substring(0, 14) + '…' : cleanName;
 
-        ctx.font = 'bold 44px "Noto Sans SC", "Noto Sans JP", "Noto Sans CJK SC", "Segoe UI Emoji", Arial, sans-serif';
+        ctx.font = `bold 44px ${UNICODE_FONT_STACK}`;
         ctx.fillStyle = '#38bdf8';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -5419,6 +5419,7 @@ async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | nul
             const phoneTag = cleanPn || cleanDigits;
 
             // 3. Render Banner Sambutan & Voice Note Secara Paralel di Awal (Pre-render)
+            console.log(`[Welcome Banner] 🎨 Merender banner untuk: "${greetingDisplayName}"`);
             const [bannerBuffer, vnBuffer] = await Promise.all([
               generateWaGroupWelcomeBanner(greetingDisplayName, photoUrl),
               generateGroupWelcomeVoiceNote(greetingDisplayName)
