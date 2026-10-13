@@ -5312,10 +5312,14 @@ async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | nul
             const mentionJid = cleanPn ? `${cleanPn}@s.whatsapp.net` : (rawParticipant.includes("@") ? rawParticipant : `${rawParticipant}@s.whatsapp.net`);
 
             // 1. Ekstraksi Nama Profil Asli WhatsApp (pushName / notify)
-            // PERHATIAN: DILARANG KERAS mengecek ke db.waProfiles atau buku kontak HP apa pun!
+            // 1. Ekstraksi Nama Profil Asli WhatsApp (pushName / notify)
             let participantName = pNotify || "";
-
-            // Bersihkan simbol gelombang ~ jika ada di pushName bawaan WhatsApp (contoh: ~ オニカーン -> オニカーン)
+            if (!participantName && cleanPn && db.waProfiles && db.waProfiles[cleanPn] && !isPhoneNumberOrEmpty(db.waProfiles[cleanPn])) {
+              participantName = db.waProfiles[cleanPn];
+            }
+            if (!participantName && rawParticipant && db.waProfiles && db.waProfiles[rawParticipant] && !isPhoneNumberOrEmpty(db.waProfiles[rawParticipant])) {
+              participantName = db.waProfiles[rawParticipant];
+            }
             if (participantName) {
               participantName = participantName.replace(/^[~\-\s]+/, "").trim();
             }
