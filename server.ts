@@ -3748,14 +3748,18 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
 
                                     // 2. Send the official Nota receipt canvas
                                     const buffer = await generateCanvasReceipt("nota", tx);
+                                    let txMsgRes: any = null;
                                     if (buffer) {
                                         const receiptCaption = getTransactionReceiptCaption(tx);
-                                        await waSocket.sendMessage(jid, { 
+                                        txMsgRes = await waSocket.sendMessage(jid, { 
                                             image: buffer, 
                                             caption: receiptCaption 
                                         });
                                     } else if (!edited) {
-                                        await waSocket.sendMessage(jid, { text: msg });
+                                        txMsgRes = await waSocket.sendMessage(jid, { text: msg });
+                                    }
+                                    if (txMsgRes?.key?.id) {
+                                        registerMessageForBlockCheck(txMsgRes.key.id, jid, "transaksi", jid.replace(/\D/g, ""), member?.name || tx.customer || "Pelanggan", msg);
                                     }
                                     await waSocket.sendPresenceUpdate("paused", jid);
                                 } else {
@@ -4159,11 +4163,128 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
   let globalWaPhoneNumber = "";
   let waReconnectAttempts = 0;
   
+interface SentMsgTracker {
+    msgId: string;
+    jid: string;
+    type: "utang" | "transaksi";
+    phone: string;
+    customerName: string;
+    totalUtang?: number;
+    msgSummary: string;
+    sentAt: number;
+    status: number; // 2 = SERVER_ACK (centang 1), 3 = DELIVERY_ACK (centang 2), 4 = READ
+    checked: boolean;
+}
+
+const sentMessagesTracker = new Map<string, SentMsgTracker>();
+
+async function notifyTelegramOwnersOfBlock(tracker: SentMsgTracker) {
+    if (!bot || !db.owners || db.owners.length === 0) return;
+    const cleanPhone = tracker.phone.replace(/\D/g, "");
+    const intlPhone = cleanPhone.startsWith("0") ? "62" + cleanPhone.slice(1) : (cleanPhone.startsWith("8") ? "62" + cleanPhone : cleanPhone);
+    const displayName = tracker.customerName || "Pelanggan";
+
+    let messageText = "";
+    if (tracker.type === "utang") {
+        const debtFormatted = (tracker.totalUtang || 0).toLocaleString("id-ID");
+        messageText = `🚨 *[ALERT PIUTANG] TERINDIKASI DIBLOKIR PELANGGAN!*\n` +
+            `Pelanggan: ${displayName} (+${intlPhone})\n` +
+            `Status WA: Nomor aktif terdaftar, tapi pesan macet Centang 1 (Nomor Bot Diblokir).\n` +
+            `Total Utang: Rp ${debtFormatted}\n` +
+            `Tindakan: Segera hubungi nomor pelanggan via telepon seluler biasa!`;
+    } else {
+        const snippet = tracker.msgSummary.length > 120 ? tracker.msgSummary.substring(0, 117) + "..." : tracker.msgSummary;
+        messageText = `⚠️ *PERINGATAN: PESAN WHATSAPP CENTANG 1 / TERINDIKASI DIBLOKIR!*\n\n` +
+            `Nomor Pembeli: +${intlPhone}\n` +
+            `Nama Profil: ${displayName}\n` +
+            `Kategori: Transaksi / Notifikasi\n` +
+            `Status Pesan: Macet di Centang 1 (Delivery Failed / Terindikasi Blokir)\n\n` +
+            `Pesan yang gagal sampai:\n` +
+            `"${snippet}"\n\n` +
+            `💡 Catatan: Nomor ini aktif di WhatsApp tetapi nomor bot kemungkinan telah diblokir. Segera hubungi pelanggan via jalur lain jika ini pesanan penting/berbayar.`;
+    }
+
+    for (const ownerId of db.owners) {
+        try {
+            await bot.telegram.sendMessage(ownerId, messageText);
+        } catch (e) {
+            console.error(`[Telegram] Gagal mengirim alert blokir ke owner ${ownerId}:`, e);
+        }
+    }
+}
+
+function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" | "transaksi", phone: string, customerName: string, msgSummary: string, totalUtang?: number) {
+    if (!msgId || !jid || jid.endsWith("@g.us") || jid.includes("broadcast")) return;
+    sentMessagesTracker.set(msgId, {
+        msgId,
+        jid,
+        type,
+        phone,
+        customerName,
+        totalUtang,
+        msgSummary,
+        sentAt: Date.now(),
+        status: 2, // Default SERVER_ACK (centang 1)
+        checked: false
+    });
+
+    // Jalankan pengecekan setelah 50 detik
+    setTimeout(async () => {
+        const item = sentMessagesTracker.get(msgId);
+        if (!item || item.checked) return;
+        item.checked = true;
+
+        // Hanya proses jika pesan MASIH macet di status centang 1 (SERVER_ACK <= 2)
+        if (item.status <= 2 && waSocket) {
+            try {
+                // 1. Verifikasi keberadaan nomor di WhatsApp server
+                const onWaResults = await waSocket.onWhatsApp(item.jid).catch(() => []);
+                const exists = Array.isArray(onWaResults) && onWaResults.length > 0 && onWaResults[0].exists;
+                
+                // ATURAN KETAT: Jika nomor tidak aktif atau tidak terdaftar, JANGAN kirim alert!
+                if (!exists) {
+                    sentMessagesTracker.delete(msgId);
+                    return;
+                }
+
+                // 2. Cek apakah presence/status diblokir (presenceSubscribe gagal atau tidak bisa membaca status)
+                let blockedPresence = false;
+                try {
+                    await waSocket.presenceSubscribe(item.jid);
+                } catch (e) {
+                    blockedPresence = true;
+                }
+
+                // Cek status profil/about
+                let canFetchStatus = true;
+                try {
+                    const statusRes = await (waSocket as any).fetchStatus?.(item.jid);
+                    if (!statusRes) canFetchStatus = false;
+                } catch (e) {
+                    canFetchStatus = false;
+                }
+
+                // Jika nomor terbukti aktif di WhatsApp namun centang 1 permanen & kehadiran/profil tertutup:
+                // Kuat terindikasi nomor bot diblokir!
+                console.log(`[WA Bot] 🚨 Terdeteksi blokir dari ${item.jid} (Nomor aktif di WA, tapi centang 1 macet)`);
+                await notifyTelegramOwnersOfBlock(item);
+            } catch (err) {
+                console.error("[WA Bot] Error saat validasi blokir:", err);
+            } finally {
+                sentMessagesTracker.delete(msgId);
+            }
+        } else {
+            sentMessagesTracker.delete(msgId);
+        }
+    }, 50000);
+}
+
   const startWaSocket = async () => {
     if (waSocket) {
       waSocket.ev.removeAllListeners("connection.update");
       waSocket.ev.removeAllListeners("creds.update");
       waSocket.ev.removeAllListeners("messages.upsert");
+      waSocket.ev.removeAllListeners("messages.update");
       waSocket.ev.removeAllListeners("group-participants.update");
     }
     
@@ -4313,6 +4434,25 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
     const repliedThanks = new Set<string>();
     const repliedGeneral = new Set<string>();
     const waCustomerSessions: Record<string, { state: 'WAITING_PLN_NOMINAL' | 'IDLE'; meterNumber?: string; meterPhotoBuffer?: Buffer; timestamp: number }> = {};
+    waSocket.ev.on("messages.update", (updates) => {
+      for (const update of updates) {
+        if (update.key && update.key.id) {
+          const item = sentMessagesTracker.get(update.key.id);
+          if (item) {
+            // Update status (3 = DELIVERY_ACK / centang 2, 4 = READ / centang 2 biru)
+            const newStatus = (update.update as any)?.status;
+            if (typeof newStatus === "number") {
+              item.status = newStatus;
+              if (newStatus >= 3) {
+                // Sudah centang 2 / sampai ke HP pengguna, batalkan pengecekan blokir!
+                sentMessagesTracker.delete(update.key.id);
+              }
+            }
+          }
+        }
+      }
+    });
+
     waSocket.ev.on("messages.upsert", async (m) => {
       for (const msgItem of m.messages || []) {
         // Tangkap pushName jika ada notifikasi grup (misal stub message bergabung)
@@ -6047,10 +6187,14 @@ Chuna – E4 Store`;
         await new Promise(r => setTimeout(r, 1200));
         await waSocket.sendPresenceUpdate("paused", jid);
 
+        let debtMsgRes: any = null;
         if (debtReceiptBuffer) {
-          await waSocket.sendMessage(jid, { image: debtReceiptBuffer, caption: msg });
+          debtMsgRes = await waSocket.sendMessage(jid, { image: debtReceiptBuffer, caption: msg });
         } else {
-          await waSocket.sendMessage(jid, { text: msg });
+          debtMsgRes = await waSocket.sendMessage(jid, { text: msg });
+        }
+        if (debtMsgRes?.key?.id) {
+          registerMessageForBlockCheck(debtMsgRes.key.id, jid, "utang", cleanWa, namaMember, msg, totalUtang);
         }
         sent = true;
       } catch (e) {
