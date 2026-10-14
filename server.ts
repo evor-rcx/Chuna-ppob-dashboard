@@ -4170,6 +4170,7 @@ interface SentMsgTracker {
     phone: string;
     customerName: string;
     totalUtang?: number;
+    diffDays?: number;
     msgSummary: string;
     sentAt: number;
     status: number; // 2 = SERVER_ACK (centang 1), 3 = DELIVERY_ACK (centang 2), 4 = READ
@@ -4177,6 +4178,195 @@ interface SentMsgTracker {
 }
 
 const sentMessagesTracker = new Map<string, SentMsgTracker>();
+
+async function generateBlockAlertImage(tracker: SentMsgTracker): Promise<Buffer> {
+    const width = 800;
+    const height = 1200;
+    const canvas = createCanvas(width, height);
+    const ctx = canvas.getContext("2d");
+
+    // 1. Background dasar putih lembut
+    ctx.fillStyle = "#f8fafc";
+    ctx.fillRect(0, 0, width, height);
+
+    // 2. Header Merah Tegas
+    ctx.fillStyle = "#dc2626";
+    ctx.fillRect(0, 0, width, 180);
+
+    // Ikon Segitiga Tanda Seru Putih
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(70, 130);
+    ctx.lineTo(95, 80);
+    ctx.lineTo(120, 130);
+    ctx.closePath();
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = "#ffffff";
+    ctx.stroke();
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `bold 24px ${UNICODE_FONT_STACK}`;
+    ctx.textAlign = "center";
+    ctx.fillText("!", 95, 122);
+    ctx.restore();
+
+    // Judul & Subjudul Header
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "left";
+    ctx.font = `bold 38px ${UNICODE_FONT_STACK}`;
+    ctx.fillText("PERINGATAN", 145, 95);
+
+    ctx.font = `bold 16px ${UNICODE_FONT_STACK}`;
+    ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+    ctx.fillText("PESAN WHATSAPP CENTANG 1 / TERINDIKASI DIBLOKIR!", 145, 132);
+
+    // Format nomor HP (+62 8xx-xxxx-xxxx)
+    const cleanPhone = tracker.phone.replace(/\D/g, "");
+    const intlPhone = cleanPhone.startsWith("0") ? "62" + cleanPhone.slice(1) : (cleanPhone.startsWith("8") ? "62" + cleanPhone : cleanPhone);
+    const formattedPhone = `+${intlPhone.slice(0, 2)} ${intlPhone.slice(2, 5)}-${intlPhone.slice(5, 9)}-${intlPhone.slice(9)}`;
+    const displayName = tracker.customerName || "Pelanggan";
+
+    // --- KOTAK 1: INFORMASI PELANGGAN & STATUS ---
+    const box1X = 50;
+    const box1Y = 210;
+    const box1W = 700;
+    const box1H = tracker.type === "utang" ? 310 : 255;
+
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.roundRect(box1X, box1Y, box1W, box1H, 20);
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "#e2e8f0";
+    ctx.stroke();
+
+    let curY = box1Y + 36;
+    ctx.fillStyle = "#64748b";
+    ctx.font = `14px ${UNICODE_FONT_STACK}`;
+    ctx.fillText("Nomor Pembeli", box1X + 28, curY);
+
+    curY += 28;
+    ctx.fillStyle = "#0f172a";
+    ctx.font = `bold 22px ${UNICODE_FONT_STACK}`;
+    ctx.fillText(formattedPhone, box1X + 28, curY);
+
+    curY += 34;
+    ctx.fillStyle = "#64748b";
+    ctx.font = `14px ${UNICODE_FONT_STACK}`;
+    ctx.fillText("Nama Profil", box1X + 28, curY);
+
+    curY += 28;
+    ctx.fillStyle = "#0f172a";
+    ctx.font = `bold 22px ${UNICODE_FONT_STACK}`;
+    ctx.fillText(displayName, box1X + 28, curY);
+
+    curY += 34;
+    ctx.fillStyle = "#64748b";
+    ctx.font = `14px ${UNICODE_FONT_STACK}`;
+    ctx.fillText("Kategori", box1X + 28, curY);
+
+    curY += 28;
+    ctx.fillStyle = "#0f172a";
+    ctx.font = `bold 20px ${UNICODE_FONT_STACK}`;
+    const categoryText = tracker.type === "utang" ? "Penagihan Utang Kasbon" : "Transaksi / Notifikasi";
+    ctx.fillText(categoryText, box1X + 28, curY);
+
+    if (tracker.type === "utang") {
+        curY += 34;
+        ctx.fillStyle = "#64748b";
+        ctx.font = `14px ${UNICODE_FONT_STACK}`;
+        ctx.fillText("Total Utang & Tunggakan", box1X + 28, curY);
+
+        curY += 28;
+        ctx.fillStyle = "#dc2626";
+        ctx.font = `bold 20px ${UNICODE_FONT_STACK}`;
+        const debtStr = `Rp ${(tracker.totalUtang || 0).toLocaleString("id-ID")}`;
+        const daysStr = tracker.diffDays ? ` (Tunggakan ${tracker.diffDays} Hari)` : "";
+        ctx.fillText(`${debtStr}${daysStr}`, box1X + 28, curY);
+    }
+
+    // Badge Status Merah di Bawah Kotak 1
+    const badgeY = box1Y + box1H - 56;
+    ctx.fillStyle = "#fef2f2";
+    ctx.beginPath();
+    ctx.roundRect(box1X + 26, badgeY, box1W - 52, 42, 10);
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "#f87171";
+    ctx.stroke();
+
+    ctx.fillStyle = "#991b1b";
+    ctx.font = `bold 14px ${UNICODE_FONT_STACK}`;
+    ctx.fillText("Macet di Centang 1 (Delivery Failed / Terindikasi Blokir)", box1X + 42, badgeY + 26);
+
+    // --- KOTAK 2: PESAN YANG GAGAL SAMPAI ---
+    const box2Y = box1Y + box1H + 24;
+    const box2H = tracker.type === "utang" ? 340 : 390;
+
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.roundRect(box1X, box2Y, box1W, box2H, 20);
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "#e2e8f0";
+    ctx.stroke();
+
+    ctx.fillStyle = "#0f172a";
+    ctx.font = `bold 18px ${UNICODE_FONT_STACK}`;
+    ctx.fillText("Pesan yang gagal sampai:", box1X + 28, box2Y + 40);
+
+    // Kotak Abu-Abu Kutipan Pesan
+    const quoteX = box1X + 26;
+    const quoteY = box2Y + 60;
+    const quoteW = box1W - 52;
+    const quoteH = box2H - 86;
+
+    ctx.fillStyle = "#f1f5f9";
+    ctx.beginPath();
+    ctx.roundRect(quoteX, quoteY, quoteW, quoteH, 14);
+    ctx.fill();
+
+    ctx.fillStyle = "#334155";
+    ctx.font = `15px ${UNICODE_FONT_STACK}`;
+    const rawLines = tracker.msgSummary.split("\n");
+    let lineY = quoteY + 34;
+    for (const rL of rawLines.slice(0, 9)) {
+        if (lineY > quoteY + quoteH - 15) break;
+        const printL = rL.length > 55 ? rL.substring(0, 52) + "..." : rL;
+        ctx.fillText(printL, quoteX + 22, lineY);
+        lineY += 28;
+    }
+
+    // --- KOTAK 3: CATATAN KUNING PERINGATAN ---
+    const box3Y = box2Y + box2H + 24;
+    const box3H = 92;
+
+    ctx.fillStyle = "#fefce8";
+    ctx.beginPath();
+    ctx.roundRect(box1X, box3Y, box1W, box3H, 16);
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "#facc15";
+    ctx.stroke();
+
+    ctx.fillStyle = "#854d0e";
+    ctx.font = `bold 15px ${UNICODE_FONT_STACK}`;
+    ctx.fillText("Catatan:", box1X + 28, box3Y + 34);
+
+    ctx.fillStyle = "#713f12";
+    ctx.font = `14px ${UNICODE_FONT_STACK}`;
+    ctx.fillText("Nomor ini aktif di WhatsApp tetapi nomor bot telah diblokir.", box1X + 28, box3Y + 64);
+
+    // --- FOOTER HITAM ELEGAN DI PALING BAWAH ---
+    ctx.fillStyle = "#0f172a";
+    ctx.fillRect(0, height - 52, width, 52);
+
+    ctx.fillStyle = "#94a3b8";
+    ctx.font = `13px ${UNICODE_FONT_STACK}`;
+    ctx.fillText("E4 Store • Sistem Notifikasi Otomatis", box1X, height - 20);
+
+    return canvas.toBuffer("image/jpeg");
+}
 
 async function notifyTelegramOwnersOfBlock(tracker: SentMsgTracker) {
     const cleanPhone = tracker.phone.replace(/\D/g, "");
@@ -4190,6 +4380,7 @@ async function notifyTelegramOwnersOfBlock(tracker: SentMsgTracker) {
             `Pelanggan: ${displayName} (+${intlPhone})\n` +
             `Status WA: Nomor aktif terdaftar, tapi pesan macet Centang 1 (Nomor Bot Diblokir).\n` +
             `Total Utang: Rp ${debtFormatted}\n` +
+            (tracker.diffDays ? `Masa Tunggakan: ${tracker.diffDays} Hari\n` : "") +
             `Tindakan: Segera hubungi nomor pelanggan via telepon seluler biasa!`;
     } else {
         const snippet = tracker.msgSummary.length > 120 ? tracker.msgSummary.substring(0, 117) + "..." : tracker.msgSummary;
@@ -4203,25 +4394,40 @@ async function notifyTelegramOwnersOfBlock(tracker: SentMsgTracker) {
             `💡 Catatan: Nomor ini aktif di WhatsApp tetapi nomor bot telah diblokir.`;
     }
 
-    // 1. Kirim ke Telegram Owner
+    let alertImageBuffer: Buffer | null = null;
+    try {
+        alertImageBuffer = await generateBlockAlertImage(tracker);
+    } catch (imgErr) {
+        console.error("[BlockAlert] Gagal merender gambar alert canvas:", imgErr);
+    }
+
+    // 1. Kirim Foto Gambar Peringatan ke Telegram Owner
     if (bot && db.owners && db.owners.length > 0) {
         for (const ownerId of db.owners) {
             try {
-                await bot.telegram.sendMessage(ownerId, messageText);
+                if (alertImageBuffer) {
+                    await bot.telegram.sendPhoto(ownerId, { source: alertImageBuffer }, { caption: messageText, parse_mode: "Markdown" });
+                } else {
+                    await bot.telegram.sendMessage(ownerId, messageText, { parse_mode: "Markdown" });
+                }
             } catch (e) {
                 console.error(`[Telegram] Gagal mengirim alert blokir ke owner ${ownerId}:`, e);
             }
         }
     }
 
-    // 2. Kirim juga salinan ke WhatsApp Owner resmi (085169949218 / db.ownerWhatsapps)
+    // 2. Kirim juga salinan Foto Gambar Peringatan ke WhatsApp Owner resmi (085169949218 / db.ownerWhatsapps)
     if (waSocket) {
         const ownersList = (db.ownerWhatsapps && db.ownerWhatsapps.length > 0) ? db.ownerWhatsapps : ["6285169949218"];
         for (const owNum of ownersList) {
             try {
                 const cleanOw = owNum.replace(/\D/g, "");
                 const owJid = (cleanOw.startsWith("0") ? "62" + cleanOw.slice(1) : cleanOw) + "@s.whatsapp.net";
-                await waSocket.sendMessage(owJid, { text: messageText });
+                if (alertImageBuffer) {
+                    await waSocket.sendMessage(owJid, { image: alertImageBuffer, caption: messageText });
+                } else {
+                    await waSocket.sendMessage(owJid, { text: messageText });
+                }
             } catch (errOw) {
                 console.error("[WA Bot] Gagal mengirim alert blokir ke WA Owner:", errOw);
             }
@@ -4229,7 +4435,7 @@ async function notifyTelegramOwnersOfBlock(tracker: SentMsgTracker) {
     }
 }
 
-function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" | "transaksi", phone: string, customerName: string, msgSummary: string, totalUtang?: number) {
+function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" | "transaksi", phone: string, customerName: string, msgSummary: string, totalUtang?: number, diffDays?: number) {
     if (!msgId || !jid || jid.endsWith("@g.us") || jid.includes("broadcast")) return;
     sentMessagesTracker.set(msgId, {
         msgId,
@@ -4238,6 +4444,7 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
         phone,
         customerName,
         totalUtang,
+        diffDays,
         msgSummary,
         sentAt: Date.now(),
         status: 2, // Default SERVER_ACK (centang 1)
@@ -6224,7 +6431,7 @@ Chuna – E4 Store`;
           debtMsgRes = await waSocket.sendMessage(jid, { text: msg });
         }
         if (debtMsgRes?.key?.id) {
-          registerMessageForBlockCheck(debtMsgRes.key.id, jid, "utang", cleanWa, namaMember, msg, totalUtang);
+          registerMessageForBlockCheck(debtMsgRes.key.id, jid, "utang", cleanWa, namaMember, msg, totalUtang, diffDays);
         }
         sent = true;
       } catch (e) {
