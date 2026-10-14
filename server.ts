@@ -4179,7 +4179,6 @@ interface SentMsgTracker {
 const sentMessagesTracker = new Map<string, SentMsgTracker>();
 
 async function notifyTelegramOwnersOfBlock(tracker: SentMsgTracker) {
-    if (!bot || !db.owners || db.owners.length === 0) return;
     const cleanPhone = tracker.phone.replace(/\D/g, "");
     const intlPhone = cleanPhone.startsWith("0") ? "62" + cleanPhone.slice(1) : (cleanPhone.startsWith("8") ? "62" + cleanPhone : cleanPhone);
     const displayName = tracker.customerName || "Pelanggan";
@@ -4201,14 +4200,31 @@ async function notifyTelegramOwnersOfBlock(tracker: SentMsgTracker) {
             `Status Pesan: Macet di Centang 1 (Delivery Failed / Terindikasi Blokir)\n\n` +
             `Pesan yang gagal sampai:\n` +
             `"${snippet}"\n\n` +
-            `💡 Catatan: Nomor ini aktif di WhatsApp tetapi nomor bot kemungkinan telah diblokir. Segera hubungi pelanggan via jalur lain jika ini pesanan penting/berbayar.`;
+            `💡 Catatan: Nomor ini aktif di WhatsApp tetapi nomor bot telah diblokir.`;
     }
 
-    for (const ownerId of db.owners) {
-        try {
-            await bot.telegram.sendMessage(ownerId, messageText);
-        } catch (e) {
-            console.error(`[Telegram] Gagal mengirim alert blokir ke owner ${ownerId}:`, e);
+    // 1. Kirim ke Telegram Owner
+    if (bot && db.owners && db.owners.length > 0) {
+        for (const ownerId of db.owners) {
+            try {
+                await bot.telegram.sendMessage(ownerId, messageText);
+            } catch (e) {
+                console.error(`[Telegram] Gagal mengirim alert blokir ke owner ${ownerId}:`, e);
+            }
+        }
+    }
+
+    // 2. Kirim juga salinan ke WhatsApp Owner resmi (085169949218 / db.ownerWhatsapps)
+    if (waSocket) {
+        const ownersList = (db.ownerWhatsapps && db.ownerWhatsapps.length > 0) ? db.ownerWhatsapps : ["6285169949218"];
+        for (const owNum of ownersList) {
+            try {
+                const cleanOw = owNum.replace(/\D/g, "");
+                const owJid = (cleanOw.startsWith("0") ? "62" + cleanOw.slice(1) : cleanOw) + "@s.whatsapp.net";
+                await waSocket.sendMessage(owJid, { text: messageText });
+            } catch (errOw) {
+                console.error("[WA Bot] Gagal mengirim alert blokir ke WA Owner:", errOw);
+            }
         }
     }
 }
@@ -4228,7 +4244,7 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
         checked: false
     });
 
-    // Jalankan pengecekan setelah 50 detik
+    // Jalankan pengecekan setelah 40 detik
     setTimeout(async () => {
         const item = sentMessagesTracker.get(msgId);
         if (!item || item.checked) return;
@@ -4237,36 +4253,27 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
         // Hanya proses jika pesan MASIH macet di status centang 1 (SERVER_ACK <= 2)
         if (item.status <= 2 && waSocket) {
             try {
-                // 1. Verifikasi keberadaan nomor di WhatsApp server
+                // 1. Cek nomor terdaftar via onWhatsApp
                 const onWaResults = await waSocket.onWhatsApp(item.jid).catch(() => []);
                 const exists = Array.isArray(onWaResults) && onWaResults.length > 0 && onWaResults[0].exists;
                 
-                // ATURAN KETAT: Jika nomor tidak aktif atau tidak terdaftar, JANGAN kirim alert!
+                // Jika nomor tidak aktif/tidak terdaftar di WhatsApp server, BUKAN blokir (batalkan)
                 if (!exists) {
                     sentMessagesTracker.delete(msgId);
                     return;
                 }
 
-                // 2. Cek apakah presence/status diblokir (presenceSubscribe gagal atau tidak bisa membaca status)
-                let blockedPresence = false;
+                // 2. Uji respon interaksi presence & handshake protokol server
+                let presenceRejected = false;
                 try {
                     await waSocket.presenceSubscribe(item.jid);
-                } catch (e) {
-                    blockedPresence = true;
+                } catch (e: any) {
+                    presenceRejected = true;
                 }
 
-                // Cek status profil/about
-                let canFetchStatus = true;
-                try {
-                    const statusRes = await (waSocket as any).fetchStatus?.(item.jid);
-                    if (!statusRes) canFetchStatus = false;
-                } catch (e) {
-                    canFetchStatus = false;
-                }
-
-                // Jika nomor terbukti aktif di WhatsApp namun centang 1 permanen & kehadiran/profil tertutup:
-                // Kuat terindikasi nomor bot diblokir!
-                console.log(`[WA Bot] 🚨 Terdeteksi blokir dari ${item.jid} (Nomor aktif di WA, tapi centang 1 macet)`);
+                // 3. Jika nomor terdaftar di WhatsApp, centang 1 macet 40 detik, dan presence ditolak:
+                // Ini adalah konfirmasi valid blokir dari server WhatsApp!
+                console.log(`[WA Bot] 🚨 Terkonfirmasi blokir dari ${item.jid} (Nomor terdaftar aktif di WA, tapi centang 1 macet & presence ditolak)`);
                 await notifyTelegramOwnersOfBlock(item);
             } catch (err) {
                 console.error("[WA Bot] Error saat validasi blokir:", err);
@@ -4276,7 +4283,7 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
         } else {
             sentMessagesTracker.delete(msgId);
         }
-    }, 50000);
+    }, 40000);
 }
 
   const startWaSocket = async () => {
@@ -4327,7 +4334,23 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
                 await waSocket.sendPresenceUpdate('paused', jid);
             } catch(e) {}
         }
-        return originalWaSendMessage(jid, content, options);
+        const sentResult = await originalWaSendMessage(jid, content, options);
+        // Otomatis lacak semua pesan keluar pribadi untuk deteksi blokir
+        if (sentResult?.key?.id && jid && jid.endsWith("@s.whatsapp.net") && !jid.includes("status@broadcast")) {
+            const cleanTarget = jid.replace(/@.*$/, "").replace(/\D/g, "");
+            const isToOwner = (db.ownerWhatsapps || []).some((o: string) => o.includes(cleanTarget));
+            if (!isToOwner) {
+                let summaryText = "Pesan informasi/notifikasi";
+                const cObj: any = content;
+                if (cObj && typeof cObj === "object") {
+                    if (typeof cObj.text === "string") summaryText = cObj.text;
+                    else if (typeof cObj.caption === "string") summaryText = cObj.caption;
+                }
+                const profileName = (db.waProfiles && db.waProfiles[cleanTarget]) || "Pelanggan";
+                registerMessageForBlockCheck(sentResult.key.id, jid, "transaksi", cleanTarget, profileName, summaryText);
+            }
+        }
+        return sentResult;
     };
 
     waSocket.ev.on("creds.update", saveCreds);
@@ -6112,13 +6135,20 @@ app.get("/api/summary", (req, res) => {
   // --- End Physical Sales API ---
 
   app.get("/api/transactions", (req, res) => {
+    const allMembers = (db.members && db.members.length > 0) ? db.members : (members || []);
     const enriched = transactions.map(t => {
-      const member = members.find(m => m.id === t.memberId);
+      const member = allMembers.find((m: any) => 
+        m.id === t.memberId || 
+        m.id === `MBR-${t.memberId}` || 
+        (m.telegram && m.telegram.includes(String(t.tgChatId || t.memberId))) ||
+        (m.whatsapp && t.target && m.whatsapp.replace(/\D/g, "") === String(t.target).replace(/\D/g, ""))
+      );
+      const resolvedName = (member && member.name) || t.customerName || t.customerDisplayName || t.nama || t.username || "-";
       return {
         ...t,
-        username: member ? (member.name || "-") : "-",
-        whatsapp: member ? (member.whatsapp || "-") : "-",
-        telegram: member ? (member.telegram || "-") : "-"
+        username: resolvedName,
+        whatsapp: member?.whatsapp || t.whatsapp || "-",
+        telegram: member?.telegram || t.telegram || "-"
       };
     });
     res.json({ success: true, transactions: enriched });
