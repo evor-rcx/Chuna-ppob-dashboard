@@ -1558,31 +1558,28 @@ function cleanWaPhone(raw: string): string {
     return raw.replace(/@.*$/, '').replace(/:\d+$/, '').replace(/\D/g, '').replace(/^0/, '62');
 }
 
-// Simpan profil asli WhatsApp (pushName / notify) ke db.waProfiles dan member.waProfileName
-function saveWaProfile(rawJidOrPhone: string, pushName?: string | null) {
+// Simpan profil asli WhatsApp dengan Smart Lock & Auto-Sync
+// isDirectMessage = true HANYA jika chat 1-on-1 langsung dari nomor HP pemilik
+function saveWaProfile(rawJidOrPhone: string, pushName?: string | null, isDirectMessage: boolean = false) {
     if (!pushName || typeof pushName !== 'string') return;
     const cleanName = pushName.trim();
     if (!cleanName || isPhoneNumberOrEmpty(cleanName)) return;
 
     if (!db.waProfiles) db.waProfiles = {};
     if (!db.waLids) db.waLids = {};
+    if (!db.waLockedProfiles) db.waLockedProfiles = {};
     let changed = false;
 
     const rawStr = String(rawJidOrPhone).trim();
+    // Jangan proses jika ini ID grup atau broadcast
+    if (rawStr.endsWith('@g.us') || rawStr.endsWith('@newsletter') || rawStr.includes('status@broadcast')) {
+        return;
+    }
+
     const isLid = rawStr.endsWith('@lid') || (!rawStr.includes('@s.whatsapp.net') && rawStr.length >= 14);
     const cleanDigits = rawStr.replace(/@.*$/, '').replace(/:\d+$/, '').replace(/\D/g, '');
 
-    // Simpan di kunci asli dan kunci angka murni
-    if (db.waProfiles[rawStr] !== cleanName) {
-        db.waProfiles[rawStr] = cleanName;
-        changed = true;
-    }
-    if (cleanDigits && db.waProfiles[cleanDigits] !== cleanName) {
-        db.waProfiles[cleanDigits] = cleanName;
-        changed = true;
-    }
-
-    // Jika input adalah LID, cari apakah ada nomor HP yang terhubung
+    // Cari linked phone
     let linkedPhone = '';
     if (isLid) {
         linkedPhone = db.waLids[rawStr] || db.waLids[cleanDigits] || '';
@@ -1594,6 +1591,26 @@ function saveWaProfile(rawJidOrPhone: string, pushName?: string | null) {
         }
     } else {
         linkedPhone = cleanWaPhone(rawStr);
+    }
+
+    const lockKey = linkedPhone || cleanDigits || rawStr;
+    const isCurrentlyLocked = !!db.waLockedProfiles[lockKey];
+
+    // JIKA PROFIL SUDAH TERKUNCI:
+    // HANYA boleh di-update jika pesan datang dari DIRECT CHAT 1-on-1 si pemilik nomor itu sendiri!
+    if (isCurrentlyLocked && !isDirectMessage) {
+        // Abaikan update dari event contacts / background / grup / notification
+        return;
+    }
+
+    // Update profil di cache
+    if (db.waProfiles[rawStr] !== cleanName) {
+        db.waProfiles[rawStr] = cleanName;
+        changed = true;
+    }
+    if (cleanDigits && db.waProfiles[cleanDigits] !== cleanName) {
+        db.waProfiles[cleanDigits] = cleanName;
+        changed = true;
     }
 
     if (linkedPhone && linkedPhone.length >= 8) {
@@ -1613,18 +1630,33 @@ function saveWaProfile(rawJidOrPhone: string, pushName?: string | null) {
         }
     }
 
-    // Perbarui member di memori & database jika cocok
+    // Perbarui member di memori & database HANYA jika pencocokan nomor eksak (minimal 9 digit)
     const targetMembers = Array.isArray(members) ? members : (db.members || []);
     for (const m of targetMembers) {
         const mClean = cleanWaPhone(m.whatsapp || '');
         const mLidDigits = m.lid ? String(m.lid).replace(/@.*$/, '').replace(/\D/g, '') : '';
-        const match = (linkedPhone && mClean === linkedPhone) || 
-                      (cleanDigits && (mClean === cleanDigits || mLidDigits === cleanDigits || m.lid === rawStr));
+        
+        // Pencocokan eksak: pastikan nomor HP cocok murni
+        const match = (linkedPhone && linkedPhone.length >= 9 && mClean === linkedPhone) || 
+                      (!linkedPhone && cleanDigits && cleanDigits.length >= 9 && (mClean === cleanDigits || mLidDigits === cleanDigits));
         if (match) {
+            // Jika profil member sudah terkunci dan bukan pesan langsung dari orangnya, jangan timpa!
+            if (m.isProfileLocked && !isDirectMessage) {
+                continue;
+            }
             if (m.waProfileName !== cleanName) {
                 m.waProfileName = cleanName;
+                m.isProfileLocked = true; // KUNCI otomatis!
                 changed = true;
             }
+        }
+    }
+
+    // KUNCI status profil di level database
+    if (lockKey && lockKey.length >= 8) {
+        if (!db.waLockedProfiles[lockKey]) {
+            db.waLockedProfiles[lockKey] = true;
+            changed = true;
         }
     }
 
@@ -1835,9 +1867,15 @@ function isPhoneNumberOrEmpty(val?: string | null): boolean {
         return false;
     }
 
-    // Hanya filter nama toko / bot itu sendiri agar bot tidak memanggil dirinya sendiri
+    // Filter ketat nama sistem / bot / kata error agar tidak pernah disimpan sebagai nama pelanggan
     const lower = trimmed.toLowerCase().replace(/[\s_\-\.]+/g, '');
-    if (lower === 'e4store' || lower === 'chuna' || lower === 'chunabot') {
+    if (
+        lower === 'e4store' || lower === 'chuna' || lower === 'chunabot' ||
+        lower === 'notifikasi' || lower === 'notification' || lower === 'notif' ||
+        lower === 'admin' || lower === 'system' || lower === 'server' ||
+        lower === 'unknown' || lower === 'broadcast' || lower === 'undefined' ||
+        lower === 'null' || lower === 'pelanggan'
+    ) {
         return true;
     }
 
@@ -4705,21 +4743,7 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
 
     waSocket.ev.on("messages.upsert", async (m) => {
       for (const msgItem of m.messages || []) {
-        // Tangkap pushName jika ada notifikasi grup (misal stub message bergabung)
-        if (msgItem.messageStubType && msgItem.pushName && msgItem.key?.remoteJid?.endsWith("@g.us")) {
-          const rawParams = msgItem.messageStubParameters || [];
-          for (const rawP of rawParams) {
-            try {
-              const parsed = typeof rawP === "string" && rawP.startsWith("{") ? JSON.parse(rawP) : rawP;
-              const pJid = typeof parsed === "object" ? (parsed.phoneNumber || parsed.id) : String(parsed || "");
-              if (pJid) {
-                const cleanP = cleanWaPhone(pJid);
-                if (cleanP) saveWaProfile(cleanP, msgItem.pushName);
-                saveWaProfile(pJid, msgItem.pushName);
-              }
-            } catch (e) {}
-          }
-        }
+        // Cegah penangkapan massal stub parameter grup (penyebab tertimpa 3-5 member sekaligus)
 
         const senderJid = msgItem.key?.participant || msgItem.key?.remoteJid || '';
         const pushName = msgItem.pushName;
@@ -4754,9 +4778,10 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
           } catch (e) {}
         }
 
-        // 3. Simpan Profil Pengirim (Nama & Foto)
+        // 3. Simpan Profil Pengirim (Nama & Foto) dengan Deteksi Direct Message
         if (pushName) {
-          saveWaProfile(senderJid, pushName);
+          const isDirect1on1 = !rJid.endsWith('@g.us') && !rJid.endsWith('@newsletter') && !rJid.includes('status@broadcast');
+          saveWaProfile(senderJid, pushName, isDirect1on1);
         }
 
         // 4. Catat Pesan Masuk untuk Notifikasi Sistem (Real-time Incoming Chat Reader)
