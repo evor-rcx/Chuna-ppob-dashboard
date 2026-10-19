@@ -17,6 +17,7 @@ import {
   Layers, 
   X, 
   CheckCircle2,
+  AlertCircle,
   Tv,
   Receipt,
   Ticket
@@ -36,6 +37,22 @@ export function Produk({ onBack }: { onBack: () => void }) {
   // Category & Brand Filter States
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [selectedBrand, setSelectedBrand] = useState<string>('ALL');
+  // Status Edit: ALL = Semua, UNEDITED = Belum Di-edit / Belum Diatur, EDITED = Sudah Di-edit / Siap Jual
+  const [editStatus, setEditStatus] = useState<'ALL' | 'UNEDITED' | 'EDITED'>('ALL');
+  // Helper: Deteksi apakah produk sudah pernah diatur laba/harganya atau belum
+  const isProductEdited = (p: any): boolean => {
+    const originalPrice = Number(p.price) || 0;
+    const pFee = fees[p.buyer_sku_code];
+    const feeBiasa = pFee ? (parseInt(pFee.biasa as string) || 0) : (p.fee_biasa || 0);
+    const feeVip = pFee ? (parseInt(pFee.vip as string) || 0) : (p.fee_vip || 0);
+    const pHarga = hargas[p.buyer_sku_code];
+    const hargaOwner = pHarga?.owner !== undefined ? (parseInt(pHarga.owner) || 0) : (p.owner_fixed || (originalPrice + (p.fee_owner || 0)));
+    const ownerProfit = Math.max(0, hargaOwner - originalPrice);
+    
+    // Dianggap SUDAH DI-EDIT jika Fee Biasa > 0 ATAU Fee VIP > 0 ATAU Laba Owner > 0 ATAU ada owner_fixed khusus
+    return feeBiasa > 0 || feeVip > 0 || ownerProfit > 0 || (p.owner_fixed !== undefined && p.owner_fixed > originalPrice);
+  };
+
   
   // Sorting State - default is price ascending with diamond tie-breaker
   const [sortBy, setSortBy] = useState<'price-asc' | 'price-desc' | 'nominal-asc' | 'name-asc' | 'name-desc'>('price-asc');
@@ -132,32 +149,47 @@ export function Produk({ onBack }: { onBack: () => void }) {
     return p.category || 'Lainnya';
   };
 
-  // All categories available in current product list
+  // Hitung jumlah total produk yang belum di-edit di seluruh katalog
+  const totalUneditedCount = useMemo(() => {
+    return products.filter(p => !isProductEdited(p)).length;
+  }, [products, fees, hargas]);
+
+  const totalEditedCount = useMemo(() => {
+    return products.length - totalUneditedCount;
+  }, [products, totalUneditedCount]);
+
+  // All categories available in current product list dengan counter belum diatur
   const availableCategories = useMemo(() => {
-    const catMap = new Map<string, number>();
+    const catMap = new Map<string, { total: number; unedited: number }>();
     products.forEach(p => {
       const cat = getNormalizedCategory(p);
-      catMap.set(cat, (catMap.get(cat) || 0) + 1);
+      const isEdited = isProductEdited(p);
+      const prev = catMap.get(cat) || { total: 0, unedited: 0 };
+      catMap.set(cat, {
+        total: prev.total + 1,
+        unedited: prev.unedited + (isEdited ? 0 : 1)
+      });
     });
 
     const standardOrder = ['Games', 'E-Money', 'Pulsa', 'Data', 'PLN', 'Voucher', 'Streaming', 'Pascabayar'];
-    const sortedCats: { name: string; count: number }[] = [];
+    const sortedCats: { name: string; count: number; unedited: number }[] = [];
 
     // Add standard ones in preferred order if present
     standardOrder.forEach(sc => {
       if (catMap.has(sc)) {
-        sortedCats.push({ name: sc, count: catMap.get(sc)! });
+        const item = catMap.get(sc)!;
+        sortedCats.push({ name: sc, count: item.total, unedited: item.unedited });
         catMap.delete(sc);
       }
     });
 
     // Add any remaining categories
-    catMap.forEach((count, name) => {
-      sortedCats.push({ name, count });
+    catMap.forEach((item, name) => {
+      sortedCats.push({ name, count: item.total, unedited: item.unedited });
     });
 
     return sortedCats;
-  }, [products]);
+  }, [products, fees, hargas]);
 
   // Available brands under current category (e.g. all games when Games is selected)
   const availableBrands = useMemo(() => {
@@ -219,6 +251,14 @@ export function Produk({ onBack }: { onBack: () => void }) {
         if ((p.brand || '').trim().toUpperCase() !== selectedBrand.toUpperCase()) {
           return false;
         }
+      }
+
+      // Status Edit Filter (Belum Diatur vs Sudah Diatur)
+      if (editStatus === 'UNEDITED' && isProductEdited(p)) {
+        return false;
+      }
+      if (editStatus === 'EDITED' && !isProductEdited(p)) {
+        return false;
       }
 
       // Search query
@@ -462,6 +502,60 @@ export function Produk({ onBack }: { onBack: () => void }) {
           </div>
         )}
 
+        {/* TAB FILTER STATUS PENGATURAN PRODUK (BELUM DI-EDIT VS SUDAH DI-EDIT) */}
+        <div className="bg-slate-900/60 p-3 rounded-2xl border border-slate-800 flex flex-wrap items-center justify-between gap-3 shadow-md">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+              <Sparkles size={14} className="text-amber-400" /> Status Pengaturan:
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setEditStatus('ALL')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                editStatus === 'ALL'
+                  ? 'bg-gradient-to-r from-slate-700 to-slate-800 text-white shadow-md ring-2 ring-slate-500/50'
+                  : 'bg-slate-800/60 text-slate-400 hover:text-white hover:bg-slate-700/60 border border-slate-700/40'
+              }`}
+            >
+              Semua Produk ({products.length})
+            </button>
+
+            <button
+              onClick={() => setEditStatus('UNEDITED')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                editStatus === 'UNEDITED'
+                  ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-slate-950 shadow-md shadow-amber-500/20 ring-2 ring-amber-400/80'
+                  : 'bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/30'
+              }`}
+              title="Produk yang fee biasa/vip masih 0 atau belum diberi laba"
+            >
+              <AlertCircle size={14} className="text-amber-400" />
+              <span>⚠️ Belum Di-edit / Belum Diatur</span>
+              <span className="px-1.5 py-0.5 rounded-md text-[10px] font-mono bg-amber-500/20 text-amber-300 font-bold">
+                {totalUneditedCount}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setEditStatus('EDITED')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                editStatus === 'EDITED'
+                  ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-500/20 ring-2 ring-emerald-400/80'
+                  : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/30'
+              }`}
+              title="Produk yang sudah memiliki fee atau harga jual khusus"
+            >
+              <CheckCircle2 size={14} className="text-emerald-400" />
+              <span>✅ Sudah Di-edit / Siap Jual</span>
+              <span className="px-1.5 py-0.5 rounded-md text-[10px] font-mono bg-emerald-500/20 text-emerald-300 font-bold">
+                {totalEditedCount}
+              </span>
+            </button>
+          </div>
+        </div>
+
         {/* 1. ROW TOMBOL KATEGORI UTAMA: Dari E-Money, Games, sampai Semua Kategori */}
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-400 px-1">
@@ -502,6 +596,11 @@ export function Produk({ onBack }: { onBack: () => void }) {
                   <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono ${isActive ? 'bg-white/20 text-white' : 'bg-slate-700 text-slate-400'}`}>
                     {cat.count}
                   </span>
+                  {cat.unedited > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-md text-[9px] bg-amber-500/25 text-amber-300 border border-amber-500/40 font-mono font-bold" title={`${cat.unedited} produk belum diatur`}>
+                      ⚠️ {cat.unedited}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -680,7 +779,18 @@ export function Produk({ onBack }: { onBack: () => void }) {
                       {p.buyer_sku_code}
                     </td>
                     <td className="px-5 py-3.5 text-slate-200">
-                      <div className="font-medium text-white">{p.product_name}</div>
+                      <div className="font-medium text-white flex items-center gap-2">
+                        <span>{p.product_name}</span>
+                        {isProductEdited(p) ? (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 inline-flex items-center gap-0.5" title="Sudah memiliki fee/margin keuntungan">
+                            ✅ Siap Jual
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 inline-flex items-center gap-0.5 animate-pulse" title="Belum memiliki fee atau harga jual belum disesuaikan">
+                            ⚠️ Belum Diatur
+                          </span>
+                        )}
+                      </div>
                       <div className="text-[10px] text-slate-400 flex items-center gap-2 mt-0.5">
                         <span>Status: {p.buyer_product_status ? '🟢 Normal' : '🔴 Gangguan'}</span>
                         {p.desc && <span className="truncate max-w-xs text-slate-400">• {p.desc}</span>}
