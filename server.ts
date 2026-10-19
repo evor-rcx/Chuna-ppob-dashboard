@@ -1467,16 +1467,36 @@ let db = readDB();
 let productFees: Record<string, { biasa: number, vip: number, owner?: number, owner_fixed?: number }> = db.productFees || {};
 
 function getProductFee(sku: string) {
+    const isPascaSku = (s: string) => {
+        const l = (s || "").toLowerCase();
+        return l.includes("pasca") || l.includes("plnpasca") || l.includes("bpjs") || l.includes("pdam") || l.includes("tagihan") || l.includes("telkom") || l.includes("indihome") || l.includes("pgn");
+    };
+
     if (!sku) return { biasa: 0, vip: 0, owner: 0, owner_fixed: undefined };
-    if (productFees[sku]) return productFees[sku];
-    const upper = sku.toUpperCase();
-    if (productFees[upper]) return productFees[upper];
-    const lower = sku.toLowerCase();
-    if (productFees[lower]) return productFees[lower];
+    let feeObj: any = null;
+    if (productFees[sku]) feeObj = productFees[sku];
+    else if (productFees[sku.toUpperCase()]) feeObj = productFees[sku.toUpperCase()];
+    else if (productFees[sku.toLowerCase()]) feeObj = productFees[sku.toLowerCase()];
+    else {
+        const key = Object.keys(productFees).find(k => k.toLowerCase() === sku.toLowerCase());
+        if (key) feeObj = productFees[key];
+    }
     
-    const key = Object.keys(productFees).find(k => k.toLowerCase() === lower);
-    if (key) return productFees[key];
+    if (feeObj) {
+        // Jika pascabayar tapi fee masih 0, otomatis terapkan proteksi biaya admin minimal agar owner tidak rugi
+        if (isPascaSku(sku)) {
+            const biasa = (feeObj.biasa && feeObj.biasa > 0) ? feeObj.biasa : 2500;
+            const vip = (feeObj.vip && feeObj.vip > 0) ? feeObj.vip : 2000;
+            const owner = feeObj.owner !== undefined ? feeObj.owner : 2500;
+            return { biasa, vip, owner, owner_fixed: feeObj.owner_fixed };
+        }
+        return feeObj;
+    }
     
+    // Default fallback jika belum pernah diset sama sekali:
+    if (isPascaSku(sku)) {
+        return { biasa: 2500, vip: 2000, owner: 2500 };
+    }
     return { biasa: 0, vip: 0, owner: 0 };
 }
 
@@ -2039,18 +2059,18 @@ export function generateSuccessMessage(params: SuccessMessageParams): string {
         (catLower.includes('pln') || brandLower === 'pln' || pNameLower.includes('pln') || skuLower.includes('plnpasca')) &&
         (catLower.includes('pasca') || pNameLower.includes('pasca') || pNameLower.includes('tagihan'))
     ) {
-        const nominalStr = tagihan ? `sebesar Rp ${Number(tagihan).toLocaleString('id-ID')}` : (price ? `sebesar Rp ${Number(price).toLocaleString('id-ID')}` : extractNominal(productName));
-        detailSukses = `Pembayaran tagihan PLN ${nominalStr} untuk ID ${target}${custSuffix} sudah berhasil.`;
+        const totalHargaJual = price ? `sebesar Rp ${Number(price).toLocaleString('id-ID')}` : (tagihan ? `sebesar Rp ${Number(tagihan).toLocaleString('id-ID')}` : extractNominal(productName));
+        detailSukses = `Pembayaran tagihan PLN ${totalHargaJual} untuk ID ${target}${custSuffix} sudah berhasil.`;
     }
     // 3. 🏥 BPJS
     else if (catLower.includes('bpjs') || brandLower.includes('bpjs') || pNameLower.includes('bpjs') || skuLower.includes('bpjs')) {
-        const nominalStr = tagihan ? `sebesar Rp ${Number(tagihan).toLocaleString('id-ID')}` : (price ? `sebesar Rp ${Number(price).toLocaleString('id-ID')}` : extractNominal(productName));
-        detailSukses = `Pembayaran BPJS ${nominalStr} untuk nomor ${target}${custSuffix} sudah berhasil.`;
+        const totalHargaJual = price ? `sebesar Rp ${Number(price).toLocaleString('id-ID')}` : (tagihan ? `sebesar Rp ${Number(tagihan).toLocaleString('id-ID')}` : extractNominal(productName));
+        detailSukses = `Pembayaran BPJS ${totalHargaJual} untuk nomor ${target}${custSuffix} sudah berhasil.`;
     }
     // 4. 🚰 PDAM
     else if (catLower.includes('pdam') || brandLower.includes('pdam') || pNameLower.includes('pdam') || pNameLower.includes('air') || skuLower.includes('pdam')) {
-        const nominalStr = tagihan ? `sebesar Rp ${Number(tagihan).toLocaleString('id-ID')}` : (price ? `sebesar Rp ${Number(price).toLocaleString('id-ID')}` : extractNominal(productName));
-        detailSukses = `Pembayaran PDAM ${nominalStr} untuk ID ${target}${custSuffix} sudah berhasil.`;
+        const totalHargaJual = price ? `sebesar Rp ${Number(price).toLocaleString('id-ID')}` : (tagihan ? `sebesar Rp ${Number(tagihan).toLocaleString('id-ID')}` : extractNominal(productName));
+        detailSukses = `Pembayaran PDAM ${totalHargaJual} untuk ID ${target}${custSuffix} sudah berhasil.`;
     }
     // 5. 💰 E-Money / E-Toll (Kartu fisik seperti Brizzi, TapCash, Mandiri E-Money, Flazz)
     else if (
