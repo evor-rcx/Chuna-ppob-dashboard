@@ -492,9 +492,16 @@ export function MemberOffline({ onBack }: { onBack: () => void }) {
               {/* Menarik Nama Profil WhatsApp */}
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-semibold text-emerald-400">
-                    Nama Profil WhatsApp (Stiker & Nota)
-                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <label className="block text-xs font-semibold text-emerald-400">
+                      Nama Profil WhatsApp (Stiker & Nota)
+                    </label>
+                    {selectedMember?.isProfileLocked && (
+                      <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.2 rounded font-bold flex items-center gap-0.5" title="Terkunci Aman: Hanya bisa diupdate jika customer kirim chat pribadi langsung ke bot">
+                        🔒 Terkunci Aman
+                      </span>
+                    )}
+                  </div>
                   <button
                     type="button"
                     disabled={loadingLookup}
