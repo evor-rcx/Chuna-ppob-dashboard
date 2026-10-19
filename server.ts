@@ -6891,14 +6891,16 @@ Chuna – E4 Store`;
       }
       if (!photoUrl && existingMember?.photoUrl) photoUrl = existingMember.photoUrl;
 
-      // 5. Cari Nama Profil WhatsApp dari cache (Phone dan LID)
+      // 5. Cari Nama Profil WhatsApp asli dari cache (~PushName)
       if (db.waProfiles) {
-        waProfileName = db.waProfiles[cleanPhone] || db.waProfiles[localPhone] || db.waProfiles[plainPhone] ||
-                        (lid && db.waProfiles[lid]) || (lidDigits && db.waProfiles[lidDigits]) || null;
+        const candidate = db.waProfiles[cleanPhone] || db.waProfiles[localPhone] || db.waProfiles[plainPhone] ||
+                          (lid && db.waProfiles[lid]) || (lidDigits && db.waProfiles[lidDigits]) || null;
+        // Pastikan bukan nama kasir atau kata terlarang
+        if (candidate && !isPhoneNumberOrEmpty(candidate)) {
+          waProfileName = candidate;
+        }
       }
-      if (!waProfileName && existingMember?.waProfileName && existingMember.waProfileName !== '-') {
-        waProfileName = existingMember.waProfileName;
-      }
+      // DILARANG KERAS fallback ke nama kasir member! Jika belum ada PushName WA asli, biarkan null.
 
       res.json({
         success: true,
@@ -6974,10 +6976,13 @@ Chuna – E4 Store`;
                      (fetchedLid && db.waProfilePhotos[fetchedLid]) || (lidDigits && db.waProfilePhotos[lidDigits]) || null;
     }
 
-    // 4. Ambil nama profil dari cache (Phone dan LID)
+    // 4. Ambil nama profil asli dari cache (~PushName)
     if (!fetchedName && db.waProfiles) {
-      fetchedName = db.waProfiles[cleanPhone] || db.waProfiles[localPhone] || db.waProfiles[plainPhone] ||
-                    (fetchedLid && db.waProfiles[fetchedLid]) || (lidDigits && db.waProfiles[lidDigits]) || null;
+      const candidate = db.waProfiles[cleanPhone] || db.waProfiles[localPhone] || db.waProfiles[plainPhone] ||
+                        (fetchedLid && db.waProfiles[fetchedLid]) || (lidDigits && db.waProfiles[lidDigits]) || null;
+      if (candidate && !isPhoneNumberOrEmpty(candidate)) {
+        fetchedName = candidate;
+      }
     }
 
     let updated = false;
@@ -7059,11 +7064,18 @@ Chuna – E4 Store`;
 
         const lidDigits = lid ? String(lid).replace(/@.*$/, '').replace(/\D/g, '') : '';
 
-        // 3. Tarik nama profil WhatsApp dari db.waProfiles (Phone dan LID)
-        let waName = (m.waProfileName && m.waProfileName !== '-') ? m.waProfileName : null;
-        if (!waName && db.waProfiles) {
-          waName = db.waProfiles[cleanPhone] || db.waProfiles[localPhone] || db.waProfiles[plainPhone] || 
-                   (lid && db.waProfiles[lid]) || (lidDigits && db.waProfiles[lidDigits]) || null;
+        // 3. Tarik nama profil asli WhatsApp (~PushName) dari db.waProfiles
+        let waName: string | null = null;
+        if (db.waProfiles) {
+          const candidate = db.waProfiles[cleanPhone] || db.waProfiles[localPhone] || db.waProfiles[plainPhone] || 
+                            (lid && db.waProfiles[lid]) || (lidDigits && db.waProfiles[lidDigits]) || null;
+          if (candidate && !isPhoneNumberOrEmpty(candidate)) {
+            waName = candidate;
+          }
+        }
+        // Jika belum ada di cache tapi member sudah punya waProfileName yang valid dan bukan nama kasir
+        if (!waName && m.waProfileName && m.waProfileName !== '-' && !isPhoneNumberOrEmpty(m.waProfileName) && m.waProfileName.trim().toLowerCase() !== (m.name || '').trim().toLowerCase()) {
+          waName = m.waProfileName;
         }
 
         // 4. Tarik foto profil dari db.waProfilePhotos jika belum dapat
@@ -7074,6 +7086,7 @@ Chuna – E4 Store`;
 
         if (waName && m.waProfileName !== waName) {
           m.waProfileName = waName;
+          m.isProfileLocked = true; // Kunci otomatis setelah nama profil asli ditarik!
           changed = true;
         }
         if (photo && m.photoUrl !== photo) {
