@@ -1408,6 +1408,7 @@ function readDB() {
   }
   return db;
 }
+let lastInternalWriteTime = 0;
 function writeDB(data: any) {
   if (!data.waProfiles) data.waProfiles = {};
   if (!data.waProfilePhotos) data.waProfilePhotos = {};
@@ -1415,7 +1416,9 @@ function writeDB(data: any) {
   try {
     securitySuite.auditDatabaseIntegrity(data);
   } catch (e) {}
+  lastInternalWriteTime = Date.now();
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+  lastInternalWriteTime = Date.now();
 }
 
 function normalizeWaNumber(phoneOrJid: string): string {
@@ -1516,6 +1519,10 @@ let members: any[] = db.members || [];
 
 fs.watchFile(DB_FILE, (curr, prev) => {
   if (curr.mtime !== prev.mtime) {
+    // Abaikan reload jika perubahan file berasal dari proses writeDB internal sendiri (< 5 detik)
+    if (Date.now() - lastInternalWriteTime < 5000) {
+      return;
+    }
     try {
       const newDb = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
       db = newDb;
@@ -14334,8 +14341,12 @@ E4 Store`,
     const localAvatarPath = path.join(avatarDir, `${psid}.jpg`);
     const hasLocalAvatar = fs.existsSync(localAvatarPath);
 
-    if (!forceRefresh && cached && cached.name && hasLocalAvatar && (Date.now() - (cached.updatedAt || 0) < 12 * 3600 * 1000)) {
-      return { name: cached.name, photoUrl: `/api/fb-avatar/${psid}` };
+    // Jika PSID ini sudah pernah dicek/di-cache dalam 12 jam terakhir, jangan panggil ulang Graph API atau writeDB(db) kecuali forceRefresh = true
+    if (!forceRefresh && cached && (Date.now() - (cached.updatedAt || 0) < 12 * 3600 * 1000)) {
+      return {
+        name: cached.name || null,
+        photoUrl: hasLocalAvatar ? `/api/fb-avatar/${psid}` : (cached.photoUrl || null)
+      };
     }
 
     const pageToken = db.fbConfig?.pageAccessToken || process.env.FB_PAGE_ACCESS_TOKEN;
@@ -14349,7 +14360,7 @@ E4 Store`,
     let fbName: string | null = cached?.name || null;
     let rawPicUrl: string | null = cached?.rawPhotoUrl || null;
 
-    // 1. Coba ambil first_name, last_name, name, profile_pic dari Graph API
+    // 1. Coba ambil first_name, last_name, name, profile_pic dari Graph API (dengan timeout 3 detik)
     const fieldCandidates = [
       "first_name,last_name,name,profile_pic",
       "first_name,last_name,profile_pic",
@@ -14360,7 +14371,10 @@ E4 Store`,
 
     for (const fields of fieldCandidates) {
       try {
-        const res = await fetch(`https://graph.facebook.com/v19.0/${encodeURIComponent(psid)}?fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(pageToken)}`);
+        const res = await fetch(
+          `https://graph.facebook.com/v19.0/${encodeURIComponent(psid)}?fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(pageToken)}`,
+          { signal: AbortSignal.timeout(3000) }
+        );
         const data: any = await res.json();
         if (data && !data.error) {
           const parsedName = data.name || [data.first_name, data.last_name].filter(Boolean).join(" ").trim();
@@ -14375,7 +14389,10 @@ E4 Store`,
     // 1b. Fallback Nama Akun Facebook via Conversations Participants API jika direct PSID dibatasi izin Meta
     if (!fbName) {
       try {
-        const convRes = await fetch(`https://graph.facebook.com/v19.0/me/conversations?fields=participants&limit=30&access_token=${encodeURIComponent(pageToken)}`);
+        const convRes = await fetch(
+          `https://graph.facebook.com/v19.0/me/conversations?fields=participants&limit=30&access_token=${encodeURIComponent(pageToken)}`,
+          { signal: AbortSignal.timeout(3000) }
+        );
         const convData: any = await convRes.json();
         if (convData && Array.isArray(convData.data)) {
           for (const conv of convData.data) {
@@ -14393,7 +14410,10 @@ E4 Store`,
     // 2. Jika belum dapat URL foto dari profile_pic, coba endpoint /picture JSON dan direct
     if (!rawPicUrl) {
       try {
-        const picJsonRes = await fetch(`https://graph.facebook.com/v19.0/${encodeURIComponent(psid)}/picture?width=400&height=400&redirect=false&access_token=${encodeURIComponent(pageToken)}`);
+        const picJsonRes = await fetch(
+          `https://graph.facebook.com/v19.0/${encodeURIComponent(psid)}/picture?width=400&height=400&redirect=false&access_token=${encodeURIComponent(pageToken)}`,
+          { signal: AbortSignal.timeout(3000) }
+        );
         const picJson: any = await picJsonRes.json();
         if (picJson?.data?.url) {
           rawPicUrl = picJson.data.url;
@@ -14405,9 +14425,9 @@ E4 Store`,
     }
 
     // 3. Unduh & simpan foto profil ke disk lokal agar tidak kadaluarsa
-    if (rawPicUrl) {
+    if (rawPicUrl && (!hasLocalAvatar || forceRefresh)) {
       try {
-        const imgRes = await fetch(rawPicUrl);
+        const imgRes = await fetch(rawPicUrl, { signal: AbortSignal.timeout(3000) });
         if (imgRes.ok) {
           const contentType = imgRes.headers.get("content-type") || "";
           if (contentType.includes("image")) {
@@ -14517,6 +14537,30 @@ E4 Store`,
     }
   });
 
+  async function fetchWithFbRetry(targetUrl: string, init: RequestInit, maxAttempts = 3, delayMs = 1500): Promise<Response> {
+    let lastErr: any = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const res = await fetch(targetUrl, {
+          ...init,
+          signal: AbortSignal.timeout(10000)
+        });
+        if (res.status >= 500 && attempt < maxAttempts) {
+          await new Promise((r) => setTimeout(r, delayMs));
+          continue;
+        }
+        return res;
+      } catch (err: any) {
+        lastErr = err;
+        if (attempt < maxAttempts) {
+          console.warn(`[FB Messenger] Percobaan kirim ke-${attempt} gagal (${err.message}), mencoba ulang dalam ${delayMs}ms...`);
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
+      }
+    }
+    throw lastErr || new Error("fetch failed after retries");
+  }
+
   async function sendFbMessage(
     recipientPsid: string,
     options: {
@@ -14538,21 +14582,29 @@ E4 Store`,
     try {
       // 1. Jika mengirim gambar dari Buffer (misal Struk Canvas atau QRIS lokal)
       if (options.imageBuffer) {
-        const formData = new FormData();
-        formData.append("recipient", JSON.stringify({ id: recipientPsid }));
-        formData.append("message", JSON.stringify({
-          attachment: {
-            type: "image",
-            payload: { is_reusable: false }
-          }
-        }));
-        const blob = new Blob([options.imageBuffer], { type: "image/png" });
-        formData.append("filedata", blob, `nota-${Date.now()}.png`);
+        const sendImageBuf = async () => {
+          const formData = new FormData();
+          formData.append("recipient", JSON.stringify({ id: recipientPsid }));
+          formData.append("message", JSON.stringify({
+            attachment: {
+              type: "image",
+              payload: { is_reusable: false }
+            }
+          }));
+          const blob = new Blob([options.imageBuffer!], { type: "image/png" });
+          formData.append("filedata", blob, `nota-${Date.now()}.png`);
+          return fetchWithFbRetry(url, {
+            method: "POST",
+            body: formData as any
+          }, 1, 1500);
+        };
 
-        await fetch(url, {
-          method: "POST",
-          body: formData as any
-        });
+        try {
+          await sendImageBuf();
+        } catch (imgErr) {
+          await new Promise((r) => setTimeout(r, 1500));
+          await sendImageBuf().catch((e) => console.warn("[FB Messenger] Gagal kirim lampiran gambar:", e.message));
+        }
 
         // Jika ada teks & quickReplies pendamping gambar, kirim setelah gambar
         if (cleanText) {
@@ -14564,7 +14616,7 @@ E4 Store`,
           if (options.quickReplies && options.quickReplies.length > 0) {
             textBody.message.quick_replies = options.quickReplies.slice(0, 13);
           }
-          await fetch(url, {
+          await fetchWithFbRetry(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(textBody)
@@ -14585,7 +14637,7 @@ E4 Store`,
             }
           }
         };
-        await fetch(url, {
+        await fetchWithFbRetry(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(imgPayload)
@@ -14602,7 +14654,7 @@ E4 Store`,
         if (options.quickReplies && options.quickReplies.length > 0) {
           body.message.quick_replies = options.quickReplies.slice(0, 13);
         }
-        const res = await fetch(url, {
+        const res = await fetchWithFbRetry(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body)
@@ -15118,6 +15170,7 @@ E4 Store`,
       const res = await fetch("https://api.digiflazz.com/v1/transaction", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(25000),
         body: JSON.stringify({
           username: digiflazzUsername,
           buyer_sku_code: product.buyer_sku_code,
@@ -15290,6 +15343,7 @@ E4 Store`,
       const res = await fetch("https://api.digiflazz.com/v1/transaction", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(25000),
         body: JSON.stringify({
           commands: "pay-pasca",
           username: digiflazzUsername,
@@ -15439,8 +15493,12 @@ E4 Store`,
       const webhookEvent = entry.messaging && entry.messaging[0];
       if (!webhookEvent) continue;
 
+      // Lewati event delivery/read/echo sebelum memanggil fungsi apa pun
+      if (!webhookEvent.message && !webhookEvent.postback) continue;
+      if (webhookEvent.message?.is_echo) continue;
+
       const senderPsid = String(webhookEvent.sender?.id || "");
-      if (!senderPsid || webhookEvent.message?.is_echo) continue;
+      if (!senderPsid) continue;
 
       const messageText = (webhookEvent.message?.text || "").trim();
       const quickReplyPayload = webhookEvent.message?.quick_reply?.payload || "";
@@ -15449,8 +15507,11 @@ E4 Store`,
       const attachments = webhookEvent.message?.attachments || [];
       const lowerMsg = messageText.toLowerCase();
 
-      // Tarik otomatis Nama Akun Facebook & Foto Profil Facebook dari Graph API
-      const fbProf = await fetchAndCacheFbProfile(senderPsid).catch(() => ({ name: null, photoUrl: null }));
+      // Tarik otomatis Nama Akun Facebook & Foto Profil Facebook dari Graph API (gunakan cache instan jika sudah ada)
+      const cachedProf = db.fbProfiles?.[senderPsid];
+      const fbProf = cachedProf
+        ? { name: cachedProf.name || null, photoUrl: cachedProf.photoUrl || null }
+        : await fetchAndCacheFbProfile(senderPsid).catch(() => ({ name: null, photoUrl: null }));
       const fbDisplayName = fbProf.name || db.fbProfiles?.[senderPsid]?.name || `Kakak`;
 
       let member = findMemberByFbPsid(senderPsid);
@@ -16375,7 +16436,7 @@ E4 Store`,
               for (const url of apis) {
                 if (nickname) break;
                 try {
-                  const r = await fetch(url, { signal: AbortSignal.timeout(3000) }).catch(() => null);
+                  const r = await fetch(url, { signal: AbortSignal.timeout(3500) }).catch(() => null);
                   if (r && r.ok) {
                     const d: any = await r.json();
                     if (d.status && d.data && d.data.name) nickname = d.data.name;
