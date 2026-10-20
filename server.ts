@@ -3689,13 +3689,20 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
                 if (memberIndex >= 0) {
                     member = members[memberIndex];
                     nama = member.name || "-";
-                    if (Array.isArray(member.telegram)) {
-                        isOwnerSelf = member.telegram.some((tid: any) => db.owners.includes(parseInt(tid)));
-                    } else if (typeof member.telegram === 'string' && member.telegram.length > 0) {
-                        isOwnerSelf = db.owners.includes(parseInt(member.telegram.replace(/\D/g, '')));
+                    const isFbMember = Boolean(
+                        member.fbPsid ||
+                        member.registeredVia === 'facebook' ||
+                        (typeof member.telegram === 'string' && member.telegram.startsWith('FB:'))
+                    );
+                    if (!isFbMember) {
+                        if (Array.isArray(member.telegram)) {
+                            isOwnerSelf = member.telegram.some((tid: any) => db.owners.includes(parseInt(tid)));
+                        } else if (typeof member.telegram === 'string' && member.telegram.length > 0) {
+                            isOwnerSelf = db.owners.includes(parseInt(member.telegram.replace(/\D/g, '')));
+                        }
                     }
                     if (status === 'Gagal' && tx.method === 'saldo' && !isOwnerSelf) {
-                        member.balance += tx.price;
+                        member.balance = (member.balance || 0) + tx.price;
                     }
                 }
 
@@ -3792,7 +3799,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                         try { await bot.telegram.sendMessage(tx.tgChatId, msg); } catch(err) {}
                     }
                     })();
-                } else if (bot && member && member.telegram && member.telegram.length > 0) {
+                } else if (bot && member && member.telegram && member.telegram.length > 0 && !String(member.telegram).startsWith('FB:')) {
                     (async () => {
                     try {
                         const tgId = Array.isArray(member.telegram) ? member.telegram[0] : member.telegram.replace(/\D/g, '');
@@ -3811,6 +3818,46 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                     } catch (e: any) { console.error("Error in prepaidBrands check:", e.message); }
                     })();
                 }
+
+                // Kirim notifikasi otomatis ke Facebook Messenger jika transaksi berasal dari Member Facebook (Pending -> Sukses / Gagal)
+                const fbTargetPsid =
+                    tx.fbPsid ||
+                    member?.fbPsid ||
+                    (member?.telegram && String(member.telegram).startsWith('FB:')
+                        ? String(member.telegram).replace(/^FB:/i, '').trim()
+                        : '');
+                if (fbTargetPsid && typeof (globalThis as any).__sendFbNotification === 'function') {
+                    (async () => {
+                        try {
+                            if (status === 'Sukses') {
+                                if (member) {
+                                    member.points = (member.points || 0) + 10;
+                                    db.members = members;
+                                    writeDB(db);
+                                }
+                                const buffer = await generateCanvasReceipt("nota", tx).catch(() => null);
+                                const fbSuccessText =
+                                    `🎉 TRANSAKSI SUKSES - E4 STORE 🎉\n` +
+                                    `━━━━━━━━━━━━━━━━━━━━━\n` +
+                                    `👤 Member: ${finalDisplayName}\n` +
+                                    `📦 Produk: ${tx.product}\n` +
+                                    `🎯 Tujuan: ${tx.target}\n` +
+                                    `💰 Total: Rp ${(tx.price || 0).toLocaleString("id-ID")}\n` +
+                                    `💳 Metode: ${tx.method === "saldo" ? "Saldo" : "QRIS"}\n` +
+                                    `🔑 SN / Token:\n${tx.sn || "-"}\n` +
+                                    `━━━━━━━━━━━━━━━━━━━━━\n` +
+                                    `Terima kasih telah berbelanja di E4 Store! 🐾\n` +
+                                    `Chuna ~ Asisten Imutmu siap bantu 24 jam! 😊💖`;
+                                await (globalThis as any).__sendFbNotification(fbTargetPsid, fbSuccessText, buffer || undefined);
+                            } else if (status === 'Gagal') {
+                                await (globalThis as any).__sendFbNotification(fbTargetPsid, msg);
+                            }
+                        } catch (e: any) {
+                            console.error("Failed to send FB webhook notification:", e.message);
+                        }
+                    })();
+                }
+
                 if (waSocket) {
                     (async () => {
                         let jid = tx.waJid;
@@ -7386,104 +7433,145 @@ Chuna – E4 Store`;
 
   app.get("/api/topup-requests", (req, res) => {
     const dbNow = readDB();
-    res.json({ success: true, topupRequests: dbNow.topupRequests || [] });
+    if (Array.isArray(dbNow.topupRequests)) {
+      db.topupRequests = dbNow.topupRequests;
+    }
+    res.json({ success: true, topupRequests: db.topupRequests || [] });
   });
 
   app.post("/api/topup-requests/:id/approve", async (req, res) => {
     const { id } = req.params;
-    const dbNow = readDB();
-    const topup = (dbNow.topupRequests || []).find((t: any) => t.id === id);
-    if (!topup) return res.status(404).json({ success: false, error: "Permintaan isi saldo tidak ditemukan." });
-    if (topup.status === 'approved') return res.status(400).json({ success: false, error: "Permintaan sudah disetujui sebelumnya." });
-
-    const member = dbNow.members.find((m: any) =>
-      m.id === topup.memberId ||
-      (topup.memberTelegram && m.telegram === topup.memberTelegram) ||
-      (topup.memberTelegram && String(topup.memberTelegram).startsWith('FB:') && m.fbPsid === String(topup.memberTelegram).replace(/^FB:/i, '')) ||
-      isTelegramMatch(m.telegram, topup.memberTelegram, null)
-    );
-    if (!member) return res.status(404).json({ success: false, error: "Member akun tidak ditemukan." });
-
-    member.balance = (member.balance || 0) + Number(topup.nominalSaldo);
-    topup.status = 'approved';
-    topup.processedAt = new Date().toISOString();
-
-    if (!dbNow.transactions) dbNow.transactions = [];
-    dbNow.transactions.unshift({
-      id: `TX-TOPUP-${Date.now()}`,
-      type: 'topup',
-      memberId: member.id,
-      target: member.fbProfileName || member.name,
-      product: `Isi Saldo Rp ${Number(topup.nominalSaldo).toLocaleString('id-ID')}`,
-      price: topup.nominalSaldo,
-      method: 'qris_manual',
-      status: 'Sukses',
-      sn: topup.transactionId || 'TOPUP-VERIFIED',
-      date: new Date().toISOString()
-    });
-
-    // Sinkronkan juga ke array in-memory
-    const memInMem = members.find((m: any) => m.id === member.id);
-    if (memInMem) memInMem.balance = member.balance;
-    writeDB(dbNow);
-
-    const approveText =
-      `🎉 *HOREEE! ISI SALDO BERHASIL!* 🥳\n` +
-      `━━━━━━━━━━━━━━━━━━━━━\n` +
-      `Halo Kak *${member.fbProfileName || topup.memberName || member.name}*, pengisian saldo sebesar *Rp ${Number(topup.nominalSaldo).toLocaleString('id-ID')}* telah diverifikasi dan disetujui oleh Owner E4 Store!\n\n` +
-      `💳 *Saldo Akun Kakak Saat Ini:* *Rp ${member.balance.toLocaleString('id-ID')}*\n\n` +
-      `Terima kasih telah berbelanja di E4 Store! Selamat bertransaksi kembali ya Kak! 🥰💖`;
-
     try {
-      const fbPsid = member.fbPsid || (String(topup.memberTelegram || '').startsWith('FB:') ? String(topup.memberTelegram).replace(/^FB:/i, '').trim() : '');
-      if (fbPsid && typeof (globalThis as any).__sendFbNotification === 'function') {
-        await (globalThis as any).__sendFbNotification(fbPsid, approveText);
-      } else if (bot && topup.memberTelegram && !String(topup.memberTelegram).startsWith('FB:')) {
-        await bot.telegram.sendMessage(
-          topup.memberTelegram,
-          approveText,
-          { parse_mode: 'Markdown' }
-        );
-      }
-    } catch (e: any) {
-      console.log('Failed to notify user on topup approve:', e.message);
-    }
+      const result = await securitySuite.atlasLock(`topup:${id}`, async () => {
+        const dbNow = readDB();
+        if (!Array.isArray(db.topupRequests) && Array.isArray(dbNow.topupRequests)) {
+          db.topupRequests = dbNow.topupRequests;
+        }
+        const topupList = db.topupRequests || dbNow.topupRequests || [];
+        const topup = topupList.find((t: any) => t.id === id);
+        if (!topup) return { status: 404, body: { success: false, error: "Permintaan isi saldo tidak ditemukan." } };
+        if (topup.status === 'approved') return { status: 400, body: { success: false, error: "Permintaan sudah disetujui sebelumnya." } };
+        if (topup.status === 'rejected') return { status: 400, body: { success: false, error: "Permintaan sudah ditolak sebelumnya." } };
 
-    res.json({ success: true, topup, member });
+        const member = members.find((m: any) =>
+          m.id === topup.memberId ||
+          (topup.memberTelegram && m.telegram === topup.memberTelegram) ||
+          (topup.memberTelegram && String(topup.memberTelegram).startsWith('FB:') && m.fbPsid === String(topup.memberTelegram).replace(/^FB:/i, '')) ||
+          isTelegramMatch(m.telegram, topup.memberTelegram, null)
+        );
+        if (!member) return { status: 404, body: { success: false, error: "Member akun tidak ditemukan." } };
+
+        const addedSaldo = Number(topup.nominalSaldo) || 0;
+        member.balance = (member.balance || 0) + addedSaldo;
+        topup.status = 'approved';
+        topup.processedAt = new Date().toISOString();
+
+        const topupTx = {
+          id: `TX-TOPUP-${Date.now()}`,
+          type: 'topup',
+          memberId: member.id,
+          target: member.fbProfileName || member.name,
+          product: `Isi Saldo Rp ${addedSaldo.toLocaleString('id-ID')}`,
+          price: addedSaldo,
+          method: 'qris_manual',
+          status: 'Sukses',
+          sn: topup.transactionId || 'TOPUP-VERIFIED',
+          date: new Date().toISOString()
+        };
+
+        transactions.unshift(topupTx);
+        db.transactions = transactions;
+        db.members = members;
+        db.topupRequests = topupList;
+        writeDB(db);
+
+        return { status: 200, topup, member };
+      });
+
+      if (result.status !== 200 || !result.topup || !result.member) {
+        return res.status(result.status).json(result.body);
+      }
+
+      const { topup, member } = result;
+      const approveText =
+        `🎉 *HOREEE! ISI SALDO BERHASIL!* 🥳\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n` +
+        `Halo Kak *${member.fbProfileName || topup.memberName || member.name}*, pengisian saldo sebesar *Rp ${Number(topup.nominalSaldo).toLocaleString('id-ID')}* telah diverifikasi dan disetujui oleh Owner E4 Store!\n\n` +
+        `💳 *Saldo Akun Kakak Saat Ini:* *Rp ${member.balance.toLocaleString('id-ID')}*\n\n` +
+        `Terima kasih telah berbelanja di E4 Store! Selamat bertransaksi kembali ya Kak! 🥰💖`;
+
+      try {
+        const fbPsid = member.fbPsid || (String(topup.memberTelegram || '').startsWith('FB:') ? String(topup.memberTelegram).replace(/^FB:/i, '').trim() : '');
+        if (fbPsid && typeof (globalThis as any).__sendFbNotification === 'function') {
+          await (globalThis as any).__sendFbNotification(fbPsid, approveText);
+        } else if (bot && topup.memberTelegram && !String(topup.memberTelegram).startsWith('FB:')) {
+          await bot.telegram.sendMessage(
+            topup.memberTelegram,
+            approveText,
+            { parse_mode: 'Markdown' }
+          );
+        }
+      } catch (e: any) {
+        console.log('Failed to notify user on topup approve:', e.message);
+      }
+
+      res.json({ success: true, topup, member });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
   });
 
   app.post("/api/topup-requests/:id/reject", async (req, res) => {
     const { id } = req.params;
-    const dbNow = readDB();
-    const topup = (dbNow.topupRequests || []).find((t: any) => t.id === id);
-    if (!topup) return res.status(404).json({ success: false, error: "Permintaan isi saldo tidak ditemukan." });
-    if (topup.status !== 'pending') return res.status(400).json({ success: false, error: `Permintaan sudah berstatus ${topup.status}.` });
-
-    topup.status = 'rejected';
-    topup.processedAt = new Date().toISOString();
-    writeDB(dbNow);
-
-    const rejectText =
-      `❌ *Pemberitahuan Pengisian Saldo*\n\n` +
-      `Halo Kak *${topup.memberName}*, mohon maaf bukti transfer sebesar Rp ${Number(topup.nominalSaldo).toLocaleString('id-ID')} tidak dapat diverifikasi oleh Owner (dana belum masuk atau bukti tidak valid).\n\n` +
-      `Silakan hubungi Owner jika ada pertanyaan atau kendala transfer ya Kak! 😊`;
-
     try {
-      if (String(topup.memberTelegram || '').startsWith('FB:') && typeof (globalThis as any).__sendFbNotification === 'function') {
-        const fbPsid = String(topup.memberTelegram).replace(/^FB:/i, '').trim();
-        await (globalThis as any).__sendFbNotification(fbPsid, rejectText);
-      } else if (bot && topup.memberTelegram) {
-        await bot.telegram.sendMessage(
-          topup.memberTelegram,
-          rejectText,
-          { parse_mode: 'Markdown' }
-        );
-      }
-    } catch (e: any) {
-      console.log('Failed to notify user on topup reject:', e.message);
-    }
+      const result = await securitySuite.atlasLock(`topup:${id}`, async () => {
+        const dbNow = readDB();
+        if (!Array.isArray(db.topupRequests) && Array.isArray(dbNow.topupRequests)) {
+          db.topupRequests = dbNow.topupRequests;
+        }
+        const topupList = db.topupRequests || dbNow.topupRequests || [];
+        const topup = topupList.find((t: any) => t.id === id);
+        if (!topup) return { status: 404, body: { success: false, error: "Permintaan isi saldo tidak ditemukan." } };
+        if (topup.status !== 'pending') return { status: 400, body: { success: false, error: `Permintaan sudah berstatus ${topup.status}.` } };
 
-    res.json({ success: true, topup });
+        topup.status = 'rejected';
+        topup.processedAt = new Date().toISOString();
+        db.topupRequests = topupList;
+        db.members = members;
+        writeDB(db);
+
+        return { status: 200, topup };
+      });
+
+      if (result.status !== 200 || !result.topup) {
+        return res.status(result.status).json(result.body);
+      }
+
+      const { topup } = result;
+      const rejectText =
+        `❌ *Pemberitahuan Pengisian Saldo*\n\n` +
+        `Halo Kak *${topup.memberName}*, mohon maaf bukti transfer sebesar Rp ${Number(topup.nominalSaldo).toLocaleString('id-ID')} tidak dapat diverifikasi oleh Owner (dana belum masuk atau bukti tidak valid).\n\n` +
+        `Silakan hubungi Owner jika ada pertanyaan atau kendala transfer ya Kak! 😊`;
+
+      try {
+        if (String(topup.memberTelegram || '').startsWith('FB:') && typeof (globalThis as any).__sendFbNotification === 'function') {
+          const fbPsid = String(topup.memberTelegram).replace(/^FB:/i, '').trim();
+          await (globalThis as any).__sendFbNotification(fbPsid, rejectText);
+        } else if (bot && topup.memberTelegram) {
+          await bot.telegram.sendMessage(
+            topup.memberTelegram,
+            rejectText,
+            { parse_mode: 'Markdown' }
+          );
+        }
+      } catch (e: any) {
+        console.log('Failed to notify user on topup reject:', e.message);
+      }
+
+      res.json({ success: true, topup });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
   });
 
   app.get("/api/topup-requests/photo/:fileId", async (req, res) => {
@@ -9556,33 +9644,45 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
         
         const reqId = ctx.match[1];
         const dbNow = readDB();
-        const topup = (dbNow.topupRequests || []).find((t: any) => t.id === reqId);
+        if (!Array.isArray(db.topupRequests) && Array.isArray(dbNow.topupRequests)) {
+          db.topupRequests = dbNow.topupRequests;
+        }
+        const topupList = db.topupRequests || dbNow.topupRequests || [];
+        const topup = topupList.find((t: any) => t.id === reqId);
         if (!topup) return ctx.answerCbQuery("Permintaan tidak ditemukan!");
         if (topup.status === 'approved') return ctx.answerCbQuery("Permintaan ini sudah disetujui sebelumnya!");
         if (topup.status === 'rejected') return ctx.answerCbQuery("Permintaan ini sudah ditolak!");
 
-        const member = dbNow.members.find((m: any) => m.id === topup.memberId || isTelegramMatch(m.telegram, topup.memberTelegram, null));
+        const member = members.find((m: any) =>
+          m.id === topup.memberId ||
+          (topup.memberTelegram && m.telegram === topup.memberTelegram) ||
+          (topup.memberTelegram && String(topup.memberTelegram).startsWith('FB:') && m.fbPsid === String(topup.memberTelegram).replace(/^FB:/i, '')) ||
+          isTelegramMatch(m.telegram, topup.memberTelegram, null)
+        );
         if (!member) return ctx.answerCbQuery("Member tidak ditemukan!");
 
-        member.balance = (member.balance || 0) + Number(topup.nominalSaldo);
+        const addedSaldo = Number(topup.nominalSaldo) || 0;
+        member.balance = (member.balance || 0) + addedSaldo;
         topup.status = 'approved';
         topup.processedAt = new Date().toISOString();
 
-        if (!dbNow.transactions) dbNow.transactions = [];
-        dbNow.transactions.unshift({
+        transactions.unshift({
           id: `TX-TOPUP-${Date.now()}`,
           type: 'topup',
           memberId: member.id,
-          target: member.name,
-          product: `Isi Saldo Rp ${Number(topup.nominalSaldo).toLocaleString('id-ID')}`,
-          price: topup.nominalSaldo,
+          target: member.fbProfileName || member.name,
+          product: `Isi Saldo Rp ${addedSaldo.toLocaleString('id-ID')}`,
+          price: addedSaldo,
           method: 'qris_manual',
           status: 'Sukses',
           sn: topup.transactionId || 'TOPUP-VERIFIED',
           date: new Date().toISOString()
         });
 
-        writeDB(dbNow);
+        db.transactions = transactions;
+        db.members = members;
+        db.topupRequests = topupList;
+        writeDB(db);
         await ctx.answerCbQuery("✅ Berhasil disetujui & saldo telah ditambahkan!");
 
         try {
@@ -9590,7 +9690,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
             `✅ *PERMINTAAN ISI SALDO TELAH DISETUJUI*\n` +
             `━━━━━━━━━━━━━━━━━━━━━\n` +
             `👤 *Member:* ${topup.memberName}\n` +
-            `💰 *Saldo Ditambahkan:* Rp ${Number(topup.nominalSaldo).toLocaleString('id-ID')}\n` +
+            `💰 *Saldo Ditambahkan:* Rp ${addedSaldo.toLocaleString('id-ID')}\n` +
             `💳 *Saldo Akhir Member:* Rp ${member.balance.toLocaleString('id-ID')}\n` +
             `🆔 *ID Ref Struk:* ${topup.transactionId || '-'}\n` +
             `⏰ *Waktu Disetujui:* ${new Date().toLocaleString('id-ID')}\n` +
@@ -9599,17 +9699,20 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
           );
         } catch (e) {}
 
-        // Notify customer
+        const approveMsg =
+          `🎉 *HOREEE! ISI SALDO BERHASIL!* 🥳\n` +
+          `━━━━━━━━━━━━━━━━━━━━━\n` +
+          `Halo Kak *${member.fbProfileName || topup.memberName || member.name}*, pengisian saldo sebesar *Rp ${addedSaldo.toLocaleString('id-ID')}* telah diverifikasi dan disetujui oleh Owner E4 Store!\n\n` +
+          `💳 *Saldo Akun Kakak Saat Ini:* *Rp ${member.balance.toLocaleString('id-ID')}*\n\n` +
+          `Terima kasih telah berbelanja di E4 Store! Selamat bertransaksi kembali ya Kak! 🥰💖`;
+
         try {
-          await bot.telegram.sendMessage(
-            topup.memberTelegram,
-            `🎉 *HOREEE! ISI SALDO BERHASIL!* 🥳\n` +
-            `━━━━━━━━━━━━━━━━━━━━━\n` +
-            `Halo Kak *${topup.memberName}*, pengisian saldo sebesar *Rp ${Number(topup.nominalSaldo).toLocaleString('id-ID')}* telah diverifikasi dan disetujui oleh Owner E4 Store!\n\n` +
-            `💳 *Saldo Akun Kakak Saat Ini:* *Rp ${member.balance.toLocaleString('id-ID')}*\n\n` +
-            `Terima kasih telah berbelanja di E4 Store! Selamat bertransaksi kembali ya Kak! 🥰💖`,
-            { parse_mode: 'Markdown' }
-          );
+          const fbPsid = member.fbPsid || (String(topup.memberTelegram || '').startsWith('FB:') ? String(topup.memberTelegram).replace(/^FB:/i, '').trim() : '');
+          if (fbPsid && typeof (globalThis as any).__sendFbNotification === 'function') {
+            await (globalThis as any).__sendFbNotification(fbPsid, approveMsg);
+          } else if (topup.memberTelegram && !String(topup.memberTelegram).startsWith('FB:')) {
+            await bot.telegram.sendMessage(topup.memberTelegram, approveMsg, { parse_mode: 'Markdown' });
+          }
         } catch (e: any) {
           console.error("Failed to notify customer:", e.message);
         }
@@ -9621,13 +9724,19 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
 
         const reqId = ctx.match[1];
         const dbNow = readDB();
-        const topup = (dbNow.topupRequests || []).find((t: any) => t.id === reqId);
+        if (!Array.isArray(db.topupRequests) && Array.isArray(dbNow.topupRequests)) {
+          db.topupRequests = dbNow.topupRequests;
+        }
+        const topupList = db.topupRequests || dbNow.topupRequests || [];
+        const topup = topupList.find((t: any) => t.id === reqId);
         if (!topup) return ctx.answerCbQuery("Permintaan tidak ditemukan!");
         if (topup.status !== 'pending') return ctx.answerCbQuery(`Permintaan sudah berstatus ${topup.status}!`);
 
         topup.status = 'rejected';
         topup.processedAt = new Date().toISOString();
-        writeDB(dbNow);
+        db.topupRequests = topupList;
+        db.members = members;
+        writeDB(db);
 
         await ctx.answerCbQuery("Permintaan isi saldo ditolak.");
         try {
@@ -9643,14 +9752,18 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
           );
         } catch (e) {}
 
+        const rejectMsg =
+          `❌ *Pemberitahuan Pengisian Saldo*\n\n` +
+          `Halo Kak *${topup.memberName}*, mohon maaf bukti transfer sebesar Rp ${Number(topup.nominalSaldo).toLocaleString('id-ID')} tidak dapat diverifikasi oleh Owner (dana belum masuk atau bukti tidak valid).\n\n` +
+          `Silakan hubungi Owner jika ada pertanyaan atau kendala transfer ya Kak! 😊`;
+
         try {
-          await bot.telegram.sendMessage(
-            topup.memberTelegram,
-            `❌ *Pemberitahuan Pengisian Saldo*\n\n` +
-            `Halo Kak *${topup.memberName}*, mohon maaf bukti transfer sebesar Rp ${Number(topup.nominalSaldo).toLocaleString('id-ID')} tidak dapat diverifikasi oleh Owner (dana belum masuk atau bukti tidak valid).\n\n` +
-            `Silakan hubungi Owner jika ada pertanyaan atau kendala transfer ya Kak! 😊`,
-            { parse_mode: 'Markdown' }
-          );
+          if (String(topup.memberTelegram || '').startsWith('FB:') && typeof (globalThis as any).__sendFbNotification === 'function') {
+            const fbPsid = String(topup.memberTelegram).replace(/^FB:/i, '').trim();
+            await (globalThis as any).__sendFbNotification(fbPsid, rejectMsg);
+          } else if (topup.memberTelegram) {
+            await bot.telegram.sendMessage(topup.memberTelegram, rejectMsg, { parse_mode: 'Markdown' });
+          }
         } catch (e: any) {
           console.log('Failed to notify telegram user:', e.message);
         }
@@ -14123,28 +14236,84 @@ E4 Store`,
     );
   }
 
+  const FB_QR_PAGE_SIZE = 10;
+
+  function formatFbQuickReplyTitle(rawItem: string, idx: number, stripPrefix?: string | null): string {
+    const isGangguan = rawItem.startsWith("🔴") || rawItem.includes("(Gangguan)");
+    let clean = rawItem
+      .replace(/^🔴\s*/, "")
+      .replace(/\s*\(Gangguan\)$/i, "")
+      .trim();
+
+    if (stripPrefix && stripPrefix.trim().length > 0) {
+      const escapedBrand = stripPrefix.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const brandRegex = new RegExp(`^(?:${escapedBrand})\\s*[-:·]?\\s*`, "i");
+      const withoutBrand = clean.replace(brandRegex, "").trim();
+      if (withoutBrand.length >= 2) {
+        clean = withoutBrand;
+      }
+    }
+
+    const numPrefix = isGangguan ? `${idx + 1}. 🔴 ` : `${idx + 1}. `;
+    let candidate = `${numPrefix}${clean}`;
+
+    if (candidate.length > 20) {
+      clean = clean
+        .replace(/\bDiamonds?\b/gi, "DM")
+        .replace(/\bMembership\b/gi, "Member")
+        .replace(/\bMingguan\b/gi, "Mgg")
+        .replace(/\bBulanan\b/gi, "Bln")
+        .replace(/\bWeekly\b/gi, "Wk")
+        .replace(/\bMonthly\b/gi, "Mo")
+        .replace(/\bTwilight\b/gi, "Twl")
+        .replace(/\bStarlight\b/gi, "Star")
+        .replace(/\s+/g, " ")
+        .trim();
+      candidate = `${numPrefix}${clean}`;
+    }
+
+    if (candidate.length > 20) {
+      candidate = candidate.slice(0, 20).trim();
+    }
+    return candidate;
+  }
+
   function buildQuickRepliesFromItems(
     items: string[],
     payloadPrefix: string,
     includeBack: boolean = true,
-    includeCancel: boolean = false
+    includeCancel: boolean = false,
+    page: number = 0,
+    stripPrefix?: string | null
   ): Array<{ content_type: string; title: string; payload: string }> {
-    const maxButtons = 13 - (includeBack ? 1 : 0) - (includeCancel ? 1 : 0);
-    const qrs: Array<{ content_type: string; title: string; payload: string }> = items
-      .slice(0, maxButtons)
-      .map((item, idx) => ({
-        content_type: "text",
-        title: item.length > 20 ? `${idx + 1}. ${item.slice(0, 15)}` : item,
-        payload: `${payloadPrefix}${idx}`
-      }));
+    const totalItems = items.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / FB_QR_PAGE_SIZE));
+    const safePage = Math.max(0, Math.min(page, totalPages - 1));
+    const startIdx = safePage * FB_QR_PAGE_SIZE;
+    const endIdx = Math.min(startIdx + FB_QR_PAGE_SIZE, totalItems);
 
+    const qrs: Array<{ content_type: string; title: string; payload: string }> = [];
+    for (let i = startIdx; i < endIdx; i++) {
+      qrs.push({
+        content_type: "text",
+        title: formatFbQuickReplyTitle(items[i], i, stripPrefix),
+        payload: `${payloadPrefix}${i}`
+      });
+    }
+
+    if (safePage > 0) {
+      qrs.push({ content_type: "text", title: "⬅️ Sebelumnya", payload: "FB_PAGE_PREV" });
+    }
+    if (endIdx < totalItems) {
+      qrs.push({ content_type: "text", title: "➡️ Lanjut", payload: "FB_PAGE_NEXT" });
+    }
     if (includeBack) {
       qrs.push({ content_type: "text", title: "🔙 Kembali", payload: "FB_BACK" });
     }
-    if (includeCancel) {
+    if (includeCancel && qrs.length < 13) {
       qrs.push({ content_type: "text", title: "❌ Batal", payload: "FB_CANCEL" });
     }
-    return qrs;
+    return qrs.slice(0, 13);
   }
 
   function findMemberByFbPsid(psid: string) {
@@ -14446,9 +14615,9 @@ E4 Store`,
     return null;
   }
 
-  // Ekspos helper untuk notifikasi topup/approve dan sinkron profil FB dari endpoint lain
-  (globalThis as any).__sendFbNotification = async (psid: string, text: string) => {
-    return sendFbMessage(psid, { text, quickReplies: fbQuickRepliesMainMenu });
+  // Ekspos helper untuk notifikasi topup/approve/webhook dan sinkron profil FB dari endpoint lain
+  (globalThis as any).__sendFbNotification = async (psid: string, text: string, imageBuffer?: Buffer) => {
+    return sendFbMessage(psid, { text, imageBuffer, quickReplies: fbQuickRepliesMainMenu });
   };
   (globalThis as any).__fetchAndCacheFbProfile = fetchAndCacheFbProfile;
 
@@ -14621,6 +14790,53 @@ E4 Store`,
     });
   }
 
+  // Helper Kirim Daftar dengan Halaman Tombol (Pagination 10 item per halaman + Nama Tombol Singkat TanpaTerpotong)
+  async function sendFbListWithPagination(
+    psid: string,
+    title: string,
+    fullLines: string[],
+    buttonLabels: string[],
+    payloadPrefix: string,
+    page: number = 0,
+    stripPrefix?: string | null,
+    showOnlyCurrentPageInText: boolean = false
+  ) {
+    const totalItems = buttonLabels.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / FB_QR_PAGE_SIZE));
+    const safePage = Math.max(0, Math.min(page, totalPages - 1));
+    const startIdx = safePage * FB_QR_PAGE_SIZE;
+    const endIdx = Math.min(startIdx + FB_QR_PAGE_SIZE, totalItems);
+
+    if (fbUserStates[psid]?.data) {
+      fbUserStates[psid].data.page = safePage;
+      fbUserStates[psid].data.pageTitle = title;
+      fbUserStates[psid].data.pageLines = fullLines;
+      fbUserStates[psid].data.buttonLabels = buttonLabels;
+      fbUserStates[psid].data.payloadPrefix = payloadPrefix;
+      fbUserStates[psid].data.stripPrefix = stripPrefix || null;
+      fbUserStates[psid].updatedAt = Date.now();
+    }
+
+    const linesToShow = showOnlyCurrentPageInText
+      ? fullLines.slice(startIdx, endIdx).join("\n")
+      : fullLines.join("\n");
+
+    const pageFooter =
+      totalPages > 1
+        ? `\n\n📄 Tombol Hal ${safePage + 1}/${totalPages} (No. ${startIdx + 1}–${endIdx} dari ${totalItems})\n(Klik tombol di bawah, klik "➡️ Lanjut" untuk tombol berikutnya, atau ketik Nomor Urut 1–${totalItems})`
+        : `\n\n(Klik tombol atau ketik Nomor Urut / Nama Produk)`;
+
+    const headerWithPage =
+      showOnlyCurrentPageInText && totalPages > 1
+        ? `${title} (Hal ${safePage + 1}/${totalPages})`
+        : title;
+
+    await sendFbMessage(psid, {
+      text: `${headerWithPage}\n━━━━━━━━━━━━━━━━━━━━━\n${linesToShow}${pageFooter}`,
+      quickReplies: buildQuickRepliesFromItems(buttonLabels, payloadPrefix, true, false, safePage, stripPrefix)
+    });
+  }
+
   // Helper Tampilkan Daftar Kategori Prabayar (sama persis Menu Produk baris 9736)
   async function showFbPrepaidCategories(psid: string) {
     await sendFbMessage(psid, { text: "🛒 Memuat kategori..." });
@@ -14641,17 +14857,16 @@ E4 Store`,
         updatedAt: Date.now()
       };
 
-      const listLines = categories.map((c, i) => `${i + 1}. ${c}`).join("\n");
-      const text =
-        `Silakan pilih kategori produk di bawah ini:\n` +
-        `━━━━━━━━━━━━━━━━━━━━━\n` +
-        `${listLines}\n\n` +
-        `(Klik tombol di bawah atau ketik Nomor / Nama Kategori)`;
-
-      await sendFbMessage(psid, {
-        text,
-        quickReplies: buildQuickRepliesFromItems(categories, "FB_PRE_CAT_", true, false)
-      });
+      const listLines = categories.map((c, i) => `${i + 1}. ${c}`);
+      await sendFbListWithPagination(
+        psid,
+        "Silakan pilih kategori produk di bawah ini:",
+        listLines,
+        categories,
+        "FB_PRE_CAT_",
+        0,
+        null
+      );
     } catch (e: any) {
       await sendFbMessage(psid, {
         text: `❌ Sistem belum terhubung ke Digiflazz atau terjadi error: ${e.message}`,
@@ -14677,18 +14892,16 @@ E4 Store`,
       updatedAt: Date.now()
     };
 
-    const listLines = brands.map((b, i) => `${i + 1}. ${b}`).join("\n");
-    const text =
-      `🛒 Kategori ${category}\n` +
-      `Silakan pilih brand di bawah ini:\n` +
-      `━━━━━━━━━━━━━━━━━━━━━\n` +
-      `${listLines}\n\n` +
-      `(Klik tombol di bawah atau ketik Nomor / Nama Brand)`;
-
-    await sendFbMessage(psid, {
-      text,
-      quickReplies: buildQuickRepliesFromItems(brands, "FB_PRE_BRAND_", true, false)
-    });
+    const listLines = brands.map((b, i) => `${i + 1}. ${b}`);
+    await sendFbListWithPagination(
+      psid,
+      `🛒 Kategori ${category}\nSilakan pilih brand di bawah ini:`,
+      listLines,
+      brands,
+      "FB_PRE_BRAND_",
+      0,
+      null
+    );
   }
 
   // Helper Tampilkan Tipe atau Daftar Produk dari Brand Prabayar (sama persis baris 12846-12881)
@@ -14705,11 +14918,16 @@ E4 Store`,
           data: { brand, categories: cats },
           updatedAt: Date.now()
         };
-        const listLines = cats.map((c, i) => `${i + 1}. ${c}`).join("\n");
-        await sendFbMessage(psid, {
-          text: `📋 Brand ${brand}\nProduk ini memiliki beberapa kategori. Silakan pilih kategori:\n━━━━━━━━━━━━━━━━━━━━━\n${listLines}`,
-          quickReplies: buildQuickRepliesFromItems(cats, "FB_PRE_BCAT_", true, false)
-        });
+        const listLines = cats.map((c, i) => `${i + 1}. ${c}`);
+        await sendFbListWithPagination(
+          psid,
+          `📋 Brand ${brand}\nProduk ini memiliki beberapa kategori. Silakan pilih kategori:`,
+          listLines,
+          cats,
+          "FB_PRE_BCAT_",
+          0,
+          null
+        );
         return;
       }
     }
@@ -14722,11 +14940,16 @@ E4 Store`,
           data: { brand, category, types },
           updatedAt: Date.now()
         };
-        const listLines = types.map((t, i) => `${i + 1}. ${t}`).join("\n");
-        await sendFbMessage(psid, {
-          text: `📋 Tipe Produk ${brand}\nSilakan pilih kategori (Misal: Umum/Membership/dll):\n━━━━━━━━━━━━━━━━━━━━━\n${listLines}`,
-          quickReplies: buildQuickRepliesFromItems(types, "FB_PRE_TYPE_", true, false)
-        });
+        const listLines = types.map((t, i) => `${i + 1}. ${t}`);
+        await sendFbListWithPagination(
+          psid,
+          `📋 Tipe Produk ${brand}\nSilakan pilih kategori (Misal: Umum/Membership/dll):`,
+          listLines,
+          types,
+          "FB_PRE_TYPE_",
+          0,
+          brand
+        );
         return;
       }
     } else {
@@ -14747,7 +14970,7 @@ E4 Store`,
       const adminFee = memberType === "VIP" ? feeData.vip : feeData.biasa;
       const total = p.price + adminFee;
       return `${i + 1}. ${getProductButtonText(p)} — Rp ${total.toLocaleString("id-ID")}`;
-    }).join("\n");
+    });
 
     fbUserStates[psid] = {
       step: "PREPAID_SELECT_PRODUCT",
@@ -14755,13 +14978,18 @@ E4 Store`,
       updatedAt: Date.now()
     };
 
-    const headerTitle = selectedType ? `📋 Produk ${selectedType}` : `📋 Produk ${brand}`;
+    const headerTitle = selectedType ? `📋 Produk ${selectedType} (${brand})` : `📋 Produk ${brand}`;
     const btnLabels = filtered.map((p: any) => getProductButtonText(p));
 
-    await sendFbMessage(psid, {
-      text: `${headerTitle}\nSilakan pilih produk yang ingin dibeli:\n━━━━━━━━━━━━━━━━━━━━━\n${prodLines}\n\n(Klik tombol atau ketik Nomor Urut / Nama Produk)`,
-      quickReplies: buildQuickRepliesFromItems(btnLabels, "FB_PRE_PROD_", true, false)
-    });
+    await sendFbListWithPagination(
+      psid,
+      `${headerTitle}\nSilakan pilih produk yang ingin dibeli:`,
+      prodLines,
+      btnLabels,
+      "FB_PRE_PROD_",
+      0,
+      brand
+    );
   }
 
   // Helper Saat Produk Prabayar Dipilih -> Masuk PREPAID_INPUT_NUMBER (sama persis baris 12804)
@@ -14822,11 +15050,16 @@ E4 Store`,
         updatedAt: Date.now()
       };
 
-      const listLines = categories.map((c, i) => `${i + 1}. ${c}`).join("\n");
-      await sendFbMessage(psid, {
-        text: `Pilih layanan tagihan:\n━━━━━━━━━━━━━━━━━━━━━\n${listLines}\n\n(Klik tombol di bawah atau ketik Nomor / Nama Layanan)`,
-        quickReplies: buildQuickRepliesFromItems(categories, "FB_PASCA_CAT_", true, false)
-      });
+      const listLines = categories.map((c, i) => `${i + 1}. ${c}`);
+      await sendFbListWithPagination(
+        psid,
+        "Pilih layanan tagihan:",
+        listLines,
+        categories,
+        "FB_PASCA_CAT_",
+        0,
+        null
+      );
     } catch (e: any) {
       await sendFbMessage(psid, {
         text: `❌ Gagal memuat tagihan: ${e.message}`,
@@ -14870,12 +15103,13 @@ E4 Store`,
     });
   }
 
-  // Helper Eksekusi Pembelian Prabayar via Facebook Messenger + Kirim Struk Canvas
+  // Helper Eksekusi Pembelian Prabayar via Facebook Messenger + Kirim Struk Canvas (Aman Refund & Polling Pending)
   async function executeFbPrepaidOrder(psid: string, product: any, targetNo: string, totalPrice: number, method: "saldo" | "qris", member?: any) {
     await sendFbMessage(psid, {
       text: `⏳ Sedang memproses pesanan ${product.product_name} ke nomor tujuan ${targetNo}... Mohon tunggu sebentar ya Kak!`
     });
 
+    const customerName = member?.fbProfileName || member?.name || member?.waProfileName || "Pelanggan FB";
     const pay_ref_id = `FB-${Date.now()}`;
     try {
       const signText = digiflazzUsername + digiflazzApiKey + pay_ref_id;
@@ -14893,30 +15127,31 @@ E4 Store`,
         })
       });
       const payJson: any = await res.json();
-      const txData = payJson?.data || {};
-      const statusRaw = txData.status || "Pending";
-      const snVal = txData.sn || "PROSES-PUSAT";
-      const modalPrice = txData.price || product.price || 0;
 
-      const customerName = member?.fbProfileName || member?.name || member?.waProfileName || "Pelanggan FB";
-
-      if (statusRaw === "Gagal") {
+      // Sama persis processPrepaidPayment (baris 8404 & 8686): jika !payJson.data atau status === "Gagal", langsung refund!
+      if (!payJson || !payJson.data || payJson.data.status === "Gagal") {
         if (member && method === "saldo") {
           member.balance = (member.balance || 0) + totalPrice;
           db.members = members;
           writeDB(db);
         }
+        const errMessage = payJson?.data?.message || payJson?.message || "Produk sedang gangguan";
         await sendFbMessage(psid, {
           text:
             `❌ Maaf Kak ${customerName}, pembelian untuk pesanan Anda gagal diproses.\n\n` +
             `📦 Produk : ${product.product_name}\n` +
             `🎯 Tujuan : ${targetNo}\n` +
-            `Keterangan : ${txData.message || "Produk sedang gangguan"}\n\n` +
+            `Keterangan : ${errMessage}\n\n` +
             (method === "saldo" ? `✅ Saldo Rp ${totalPrice.toLocaleString("id-ID")} telah dikembalikan ke akun Kakak.` : ""),
           quickReplies: fbQuickRepliesMainMenu
         });
         return;
       }
+
+      const txData = payJson.data;
+      const statusRaw = txData.status || "Pending";
+      const snVal = txData.sn || "PROSES-PUSAT";
+      const modalPrice = txData.price || product.price || 0;
 
       const newTx = {
         id: pay_ref_id,
@@ -14924,13 +15159,14 @@ E4 Store`,
         nama: customerName,
         customerDisplayName: customerName,
         customerName: customerName,
+        type: "prepaid",
         product: product.product_name,
         sku: product.buyer_sku_code,
         target: targetNo,
         price: totalPrice,
         modal: modalPrice,
-        cuan: totalPrice - modalPrice,
-        status: statusRaw === "Sukses" ? "Sukses" : statusRaw,
+        cuan: totalPrice - modalPrice > 0 ? totalPrice - modalPrice : 0,
+        status: statusRaw === "Sukses" ? "Sukses" : "Pending",
         isPaid: true,
         sn: snVal,
         method: method,
@@ -14939,7 +15175,8 @@ E4 Store`,
         date: new Date().toISOString()
       };
 
-      if (member) {
+      // Hanya tambahkan poin jika transaksi langsung Sukses (jika Pending, poin ditambah di webhook saat Sukses)
+      if (statusRaw === "Sukses" && member) {
         member.points = (member.points || 0) + 10;
       }
 
@@ -14947,6 +15184,31 @@ E4 Store`,
       db.transactions = transactions;
       db.members = members;
       writeDB(db);
+
+      if (statusRaw === "Pending") {
+        const konfirmasiBuffer = await generateKonfirmasiReceipt({
+          nama: customerName || "E4STORE",
+          layanan: product.product_name,
+          nomor: targetNo,
+          totalBayar: totalPrice,
+          waPhotoUrl: null
+        }).catch(() => null);
+
+        const pendingMsg =
+          `⏳ Hai Kak ${customerName}, pesanan sedang diproses sistem pusat E4 Store.\n` +
+          `Akan update otomatis ya, Kak. Mohon ditunggu.\n\n` +
+          `📦 Produk: ${product.product_name}\n` +
+          `🎯 Tujuan: ${targetNo}\n` +
+          `💰 Total: Rp ${totalPrice.toLocaleString("id-ID")}\n\n` +
+          `Chuna siap bantu! 😊`;
+
+        await sendFbMessage(psid, {
+          imageBuffer: konfirmasiBuffer || undefined,
+          text: pendingMsg,
+          quickReplies: fbQuickRepliesMainMenu
+        });
+        return;
+      }
 
       const notaBuffer = await generateCanvasReceipt("nota", newTx).catch(() => null);
 
@@ -14976,8 +15238,37 @@ E4 Store`,
         });
       }
     } catch (err: any) {
+      // Sama persis baris 8696 di Telegram: catat sebagai Pending agar dicek otomatis oleh sistem polling 30 detik (tidak hangus)
+      transactions.unshift({
+        id: pay_ref_id,
+        memberId: member?.id || `FB-${psid}`,
+        nama: customerName,
+        customerDisplayName: customerName,
+        customerName: customerName,
+        type: "prepaid",
+        product: product.product_name,
+        sku: product.buyer_sku_code,
+        target: targetNo,
+        price: totalPrice,
+        modal: 0,
+        cuan: 0,
+        status: "Pending",
+        isPaid: true,
+        sn: "PROSES-PUSAT",
+        method: method,
+        platform: "facebook",
+        fbPsid: psid,
+        date: new Date().toISOString()
+      });
+      db.transactions = transactions;
+      writeDB(db);
+
       await sendFbMessage(psid, {
-        text: `❌ Maaf Kak, terjadi kendala koneksi ke server pusat: ${err.message}`,
+        text:
+          `⏳ Transaksi Sedang Diproses (Network Error)\n` +
+          `Pesanan Kakak sedang dikonfirmasi oleh sistem pusat meski sempat terjadi gangguan koneksi.\n` +
+          `Jika gagal dari pusat, saldo Rp ${totalPrice.toLocaleString("id-ID")} akan otomatis dikembalikan oleh Chuna.\n` +
+          `Pesan Error: ${err.message}`,
         quickReplies: fbQuickRepliesMainMenu
       });
     }
@@ -14988,6 +15279,7 @@ E4 Store`,
     const { product, ref_id, totalBayar, checkResult, targetNo } = stateData;
     const customerNo = cleanTargetNumber(targetNo || checkResult?.customer_no || "");
     const pay_ref_id = ref_id || `PASCA-FB-${Date.now()}`;
+    const customerDisplayName = member?.fbProfileName || member?.name || checkResult?.customer_name || "Pelanggan FB";
 
     await sendFbMessage(psid, {
       text: `⏳ Sedang memproses pelunasan tagihan ${product.product_name} untuk nomor ${customerNo}...`
@@ -15008,23 +15300,26 @@ E4 Store`,
         })
       });
       const payJson: any = await res.json();
-      const status = payJson?.data?.status || "Gagal";
-      const digiflazzPrice = payJson?.data?.price || 0;
-      const cuan = totalBayar - digiflazzPrice;
-      const customerDisplayName = member?.fbProfileName || member?.name || checkResult?.customer_name || "Pelanggan FB";
 
-      if (status === "Gagal") {
-        member.balance = (member.balance || 0) + totalBayar;
-        db.members = members;
-        writeDB(db);
+      // Sama persis processPascaPayment (baris 8784 & 9067): jika !payJson.data atau status === "Gagal", langsung refund!
+      if (!payJson || !payJson.data || payJson.data.status === "Gagal") {
+        if (member) {
+          member.balance = (member.balance || 0) + totalBayar;
+          db.members = members;
+          writeDB(db);
+        }
         await sendFbMessage(psid, {
           text:
-            `❌ Pembayaran Tagihan Gagal: ${payJson?.data?.message || "Transaksi Gagal"}\n` +
+            `❌ Pembayaran Tagihan Gagal: ${payJson?.data?.message || payJson?.message || "Transaksi Gagal"}\n` +
             `✅ Saldo Rp ${totalBayar.toLocaleString("id-ID")} telah dikembalikan ke akun Kakak.`,
           quickReplies: fbQuickRepliesMainMenu
         });
         return;
       }
+
+      const status = payJson.data.status || "Pending";
+      const digiflazzPrice = payJson.data.price || 0;
+      const cuan = totalBayar - digiflazzPrice;
 
       const newTx = {
         id: pay_ref_id,
@@ -15041,19 +15336,33 @@ E4 Store`,
         cuan: cuan > 0 ? cuan : 0,
         tagihan: checkResult?.selling_price || 0,
         admin_pel: stateData.adminFee || 0,
-        status,
+        status: status === "Sukses" ? "Sukses" : "Pending",
         method: "saldo",
         platform: "facebook",
         fbPsid: psid,
-        sn: payJson?.data?.sn || "-",
+        sn: payJson.data.sn || "-",
         date: new Date().toISOString()
       };
 
-      member.points = (member.points || 0) + 10;
+      if (status === "Sukses") {
+        member.points = (member.points || 0) + 10;
+      }
       transactions.unshift(newTx);
       db.transactions = transactions;
       db.members = members;
       writeDB(db);
+
+      if (status === "Pending") {
+        await sendFbMessage(psid, {
+          text:
+            `⏳ Hai Kak ${customerDisplayName}, pelunasan tagihan sedang diproses sistem pusat E4 Store.\n` +
+            `Akan update otomatis ya, Kak. Mohon ditunggu.\n\n` +
+            `📦 Layanan: ${product.product_name}\n` +
+            `🎯 Nomor: ${customerNo}`,
+          quickReplies: fbQuickRepliesMainMenu
+        });
+        return;
+      }
 
       const notaBuffer = await generateCanvasReceipt("nota", newTx).catch(() => null);
       const msg =
@@ -15063,7 +15372,7 @@ E4 Store`,
         `🎯 Nomor: ${customerNo}\n` +
         `👤 Nama: ${checkResult?.customer_name || customerDisplayName}\n` +
         `💰 Total Bayar: Rp ${totalBayar.toLocaleString("id-ID")}\n` +
-        `🔑 SN / Ref: ${payJson?.data?.sn || "-"}\n` +
+        `🔑 SN / Ref: ${payJson.data.sn || "-"}\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
         `Terima kasih telah membayar tagihan di E4 Store! 🥰💖`;
 
@@ -15080,8 +15389,38 @@ E4 Store`,
         });
       }
     } catch (e: any) {
+      // Sama persis baris 9077 di Telegram: catat sebagai Pending agar dicek otomatis oleh sistem polling 30 detik
+      transactions.unshift({
+        id: pay_ref_id,
+        memberId: member.id,
+        nama: customerDisplayName,
+        customerDisplayName,
+        customerName: customerDisplayName,
+        type: "pasca",
+        product: product.product_name,
+        sku: product.buyer_sku_code,
+        target: customerNo,
+        price: totalBayar,
+        modal: 0,
+        cuan: 0,
+        tagihan: checkResult?.selling_price || 0,
+        admin_pel: stateData.adminFee || 0,
+        status: "Pending",
+        method: "saldo",
+        platform: "facebook",
+        fbPsid: psid,
+        sn: "-",
+        date: new Date().toISOString()
+      });
+      db.transactions = transactions;
+      writeDB(db);
+
       await sendFbMessage(psid, {
-        text: `⏳ Transaksi Sedang Diproses: ${e.message}`,
+        text:
+          `⏳ Transaksi Sedang Diproses (Network Error)\n` +
+          `Pelunasan tagihan Kakak sedang dikonfirmasi oleh sistem pusat meski sempat terjadi gangguan koneksi.\n` +
+          `Jika gagal dari pusat, saldo Rp ${totalBayar.toLocaleString("id-ID")} akan otomatis dikembalikan oleh Chuna.\n` +
+          `Pesan Error: ${e.message}`,
         quickReplies: fbQuickRepliesMainMenu
       });
     }
@@ -15550,6 +15889,34 @@ E4 Store`,
         continue;
       }
 
+      // Tombol Navigasi Halaman Tombol ("⬅️ Sebelumnya" & "➡️ Lanjut") untuk Daftar Kategori/Brand/Produk
+      if (
+        state &&
+        Array.isArray(state.data?.buttonLabels) &&
+        (activePayload === "FB_PAGE_NEXT" ||
+          activePayload === "FB_PAGE_PREV" ||
+          lowerMsg === "➡️ lanjut" ||
+          lowerMsg === "lanjut" ||
+          lowerMsg === "⬅️ sebelumnya" ||
+          lowerMsg === "sebelumnya")
+      ) {
+        const isNext = activePayload === "FB_PAGE_NEXT" || lowerMsg === "➡️ lanjut" || lowerMsg === "lanjut";
+        const currentPage = Number(state.data.page || 0);
+        const nextPage = isNext ? currentPage + 1 : Math.max(0, currentPage - 1);
+
+        await sendFbListWithPagination(
+          senderPsid,
+          state.data.pageTitle || "📋 Daftar Pilihan",
+          state.data.pageLines || state.data.buttonLabels.map((b: string, i: number) => `${i + 1}. ${b}`),
+          state.data.buttonLabels,
+          state.data.payloadPrefix || "FB_PRE_PROD_",
+          nextPage,
+          state.data.stripPrefix || null,
+          true
+        );
+        continue;
+      }
+
       // =========================================================================
       // C. PENANGANAN 5 MENU UTAMA (PERSIS BOT TELEGRAM)
       //    1. 💵 Cek Saldo
@@ -15928,6 +16295,7 @@ E4 Store`,
 
         if (state.step === "PREPAID_SELECT_PRODUCT") {
           const productsList: any[] = state.data.products || [];
+          const brandName: string = state.data.brand || "";
           let matchedProduct: any = null;
           if (activePayload.startsWith("FB_PRE_PROD_")) {
             const idx = parseInt(activePayload.replace("FB_PRE_PROD_", ""), 10);
@@ -15939,11 +16307,20 @@ E4 Store`,
               matchedProduct = productsList[num - 1];
             } else {
               const cleanTxt = cleanProductName(messageText.replace(/^\d+\.\s*/, "").trim()).toLowerCase();
-              matchedProduct = productsList.find(
-                (p) =>
-                  String(p.product_name || "").toLowerCase() === cleanTxt ||
-                  String(p.buyer_sku_code || "").toLowerCase() === cleanTxt
-              );
+              matchedProduct = productsList.find((p, i) => {
+                const fullProdName = String(p.product_name || "").toLowerCase();
+                const skuCode = String(p.buyer_sku_code || "").toLowerCase();
+                const shortTitle = formatFbQuickReplyTitle(getProductButtonText(p), i, brandName)
+                  .replace(/^\d+\.\s*(?:🔴\s*)?/, "")
+                  .trim()
+                  .toLowerCase();
+                return (
+                  fullProdName === cleanTxt ||
+                  skuCode === cleanTxt ||
+                  shortTitle === cleanTxt ||
+                  fullProdName.endsWith(` ${cleanTxt}`)
+                );
+              });
             }
           }
 
@@ -16037,7 +16414,7 @@ E4 Store`,
           continue;
         }
 
-        // 5. State Pembayaran Prabayar (WAIT_PAYMENT_PREPAID - persis baris 12136)
+        // 5. State Pembayaran Prabayar (WAIT_PAYMENT_PREPAID - persis baris 12136 + Kunci Anti-Double-Click atlasLock)
         if (state.step === "WAIT_PAYMENT_PREPAID") {
           const { product, targetNo, totalBayar } = state.data;
 
@@ -16048,7 +16425,26 @@ E4 Store`,
             lowerMsg === "1" ||
             lowerMsg.includes("potong saldo")
           ) {
-            if ((member.balance || 0) < totalBayar) {
+            const lockOutcome = await securitySuite.atlasLock(`member:${member.id}`, async () => {
+              // Pastikan state belum dikonsumsi oleh klik sebelumnya (anti double click)
+              if (!fbUserStates[senderPsid] || fbUserStates[senderPsid].step !== "WAIT_PAYMENT_PREPAID") {
+                return "ALREADY_PROCESSED";
+              }
+              if ((member.balance || 0) < totalBayar) {
+                return "INSUFFICIENT_BALANCE";
+              }
+              member.balance = (member.balance || 0) - totalBayar;
+              db.members = members;
+              writeDB(db);
+              delete fbUserStates[senderPsid];
+              return "OK";
+            });
+
+            if (lockOutcome === "ALREADY_PROCESSED") {
+              continue;
+            }
+
+            if (lockOutcome === "INSUFFICIENT_BALANCE") {
               await sendFbMessage(senderPsid, {
                 text:
                   `❌ Saldo Kakak tidak mencukupi (Saldo: Rp ${(member.balance || 0).toLocaleString("id-ID")}, Total: Rp ${totalBayar.toLocaleString("id-ID")}).\n\n` +
@@ -16061,11 +16457,6 @@ E4 Store`,
               });
               continue;
             }
-
-            member.balance -= totalBayar;
-            db.members = members;
-            writeDB(db);
-            delete fbUserStates[senderPsid];
 
             await executeFbPrepaidOrder(senderPsid, product, targetNo, totalBayar, "saldo", member);
             continue;
@@ -16136,11 +16527,16 @@ E4 Store`,
               updatedAt: Date.now()
             };
 
-            const listLines = brands.map((b, i) => `${i + 1}. ${b}`).join("\n");
-            await sendFbMessage(senderPsid, {
-              text: `🧾 Kategori ${selectedCat} (Pascabayar)\nSilakan pilih layanan di bawah ini:\n━━━━━━━━━━━━━━━━━━━━━\n${listLines}`,
-              quickReplies: buildQuickRepliesFromItems(brands, "FB_PASCA_BRAND_", true, false)
-            });
+            const listLines = brands.map((b, i) => `${i + 1}. ${b}`);
+            await sendFbListWithPagination(
+              senderPsid,
+              `🧾 Kategori ${selectedCat} (Pascabayar)\nSilakan pilih layanan di bawah ini:`,
+              listLines,
+              brands,
+              "FB_PASCA_BRAND_",
+              0,
+              null
+            );
             continue;
           }
         }
@@ -16176,18 +16572,24 @@ E4 Store`,
               updatedAt: Date.now()
             };
 
-            const listLines = filtered.map((p: any, i: number) => `${i + 1}. ${getProductButtonText(p)}`).join("\n");
+            const listLines = filtered.map((p: any, i: number) => `${i + 1}. ${getProductButtonText(p)}`);
             const btnLabels = filtered.map((p: any) => getProductButtonText(p));
-            await sendFbMessage(senderPsid, {
-              text: `🧾 Layanan ${selectedBrand}\nSilakan pilih layanan untuk melihat detail:\n━━━━━━━━━━━━━━━━━━━━━\n${listLines}`,
-              quickReplies: buildQuickRepliesFromItems(btnLabels, "FB_PASCA_PROD_", true, false)
-            });
+            await sendFbListWithPagination(
+              senderPsid,
+              `🧾 Layanan ${selectedBrand}\nSilakan pilih layanan untuk melihat detail:`,
+              listLines,
+              btnLabels,
+              "FB_PASCA_PROD_",
+              0,
+              selectedBrand
+            );
             continue;
           }
         }
 
         if (state.step === "PASCA_SELECT_PRODUCT") {
           const productsList: any[] = state.data.products || [];
+          const brandName: string = state.data.brand || "";
           let matchedProduct: any = null;
           if (activePayload.startsWith("FB_PASCA_PROD_")) {
             const idx = parseInt(activePayload.replace("FB_PASCA_PROD_", ""), 10);
@@ -16199,7 +16601,14 @@ E4 Store`,
               matchedProduct = productsList[num - 1];
             } else {
               const cleanTxt = cleanProductName(messageText.replace(/^\d+\.\s*/, "").trim()).toLowerCase();
-              matchedProduct = productsList.find((p) => String(p.product_name || "").toLowerCase() === cleanTxt);
+              matchedProduct = productsList.find((p, i) => {
+                const fullProdName = String(p.product_name || "").toLowerCase();
+                const shortTitle = formatFbQuickReplyTitle(getProductButtonText(p), i, brandName)
+                  .replace(/^\d+\.\s*(?:🔴\s*)?/, "")
+                  .trim()
+                  .toLowerCase();
+                return fullProdName === cleanTxt || shortTitle === cleanTxt || fullProdName.endsWith(` ${cleanTxt}`);
+              });
             }
           }
 
@@ -16319,8 +16728,28 @@ E4 Store`,
             lowerMsg === "saldo" ||
             lowerMsg === "1"
           ) {
-            const { totalBayar } = state.data;
-            if ((member.balance || 0) < totalBayar) {
+            const pascaStateData = state.data;
+            const { totalBayar } = pascaStateData;
+
+            const lockOutcome = await securitySuite.atlasLock(`member:${member.id}`, async () => {
+              if (!fbUserStates[senderPsid] || fbUserStates[senderPsid].step !== "WAIT_PAYMENT_PASCA") {
+                return "ALREADY_PROCESSED";
+              }
+              if ((member.balance || 0) < totalBayar) {
+                return "INSUFFICIENT_BALANCE";
+              }
+              member.balance = (member.balance || 0) - totalBayar;
+              db.members = members;
+              writeDB(db);
+              delete fbUserStates[senderPsid];
+              return "OK";
+            });
+
+            if (lockOutcome === "ALREADY_PROCESSED") {
+              continue;
+            }
+
+            if (lockOutcome === "INSUFFICIENT_BALANCE") {
               await sendFbMessage(senderPsid, {
                 text: `❌ Saldo Kakak tidak mencukupi (Saldo: Rp ${(member.balance || 0).toLocaleString("id-ID")}, Total Tagihan: Rp ${totalBayar.toLocaleString("id-ID")}).\nSilakan isi saldo terlebih dahulu ya Kak!`,
                 quickReplies: [
@@ -16330,12 +16759,6 @@ E4 Store`,
               });
               continue;
             }
-
-            member.balance -= totalBayar;
-            db.members = members;
-            writeDB(db);
-            const pascaStateData = state.data;
-            delete fbUserStates[senderPsid];
 
             await executeFbPascaPayment(senderPsid, pascaStateData, member);
             continue;
