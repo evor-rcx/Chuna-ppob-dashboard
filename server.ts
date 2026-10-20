@@ -14331,6 +14331,164 @@ E4 Store`,
     );
   }
 
+  // Agent khusus IPv4 (persis seperti Telegram) agar koneksi ke Meta Graph API di STB Armbian tidak pernah terkena bug IPv6 fetch failed
+  const fbHttpsAgent = new https.Agent({ family: 4, keepAlive: true });
+
+  interface FbApiResponse {
+    ok: boolean;
+    status: number;
+    headers: Record<string, any>;
+    buffer: Buffer;
+    text: () => string;
+    json: () => any;
+  }
+
+  function executeSingleHttpsIpv4(
+    targetUrl: string,
+    options: {
+      method?: string;
+      headers?: Record<string, string>;
+      body?: string | Buffer;
+      timeoutMs?: number;
+    },
+    redirectCount = 0
+  ): Promise<FbApiResponse> {
+    return new Promise((resolve, reject) => {
+      try {
+        const parsedUrl = new URL(targetUrl);
+        const reqOptions: https.RequestOptions = {
+          protocol: parsedUrl.protocol,
+          hostname: parsedUrl.hostname,
+          port: parsedUrl.port || 443,
+          path: parsedUrl.pathname + parsedUrl.search,
+          method: options.method || "GET",
+          headers: {
+            Connection: "keep-alive",
+            ...(options.headers || {})
+          },
+          agent: fbHttpsAgent,
+          family: 4
+        };
+
+        if (options.body && reqOptions.headers && !("Content-Length" in reqOptions.headers) && !("content-length" in reqOptions.headers)) {
+          (reqOptions.headers as Record<string, string>)["Content-Length"] = String(Buffer.byteLength(options.body));
+        }
+
+        const req = https.request(reqOptions, (res) => {
+          const status = res.statusCode || 0;
+          if ([301, 302, 303, 307, 308].includes(status) && res.headers.location && redirectCount < 3) {
+            res.resume();
+            const nextUrl = new URL(res.headers.location, targetUrl).toString();
+            executeSingleHttpsIpv4(nextUrl, { method: "GET", timeoutMs: options.timeoutMs }, redirectCount + 1)
+              .then(resolve)
+              .catch(reject);
+            return;
+          }
+
+          const chunks: Buffer[] = [];
+          res.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+          res.on("end", () => {
+            const buffer = Buffer.concat(chunks);
+            resolve({
+              ok: status >= 200 && status < 300,
+              status,
+              headers: res.headers as Record<string, any>,
+              buffer,
+              text: () => buffer.toString("utf-8"),
+              json: () => JSON.parse(buffer.toString("utf-8"))
+            });
+          });
+        });
+
+        const timeoutMs = options.timeoutMs ?? 10000;
+        req.setTimeout(timeoutMs, () => {
+          req.destroy(new Error(`Request timeout after ${timeoutMs}ms`));
+        });
+
+        req.on("error", (err) => {
+          reject(err);
+        });
+
+        if (options.body) {
+          req.write(options.body);
+        }
+        req.end();
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  async function fbApiRequest(
+    targetUrl: string,
+    options: {
+      method?: string;
+      headers?: Record<string, string>;
+      body?: string | Buffer;
+      timeoutMs?: number;
+    } = {},
+    maxAttempts = 3,
+    delayMs = 1200
+  ): Promise<FbApiResponse> {
+    let lastErr: any = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const res = await executeSingleHttpsIpv4(targetUrl, options);
+        if (res.status >= 500 && attempt < maxAttempts) {
+          await new Promise((r) => setTimeout(r, delayMs));
+          continue;
+        }
+        return res;
+      } catch (err: any) {
+        lastErr = err;
+        if (attempt < maxAttempts) {
+          console.warn(`[FB Messenger IPv4] Percobaan ke-${attempt} gagal (${err.message}), mencoba ulang dalam ${delayMs}ms...`);
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
+      }
+    }
+    throw lastErr || new Error("FB IPv4 request failed after retries");
+  }
+
+  function buildFbMultipartImageBody(recipientPsid: string, imageBuffer: Buffer) {
+    const boundary = `----E4StoreFbFormBoundary${Date.now().toString(16)}`;
+    const parts: Buffer[] = [];
+
+    const appendField = (name: string, val: string) => {
+      parts.push(
+        Buffer.from(
+          `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${val}\r\n`,
+          "utf-8"
+        )
+      );
+    };
+
+    appendField("recipient", JSON.stringify({ id: recipientPsid }));
+    appendField(
+      "message",
+      JSON.stringify({
+        attachment: {
+          type: "image",
+          payload: { is_reusable: false }
+        }
+      })
+    );
+
+    parts.push(
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="filedata"; filename="nota-${Date.now()}.png"\r\nContent-Type: image/png\r\n\r\n`,
+        "utf-8"
+      )
+    );
+    parts.push(imageBuffer);
+    parts.push(Buffer.from(`\r\n--${boundary}--\r\n`, "utf-8"));
+
+    return {
+      body: Buffer.concat(parts),
+      contentType: `multipart/form-data; boundary=${boundary}`
+    };
+  }
+
   // Tarik Otomatis Nama Akun Facebook & Foto Profil Facebook Asli dari Meta Graph API + Simpan Cache Lokal
   async function fetchAndCacheFbProfile(psid: string, forceRefresh = false): Promise<{ name: string | null; photoUrl: string | null }> {
     if (!psid) return { name: null, photoUrl: null };
@@ -14360,7 +14518,7 @@ E4 Store`,
     let fbName: string | null = cached?.name || null;
     let rawPicUrl: string | null = cached?.rawPhotoUrl || null;
 
-    // 1. Coba ambil first_name, last_name, name, profile_pic dari Graph API (dengan timeout 3 detik)
+    // 1. Coba ambil first_name, last_name, name, profile_pic dari Graph API via IPv4 (timeout 3 detik)
     const fieldCandidates = [
       "first_name,last_name,name,profile_pic",
       "first_name,last_name,profile_pic",
@@ -14371,11 +14529,12 @@ E4 Store`,
 
     for (const fields of fieldCandidates) {
       try {
-        const res = await fetch(
+        const res = await fbApiRequest(
           `https://graph.facebook.com/v19.0/${encodeURIComponent(psid)}?fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(pageToken)}`,
-          { signal: AbortSignal.timeout(3000) }
+          { method: "GET", timeoutMs: 3000 },
+          1
         );
-        const data: any = await res.json();
+        const data: any = res.json();
         if (data && !data.error) {
           const parsedName = data.name || [data.first_name, data.last_name].filter(Boolean).join(" ").trim();
           if (parsedName) fbName = parsedName;
@@ -14389,11 +14548,12 @@ E4 Store`,
     // 1b. Fallback Nama Akun Facebook via Conversations Participants API jika direct PSID dibatasi izin Meta
     if (!fbName) {
       try {
-        const convRes = await fetch(
+        const convRes = await fbApiRequest(
           `https://graph.facebook.com/v19.0/me/conversations?fields=participants&limit=30&access_token=${encodeURIComponent(pageToken)}`,
-          { signal: AbortSignal.timeout(3000) }
+          { method: "GET", timeoutMs: 3000 },
+          1
         );
-        const convData: any = await convRes.json();
+        const convData: any = convRes.json();
         if (convData && Array.isArray(convData.data)) {
           for (const conv of convData.data) {
             const parts = conv?.participants?.data || [];
@@ -14410,11 +14570,12 @@ E4 Store`,
     // 2. Jika belum dapat URL foto dari profile_pic, coba endpoint /picture JSON dan direct
     if (!rawPicUrl) {
       try {
-        const picJsonRes = await fetch(
+        const picJsonRes = await fbApiRequest(
           `https://graph.facebook.com/v19.0/${encodeURIComponent(psid)}/picture?width=400&height=400&redirect=false&access_token=${encodeURIComponent(pageToken)}`,
-          { signal: AbortSignal.timeout(3000) }
+          { method: "GET", timeoutMs: 3000 },
+          1
         );
-        const picJson: any = await picJsonRes.json();
+        const picJson: any = picJsonRes.json();
         if (picJson?.data?.url) {
           rawPicUrl = picJson.data.url;
         }
@@ -14424,19 +14585,15 @@ E4 Store`,
       rawPicUrl = `https://graph.facebook.com/v19.0/${encodeURIComponent(psid)}/picture?type=large&access_token=${encodeURIComponent(pageToken)}`;
     }
 
-    // 3. Unduh & simpan foto profil ke disk lokal agar tidak kadaluarsa
+    // 3. Unduh & simpan foto profil ke disk lokal via IPv4 agar tidak kadaluarsa
     if (rawPicUrl && (!hasLocalAvatar || forceRefresh)) {
       try {
-        const imgRes = await fetch(rawPicUrl, { signal: AbortSignal.timeout(3000) });
+        const imgRes = await fbApiRequest(rawPicUrl, { method: "GET", timeoutMs: 3500 }, 1);
         if (imgRes.ok) {
-          const contentType = imgRes.headers.get("content-type") || "";
-          if (contentType.includes("image")) {
-            const arrBuf = await imgRes.arrayBuffer();
-            const buf = Buffer.from(arrBuf);
-            if (buf.length > 200) {
-              if (!fs.existsSync(avatarDir)) fs.mkdirSync(avatarDir, { recursive: true });
-              fs.writeFileSync(localAvatarPath, buf);
-            }
+          const contentType = String(imgRes.headers["content-type"] || "");
+          if (contentType.includes("image") && imgRes.buffer.length > 200) {
+            if (!fs.existsSync(avatarDir)) fs.mkdirSync(avatarDir, { recursive: true });
+            fs.writeFileSync(localAvatarPath, imgRes.buffer);
           }
         }
       } catch (e) {}
@@ -14537,30 +14694,6 @@ E4 Store`,
     }
   });
 
-  async function fetchWithFbRetry(targetUrl: string, init: RequestInit, maxAttempts = 3, delayMs = 1500): Promise<Response> {
-    let lastErr: any = null;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        const res = await fetch(targetUrl, {
-          ...init,
-          signal: AbortSignal.timeout(10000)
-        });
-        if (res.status >= 500 && attempt < maxAttempts) {
-          await new Promise((r) => setTimeout(r, delayMs));
-          continue;
-        }
-        return res;
-      } catch (err: any) {
-        lastErr = err;
-        if (attempt < maxAttempts) {
-          console.warn(`[FB Messenger] Percobaan kirim ke-${attempt} gagal (${err.message}), mencoba ulang dalam ${delayMs}ms...`);
-          await new Promise((r) => setTimeout(r, delayMs));
-        }
-      }
-    }
-    throw lastErr || new Error("fetch failed after retries");
-  }
-
   async function sendFbMessage(
     recipientPsid: string,
     options: {
@@ -14580,31 +14713,20 @@ E4 Store`,
     const cleanText = options.text ? cleanFbMarkdown(options.text) : undefined;
 
     try {
-      // 1. Jika mengirim gambar dari Buffer (misal Struk Canvas atau QRIS lokal)
+      // 1. Jika mengirim gambar dari Buffer (misal Struk Canvas atau QRIS lokal) via IPv4 murni
       if (options.imageBuffer) {
-        const sendImageBuf = async () => {
-          const formData = new FormData();
-          formData.append("recipient", JSON.stringify({ id: recipientPsid }));
-          formData.append("message", JSON.stringify({
-            attachment: {
-              type: "image",
-              payload: { is_reusable: false }
-            }
-          }));
-          const blob = new Blob([options.imageBuffer!], { type: "image/png" });
-          formData.append("filedata", blob, `nota-${Date.now()}.png`);
-          return fetchWithFbRetry(url, {
+        const multipart = buildFbMultipartImageBody(recipientPsid, options.imageBuffer);
+        await fbApiRequest(
+          url,
+          {
             method: "POST",
-            body: formData as any
-          }, 1, 1500);
-        };
-
-        try {
-          await sendImageBuf();
-        } catch (imgErr) {
-          await new Promise((r) => setTimeout(r, 1500));
-          await sendImageBuf().catch((e) => console.warn("[FB Messenger] Gagal kirim lampiran gambar:", e.message));
-        }
+            headers: { "Content-Type": multipart.contentType },
+            body: multipart.body,
+            timeoutMs: 15000
+          },
+          3,
+          1200
+        ).catch((e) => console.warn("[FB Messenger] Gagal kirim lampiran gambar:", e.message));
 
         // Jika ada teks & quickReplies pendamping gambar, kirim setelah gambar
         if (cleanText) {
@@ -14616,16 +14738,22 @@ E4 Store`,
           if (options.quickReplies && options.quickReplies.length > 0) {
             textBody.message.quick_replies = options.quickReplies.slice(0, 13);
           }
-          await fetchWithFbRetry(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(textBody)
-          });
+          await fbApiRequest(
+            url,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(textBody),
+              timeoutMs: 10000
+            },
+            3,
+            1200
+          );
         }
         return true;
       }
 
-      // 2. Jika mengirim gambar dari URL
+      // 2. Jika mengirim gambar dari URL via IPv4 murni
       if (options.imageUrl) {
         const imgPayload: any = {
           recipient: { id: recipientPsid },
@@ -14637,14 +14765,20 @@ E4 Store`,
             }
           }
         };
-        await fetchWithFbRetry(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(imgPayload)
-        });
+        await fbApiRequest(
+          url,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(imgPayload),
+            timeoutMs: 10000
+          },
+          3,
+          1200
+        );
       }
 
-      // 3. Kirim pesan teks dan/atau Quick Replies
+      // 3. Kirim pesan teks dan/atau Quick Replies via IPv4 murni
       if (cleanText) {
         const body: any = {
           recipient: { id: recipientPsid },
@@ -14654,12 +14788,18 @@ E4 Store`,
         if (options.quickReplies && options.quickReplies.length > 0) {
           body.message.quick_replies = options.quickReplies.slice(0, 13);
         }
-        const res = await fetchWithFbRetry(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body)
-        });
-        return await res.json();
+        const res = await fbApiRequest(
+          url,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+            timeoutMs: 10000
+          },
+          3,
+          1200
+        );
+        return res.json();
       }
     } catch (err: any) {
       console.error("[FB Messenger] Gagal mengirim pesan:", err.message);
@@ -14707,8 +14847,12 @@ E4 Store`,
 
       if (db.fbConfig.pageAccessToken) {
         try {
-          const checkRes = await fetch(`https://graph.facebook.com/v19.0/me?fields=id,name&access_token=${encodeURIComponent(db.fbConfig.pageAccessToken)}`);
-          const checkData: any = await checkRes.json();
+          const checkRes = await fbApiRequest(
+            `https://graph.facebook.com/v19.0/me?fields=id,name&access_token=${encodeURIComponent(db.fbConfig.pageAccessToken)}`,
+            { method: "GET", timeoutMs: 8000 },
+            2
+          );
+          const checkData: any = checkRes.json();
           if (checkData && checkData.name) {
             db.fbConfig.pageName = checkData.name;
             db.fbConfig.pageId = checkData.id;
