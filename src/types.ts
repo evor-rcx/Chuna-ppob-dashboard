@@ -6,10 +6,8 @@ export type Page =
   | 'konfig' 
   | 'bot' 
   | 'saldo' 
-  | 'member-facebook'
   | 'member-offline'
   | 'kasir-fisik'
   | 'security'
   | 'gemini';
-
 

@@ -484,7 +484,7 @@ export function Menu({ onNavigate }: MenuProps) {
   };
 
   const handleItemClick = (id: Page) => {
-    if (id === 'produk' || id === 'konfig' || id === 'saldo' || id === 'member-facebook' || id === 'bot' || id === 'security' || id === 'gemini') {
+    if (id === 'produk' || id === 'konfig' || id === 'saldo' || id === 'bot' || id === 'security' || id === 'gemini') {
       setShowPasswordModal(id);
       setPasswordInput('');
       setTotpInput('');
@@ -538,9 +538,8 @@ export function Menu({ onNavigate }: MenuProps) {
     { id: 'transaksi', icon: <FileText size={24} />, label: 'TRANSAKSI', subtitle: 'Sukses • Pending • Gagal...', iconBg: 'bg-emerald-50 text-emerald-600 border border-emerald-200/60' },
     { id: 'konfig', icon: <Settings size={24} />, label: 'KONFIG API', subtitle: 'Digiflazz • WA Owner', iconBg: 'bg-orange-50 text-orange-500 border border-orange-200/60' },
     { id: 'gemini', icon: <Sparkles size={24} />, label: 'KONFIG AI GEMINI', subtitle: 'Model • API Key • Prompts', iconBg: 'bg-purple-50 text-purple-600 border border-purple-200/60' },
-    { id: 'bot', icon: <Bot size={24} />, label: 'BOT WA / TELE / FB', subtitle: 'Status • WA • Tele • FB', iconBg: 'bg-cyan-50 text-cyan-600 border border-cyan-200/60' },
-    { id: 'saldo', icon: <Send size={24} />, label: 'MEMBER TELEGRAM', subtitle: 'Cek & Topup Saldo Tele', iconBg: 'bg-sky-50 text-sky-600 border border-sky-200/60' },
-    { id: 'member-facebook', icon: <Users size={24} />, label: 'MEMBER FACEBOOK', subtitle: 'Akun FB • Foto & Saldo', iconBg: 'bg-blue-50 text-blue-600 border border-blue-200/60' },
+    { id: 'bot', icon: <Bot size={24} />, label: 'BOT WA / TELE', subtitle: 'Status • QR Baileys • Tele', iconBg: 'bg-cyan-50 text-cyan-600 border border-cyan-200/60' },
+    { id: 'saldo', icon: <Send size={24} />, label: 'SALDO TELEGRAM', subtitle: 'Cek & Topup Saldo Bot', iconBg: 'bg-sky-50 text-sky-600 border border-sky-200/60' },
     { id: 'member-offline', icon: <Users size={24} />, label: 'MEMBER OFFLINE', subtitle: 'Data Pelanggan & Utang', iconBg: 'bg-teal-50 text-teal-600 border border-teal-200/60' },
     { id: 'kasir-fisik', icon: <Store size={24} />, label: 'KASIR FISIK', subtitle: 'Transaksi Langsung & POS', iconBg: 'bg-amber-50 text-amber-600 border border-amber-200/60' },
     { id: 'security', icon: <ShieldAlert size={24} />, label: 'KEAMANAN SUPER', subtitle: 'PIN • Proteksi • Audit Log', iconBg: 'bg-rose-50 text-rose-600 border border-rose-200/60' },
