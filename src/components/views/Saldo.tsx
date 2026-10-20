@@ -1,23 +1,49 @@
 import { PageContainer } from '../PageContainer';
 import { useState, useEffect } from 'react';
-import { X, CheckCircle, XCircle, Clock, Image as ImageIcon, ShieldCheck, RefreshCw, User, Phone, Send } from 'lucide-react';
+import { X, CheckCircle, XCircle, Clock, Image as ImageIcon, ShieldCheck, RefreshCw, User, Phone, Send, PlusCircle, MinusCircle, Award, Search, Trash2 } from 'lucide-react';
 
-export function Saldo({ onBack }: { onBack: () => void }) {
+export function Saldo({
+  onBack,
+  mode = 'telegram'
+}: {
+  onBack: () => void;
+  mode?: 'telegram' | 'facebook';
+}) {
+  const isFacebookMode = mode === 'facebook';
   const [members, setMembers] = useState<any[]>([]);
+  const [facebookMembers, setFacebookMembers] = useState<any[]>([]);
   const [topupRequests, setTopupRequests] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'requests' | 'members'>('requests');
+  const [activeTab, setActiveTab] = useState<'requests' | 'members' | 'fb-members'>(
+    isFacebookMode ? 'fb-members' : 'requests'
+  );
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [selectedPhoto, setSelectedPhoto] = useState<{ url: string; title: string; req: any } | null>(null);
-  
-  const [topupModal, setTopupModal] = useState<{ isOpen: boolean; memberId: string | null }>({ isOpen: false, memberId: null });
+  const [fbSearch, setFbSearch] = useState('');
+  const [syncingFbId, setSyncingFbId] = useState<string | null>(null);
+  const [isSyncingAllFb, setIsSyncingAllFb] = useState(false);
+  const [avatarCacheBust, setAvatarCacheBust] = useState<number>(() => Date.now());
+
+  const [topupModal, setTopupModal] = useState<{ isOpen: boolean; memberId: string | null; action: 'add' | 'subtract' }>({
+    isOpen: false,
+    memberId: null,
+    action: 'add'
+  });
   const [topupAmount, setTopupAmount] = useState('');
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
+
+  useEffect(() => {
+    setActiveTab(isFacebookMode ? 'fb-members' : 'requests');
+    setStatusFilter('all');
+  }, [isFacebookMode]);
 
   const fetchMembers = () => {
     fetch('/api/members')
       .then(res => res.json())
       .then(data => {
-        if (data.success) setMembers(data.members || []);
+        if (data.success) {
+          setMembers(data.members || []);
+          setFacebookMembers(data.facebookMembers || []);
+        }
       })
       .catch(() => {});
   };
@@ -34,12 +60,15 @@ export function Saldo({ onBack }: { onBack: () => void }) {
   useEffect(() => {
     fetchMembers();
     fetchTopupRequests();
-    const interval = setInterval(fetchTopupRequests, 10000);
+    const interval = setInterval(() => {
+      fetchTopupRequests();
+      fetchMembers();
+    }, 10000);
     return () => clearInterval(interval);
   }, []);
 
   const handleApproveTopup = async (reqId: string, memberName: string, nominal: number) => {
-    if (!confirm(`Setujui pengisian saldo sebesar ${formatRupiah(nominal)} untuk ${memberName}? Saldo akun akan langsung bertambah dan notifikasi dikirimkan ke Telegram.`)) {
+    if (!confirm(`Setujui pengisian saldo sebesar ${formatRupiah(nominal)} untuk ${memberName}? Saldo akun akan langsung bertambah dan notifikasi dikirimkan ke member.`)) {
       return;
     }
 
@@ -86,7 +115,7 @@ export function Saldo({ onBack }: { onBack: () => void }) {
   const handleBalanceChange = async (memberId: string, currentBalance: number) => {
     const newBalanceStr = prompt("Masukkan jumlah saldo baru:", currentBalance.toString());
     if (newBalanceStr !== null) {
-      const newBalance = parseInt(newBalanceStr);
+      const newBalance = parseInt(newBalanceStr, 10);
       if (!isNaN(newBalance) && newBalance !== currentBalance) {
         try {
           const res = await fetch(`/api/members/${memberId}/balance`, {
@@ -96,7 +125,8 @@ export function Saldo({ onBack }: { onBack: () => void }) {
           });
           const data = await res.json();
           if (data.success) {
-            setMembers(members.map(m => m.id === memberId ? { ...m, balance: newBalance } : m));
+            setMembers(prev => prev.map(m => m.id === memberId ? { ...m, balance: newBalance } : m));
+            setFacebookMembers(prev => prev.map(m => m.id === memberId ? { ...m, balance: newBalance } : m));
           } else {
             alert(data.error);
           }
@@ -118,7 +148,8 @@ export function Saldo({ onBack }: { onBack: () => void }) {
         });
         const data = await res.json();
         if (data.success) {
-          setMembers(members.map(m => m.id === memberId ? { ...m, telegram: newTelegram } : m));
+          setMembers(prev => prev.map(m => m.id === memberId ? { ...m, telegram: newTelegram } : m));
+          setFacebookMembers(prev => prev.map(m => m.id === memberId ? { ...m, telegram: newTelegram } : m));
         } else {
           alert(data.error);
         }
@@ -137,7 +168,8 @@ export function Saldo({ onBack }: { onBack: () => void }) {
       });
       const data = await res.json();
       if (data.success) {
-        setMembers(members.map(m => m.id === memberId ? { ...m, type: newType } : m));
+        setMembers(prev => prev.map(m => m.id === memberId ? { ...m, type: newType } : m));
+        setFacebookMembers(prev => prev.map(m => m.id === memberId ? { ...m, type: newType } : m));
       } else {
         alert(data.error);
       }
@@ -161,13 +193,64 @@ export function Saldo({ onBack }: { onBack: () => void }) {
     }
   };
 
+  const handleSyncFbProfile = async (memberId: string) => {
+    setSyncingFbId(memberId);
+    try {
+      const res = await fetch(`/api/members/${memberId}/sync-fb`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setAvatarCacheBust(Date.now());
+        fetchMembers();
+        alert(`✅ Profil Facebook berhasil disinkronkan!\n\nNama Akun FB: ${data.fbProfileName || '-'}\nFoto Profil FB: Diperbarui dari Meta Graph API`);
+      } else {
+        alert(data.error || "Gagal menyinkronkan profil Facebook.");
+      }
+    } catch (err: any) {
+      alert("Gagal menghubungi server Facebook: " + err.message);
+    } finally {
+      setSyncingFbId(null);
+    }
+  };
+
+  const handleSyncAllFbProfiles = async () => {
+    if (facebookMembers.length === 0) return;
+    setIsSyncingAllFb(true);
+    try {
+      for (const m of facebookMembers) {
+        await fetch(`/api/members/${m.id}/sync-fb`, { method: 'POST' }).catch(() => {});
+      }
+      setAvatarCacheBust(Date.now());
+      fetchMembers();
+      alert(`✅ Seluruh ${facebookMembers.length} Member Facebook berhasil disinkronkan ulang!`);
+    } catch (err: any) {
+      alert("Terjadi kesalahan saat sinkronisasi massal: " + err.message);
+    } finally {
+      setIsSyncingAllFb(false);
+    }
+  };
+
+  const handleDeleteMember = (memberId: string, memberName: string) => {
+    if (confirm(`Apakah Anda yakin ingin menghapus member "${memberName}"?`)) {
+      fetch(`/api/members/${memberId}`, { method: 'DELETE' })
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) {
+            alert("Member berhasil dihapus");
+            fetchMembers();
+          } else {
+            alert("Gagal: " + data.error);
+          }
+        });
+    }
+  };
+
   const formatRupiah = (amount: number) => {
     return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(amount || 0);
   };
 
   const handleTopup = async () => {
     if (!topupModal.memberId || !topupAmount) return;
-    
+
     const amount = parseInt(topupAmount, 10);
     if (isNaN(amount) || amount <= 0) return;
 
@@ -175,31 +258,63 @@ export function Saldo({ onBack }: { onBack: () => void }) {
       const res = await fetch(`/api/members/${topupModal.memberId}/topup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount })
+        body: JSON.stringify({
+          amount,
+          action: topupModal.action
+        })
       });
       const data = await res.json();
       if (data.success) {
         fetchMembers();
-        setTopupModal({ isOpen: false, memberId: null });
+        setTopupModal({ isOpen: false, memberId: null, action: 'add' });
         setTopupAmount('');
       } else {
         alert(data.error);
       }
     } catch (err) {
-      alert("Error topup");
+      alert("Error memproses perubahan saldo");
     }
   };
 
-  const selectedMember = members.find(m => m.id === topupModal.memberId);
-  const pendingCount = topupRequests.filter(r => r.status === 'pending').length;
+  const allLoadedMembers = [...members, ...facebookMembers];
+  const selectedMember = allLoadedMembers.find(m => m.id === topupModal.memberId);
 
-  const filteredRequests = topupRequests.filter(r => {
+  const isFbTopupRequest = (r: any) =>
+    String(r?.id || '').startsWith('TOPUP-FB-') ||
+    String(r?.memberTelegram || '').startsWith('FB:') ||
+    String(r?.memberId || '').startsWith('MBR-FB-') ||
+    String(r?.memberId || '').startsWith('FB-');
+
+  const platformRequests = topupRequests.filter(r =>
+    isFacebookMode ? isFbTopupRequest(r) : !isFbTopupRequest(r)
+  );
+  const pendingCount = platformRequests.filter(r => r.status === 'pending').length;
+
+  const filteredRequests = platformRequests.filter(r => {
     if (statusFilter === 'all') return true;
     return r.status === statusFilter;
   });
 
+  const filteredFbMembers = facebookMembers.filter(m => {
+    if (!fbSearch.trim()) return true;
+    const q = fbSearch.toLowerCase();
+    const fbName = String(m.fbProfileName || m.name || '').toLowerCase();
+    const wa = String(m.whatsapp || '').toLowerCase();
+    const psid = String(m.fbPsid || m.telegram || '').toLowerCase();
+    return fbName.includes(q) || wa.includes(q) || psid.includes(q);
+  });
+
+  const totalFbBalance = facebookMembers.reduce((acc, m) => acc + (Number(m.balance) || 0), 0);
+
   return (
-    <PageContainer title="Manajemen Saldo & Verifikasi Bukti Transfer" onBack={onBack}>
+    <PageContainer
+      title={
+        isFacebookMode
+          ? 'Manajemen Member Facebook & Konfirmasi Saldo FB'
+          : 'Manajemen Member Telegram & Verifikasi Saldo'
+      }
+      onBack={onBack}
+    >
       {/* Top Banner & Tabs */}
       <div className="-mx-6 -mt-6 mb-6 bg-slate-900/80 border-b border-slate-800/80 p-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -210,13 +325,21 @@ export function Saldo({ onBack }: { onBack: () => void }) {
               </span>
               <span className="text-xs text-slate-400">Pajak 0.3% untuk saldo ≥ Rp 400.000</span>
             </div>
-            <h2 className="text-xl font-bold text-white mt-1">Konfirmasi Saldo & Member Telegram</h2>
-            <p className="text-xs text-slate-400">Verifikasi otomatis AI Vision, salinan struk transfer, dan persetujuan saldo manual owner.</p>
+            <h2 className="text-xl font-bold text-white mt-1">
+              {isFacebookMode
+                ? 'Daftar Member Facebook & Konfirmasi Saldo FB'
+                : 'Konfirmasi Saldo & Daftar Member Telegram'}
+            </h2>
+            <p className="text-xs text-slate-400">
+              {isFacebookMode
+                ? 'Kelola member Bot Facebook Messenger ("Daftar Bareng Chuna"), sinkronisasi nama & foto profil Facebook asli, serta konfirmasi isi saldo.'
+                : 'Kelola verifikasi bukti transfer QRIS dan daftar member Bot Telegram.'}
+            </p>
           </div>
 
           <div className="flex items-center gap-2">
             <button
-              onClick={() => { fetchTopupRequests(); fetchMembers(); }}
+              onClick={() => { fetchTopupRequests(); fetchMembers(); setAvatarCacheBust(Date.now()); }}
               className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl border border-slate-700/50 transition-colors cursor-pointer"
               title="Refresh Data"
             >
@@ -225,41 +348,80 @@ export function Saldo({ onBack }: { onBack: () => void }) {
           </div>
         </div>
 
-        {/* Tab Switcher */}
-        <div className="flex gap-2 mt-6 border-b border-slate-800">
-          <button
-            onClick={() => setActiveTab('requests')}
-            className={`pb-3 px-4 font-semibold text-sm transition-all cursor-pointer relative flex items-center gap-2 ${
-              activeTab === 'requests'
-                ? 'text-sky-400 border-b-2 border-sky-400 font-bold'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <span>📥 Permintaan Isi Saldo (Bukti Struk)</span>
-            {pendingCount > 0 && (
-              <span className="bg-amber-500 text-slate-950 text-xs px-2 py-0.5 rounded-full font-bold animate-pulse">
-                {pendingCount}
-              </span>
-            )}
-          </button>
+        {/* Tab Switcher - Terpisah antara halaman Telegram dan halaman Facebook */}
+        <div className="flex flex-wrap gap-2 mt-6 border-b border-slate-800">
+          {isFacebookMode ? (
+            <>
+              <button
+                onClick={() => setActiveTab('fb-members')}
+                className={`pb-3 px-4 font-semibold text-sm transition-all cursor-pointer relative flex items-center gap-2 ${
+                  activeTab === 'fb-members'
+                    ? 'text-[#1877F2] border-b-2 border-[#1877F2] font-bold'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-[#1877F2] text-white text-[10px] font-black">
+                  f
+                </span>
+                <span>Daftar Member Facebook</span>
+                <span className="bg-[#1877F2]/20 text-sky-300 border border-[#1877F2]/40 text-xs px-2 py-0.5 rounded-full font-bold">
+                  {facebookMembers.length}
+                </span>
+              </button>
 
-          <button
-            onClick={() => setActiveTab('members')}
-            className={`pb-3 px-4 font-semibold text-sm transition-all cursor-pointer relative flex items-center gap-2 ${
-              activeTab === 'members'
-                ? 'text-sky-400 border-b-2 border-sky-400 font-bold'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <span>👥 Data Member & Saldo Akun</span>
-            <span className="bg-slate-800 text-slate-400 text-xs px-2 py-0.5 rounded-full">
-              {members.length}
-            </span>
-          </button>
+              <button
+                onClick={() => setActiveTab('requests')}
+                className={`pb-3 px-4 font-semibold text-sm transition-all cursor-pointer relative flex items-center gap-2 ${
+                  activeTab === 'requests'
+                    ? 'text-[#1877F2] border-b-2 border-[#1877F2] font-bold'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <span>📥 Permintaan Isi Saldo FB (Bukti Struk)</span>
+                {pendingCount > 0 && (
+                  <span className="bg-amber-500 text-slate-950 text-xs px-2 py-0.5 rounded-full font-bold animate-pulse">
+                    {pendingCount}
+                  </span>
+                )}
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => setActiveTab('requests')}
+                className={`pb-3 px-4 font-semibold text-sm transition-all cursor-pointer relative flex items-center gap-2 ${
+                  activeTab === 'requests'
+                    ? 'text-sky-400 border-b-2 border-sky-400 font-bold'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <span>📥 Permintaan Isi Saldo (Bukti Struk)</span>
+                {pendingCount > 0 && (
+                  <span className="bg-amber-500 text-slate-950 text-xs px-2 py-0.5 rounded-full font-bold animate-pulse">
+                    {pendingCount}
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={() => setActiveTab('members')}
+                className={`pb-3 px-4 font-semibold text-sm transition-all cursor-pointer relative flex items-center gap-2 ${
+                  activeTab === 'members'
+                    ? 'text-sky-400 border-b-2 border-sky-400 font-bold'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <span>👥 Member Telegram</span>
+                <span className="bg-slate-800 text-slate-300 text-xs px-2 py-0.5 rounded-full">
+                  {members.length}
+                </span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      {activeTab === 'requests' ? (
+      {activeTab === 'requests' && (
         <div className="space-y-4">
           {/* Status Filter */}
           <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-800/30 p-3 rounded-xl border border-slate-800">
@@ -269,7 +431,7 @@ export function Saldo({ onBack }: { onBack: () => void }) {
                 onClick={() => setStatusFilter('all')}
                 className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors ${statusFilter === 'all' ? 'bg-sky-500 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
               >
-                Semua ({topupRequests.length})
+                Semua ({platformRequests.length})
               </button>
               <button
                 onClick={() => setStatusFilter('pending')}
@@ -281,22 +443,24 @@ export function Saldo({ onBack }: { onBack: () => void }) {
                 onClick={() => setStatusFilter('approved')}
                 className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors ${statusFilter === 'approved' ? 'bg-emerald-500 text-white font-bold' : 'bg-slate-800 text-emerald-400 hover:bg-slate-700'}`}
               >
-                Disetujui ({topupRequests.filter(r => r.status === 'approved').length})
+                Disetujui ({platformRequests.filter(r => r.status === 'approved').length})
               </button>
               <button
                 onClick={() => setStatusFilter('rejected')}
                 className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors ${statusFilter === 'rejected' ? 'bg-red-500 text-white font-bold' : 'bg-slate-800 text-red-400 hover:bg-slate-700'}`}
               >
-                Ditolak ({topupRequests.filter(r => r.status === 'rejected').length})
+                Ditolak ({platformRequests.filter(r => r.status === 'rejected').length})
               </button>
             </div>
             <div className="text-xs text-slate-400">
-              💡 Owner dapat menyetujui langsung dari sini atau via tombol bot Telegram.
+              {isFacebookMode
+                ? '💡 Owner dapat menyetujui langsung pengisian saldo Member Facebook dari sini.'
+                : '💡 Owner dapat menyetujui langsung dari sini atau via tombol bot Telegram.'}
             </div>
           </div>
 
           {/* Topup Requests Table */}
-          <div className="-mx-6">
+          <div className="-mx-6 overflow-x-auto">
             <table className="w-full text-left">
               <thead>
                 <tr className="text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-800/50 bg-slate-800/20">
@@ -431,8 +595,10 @@ export function Saldo({ onBack }: { onBack: () => void }) {
             </table>
           </div>
         </div>
-      ) : (
-        /* Member Table */
+      )}
+
+      {activeTab === 'members' && (
+        /* Member Telegram Table */
         <div className="-mx-6 overflow-x-auto">
           <table className="w-full text-left">
             <thead>
@@ -474,7 +640,6 @@ export function Saldo({ onBack }: { onBack: () => void }) {
                   {/* Profil WhatsApp (Foto, Nama, LID, Nomor) */}
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2.5">
-                      {/* Avatar Bulat Foto Profil WhatsApp */}
                       <div className="relative shrink-0">
                         {m.photoUrl ? (
                           <img
@@ -583,11 +748,11 @@ export function Saldo({ onBack }: { onBack: () => void }) {
                         <RefreshCw size={11} /> Tarik WA
                       </button>
                       <button 
-                        onClick={() => setTopupModal({ isOpen: true, memberId: m.id })}
+                        onClick={() => setTopupModal({ isOpen: true, memberId: m.id, action: 'add' })}
                         className="bg-sky-500/10 text-sky-400 hover:bg-sky-500/20 font-medium py-1 px-2 rounded-lg cursor-pointer transition-colors text-[11px] uppercase tracking-wider"
-                        title="Topup Saldo Manual"
+                        title="Tambah / Kurangi Saldo Manual"
                       >
-                        Topup
+                        ± Saldo
                       </button>
                       <button 
                         onClick={() => {
@@ -609,20 +774,7 @@ export function Saldo({ onBack }: { onBack: () => void }) {
                         PIN
                       </button>
                       <button 
-                        onClick={() => {
-                          if (confirm("Apakah Anda yakin ingin menghapus member ini?")) {
-                            fetch(`/api/members/${m.id}`, { method: 'DELETE' })
-                            .then(res => res.json())
-                            .then(data => {
-                              if (data.success) {
-                                alert("Member berhasil dihapus");
-                                fetchMembers();
-                              } else {
-                                alert("Gagal: " + data.error);
-                              }
-                            });
-                          }
-                        }}
+                        onClick={() => handleDeleteMember(m.id, m.name)}
                         className="bg-red-500/10 text-red-400 hover:bg-red-500/20 font-medium py-1 px-2 rounded-lg cursor-pointer transition-colors text-[11px] uppercase tracking-wider"
                         title="Hapus Member"
                       >
@@ -635,12 +787,245 @@ export function Saldo({ onBack }: { onBack: () => void }) {
               {members.length === 0 && (
                 <tr>
                   <td colSpan={7} className="px-6 py-8 text-center text-slate-400 text-sm">
-                    Tidak ada data member.
+                    Tidak ada data Member Telegram.
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {activeTab === 'fb-members' && (
+        /* Member Facebook Section */
+        <div className="space-y-4">
+          {/* Top Bar Member Facebook: Ringkasan, Pencarian & Sinkronisasi */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-800/40 p-4 rounded-xl border border-slate-800">
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-[#1877F2] text-white flex items-center justify-center font-black text-lg shadow-md shadow-blue-950/50">
+                  f
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Daftar Member Facebook Messenger</h3>
+                  <p className="text-xs text-slate-400">
+                    Terdaftar lewat alur <span className="text-sky-400 font-semibold">✨ Daftar Bareng Chuna</span> di Bot Facebook Messenger
+                  </p>
+                </div>
+              </div>
+
+              <div className="h-7 w-px bg-slate-700/60 hidden sm:block" />
+
+              <div className="flex items-center gap-4 text-xs">
+                <div>
+                  <span className="text-slate-400">Total Member FB: </span>
+                  <span className="font-bold text-white">{facebookMembers.length} Akun</span>
+                </div>
+                <span className="text-slate-600">·</span>
+                <div>
+                  <span className="text-slate-400">Total Saldo FB: </span>
+                  <span className="font-bold text-emerald-400">{formatRupiah(totalFbBalance)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={fbSearch}
+                  onChange={(e) => setFbSearch(e.target.value)}
+                  placeholder="Cari nama FB, WA, PSID..."
+                  className="bg-slate-900/80 border border-slate-700/60 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 outline-none focus:border-[#1877F2]"
+                />
+              </div>
+
+              <button
+                onClick={handleSyncAllFbProfiles}
+                disabled={isSyncingAllFb || facebookMembers.length === 0}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1877F2] hover:bg-[#166fe5] disabled:opacity-50 text-white text-xs font-semibold transition-colors cursor-pointer shadow-sm"
+                title="Tarik ulang Nama Akun Facebook & Foto Profil semua member dari Meta Graph API"
+              >
+                <RefreshCw size={13} className={isSyncingAllFb ? 'animate-spin' : ''} />
+                <span>{isSyncingAllFb ? 'Menyinkronkan...' : 'Sinkron Semua Nama & Foto FB'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Tabel Member Facebook */}
+          <div className="-mx-6 overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-800/50 bg-slate-800/20">
+                  <th className="px-6 py-3 font-semibold">Profil Akun Facebook</th>
+                  <th className="px-6 py-3 font-semibold">Nomor Telepon / WA</th>
+                  <th className="px-6 py-3 font-semibold">ID Facebook (PSID)</th>
+                  <th className="px-6 py-3 font-semibold text-center">Tipe Member</th>
+                  <th className="px-6 py-3 font-semibold text-center">Poin</th>
+                  <th className="px-6 py-3 font-semibold text-right">Sisa Saldo</th>
+                  <th className="px-6 py-3 font-semibold text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/30">
+                {filteredFbMembers.map((m) => {
+                  const psid = m.fbPsid || (m.telegram && String(m.telegram).startsWith('FB:') ? String(m.telegram).replace(/^FB:/i, '').trim() : '');
+                  const fbName = m.fbProfileName || m.name || `User FB ${psid.slice(-4)}`;
+                  const fbAvatarSrc = psid ? `/api/fb-avatar/${psid}?t=${avatarCacheBust}` : m.fbPhotoUrl;
+
+                  return (
+                    <tr key={m.id} className="hover:bg-slate-700/10 transition-colors">
+                      {/* a & b. Foto Profil Akun Facebook Asli + Badge Ikon FB + Nama Akun Facebook Asli */}
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="relative shrink-0">
+                            {fbAvatarSrc ? (
+                              <img
+                                src={fbAvatarSrc}
+                                alt={fbName}
+                                className="w-11 h-11 rounded-full object-cover border-2 border-[#1877F2]/60 shadow-sm"
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLElement).style.display = 'none';
+                                  const fallback = (e.currentTarget.nextElementSibling as HTMLElement);
+                                  if (fallback) fallback.style.display = 'flex';
+                                }}
+                              />
+                            ) : null}
+                            <div
+                              style={{ display: fbAvatarSrc ? 'none' : 'flex' }}
+                              className="w-11 h-11 rounded-full bg-[#1877F2]/20 text-sky-300 border-2 border-[#1877F2]/50 items-center justify-center font-bold text-sm shrink-0 select-none"
+                              title="Foto Profil Facebook"
+                            >
+                              {fbName.trim().charAt(0).toUpperCase() || <User size={16} />}
+                            </div>
+                            {/* Badge Ikon Facebook */}
+                            <span
+                              className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#1877F2] text-white text-[10px] font-black flex items-center justify-center ring-2 ring-slate-900 select-none"
+                              title="Terdaftar via Facebook Messenger"
+                            >
+                              f
+                            </span>
+                          </div>
+
+                          <div className="min-w-0">
+                            <div className="text-sm font-bold text-white truncate" title="Nama Akun Facebook Asli">
+                              {fbName}
+                            </div>
+                            <div className="text-[11px] font-mono text-slate-400 mt-0.5">
+                              {m.id}
+                              {m.createdAt && (
+                                <span className="text-slate-500"> · {new Date(m.createdAt).toLocaleDateString('id-ID')}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* c. Nomor Telepon / WhatsApp */}
+                      <td className="px-6 py-4">
+                        <div className="text-xs font-mono font-semibold text-emerald-400 flex items-center gap-1.5">
+                          <Phone size={12} className="text-emerald-500" />
+                          <span>{m.whatsapp || '-'}</span>
+                        </div>
+                      </td>
+
+                      {/* c. ID Facebook (PSID) */}
+                      <td className="px-6 py-4">
+                        <div className="font-mono text-xs text-sky-400 select-all">
+                          {psid || '-'}
+                        </div>
+                        <div className="text-[10px] text-slate-500 mt-0.5">
+                          Meta Messenger PSID
+                        </div>
+                      </td>
+
+                      {/* d. Tipe Member */}
+                      <td className="px-6 py-4 text-center">
+                        <select
+                          value={m.type || 'Biasa'}
+                          onChange={(e) => handleTypeChange(m.id, e.target.value)}
+                          className={`bg-slate-800/50 border border-slate-700/50 rounded-lg px-2.5 py-1 outline-none focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/50 transition-all text-xs font-semibold cursor-pointer ${
+                            m.type === 'VIP'
+                              ? 'text-amber-400 border-amber-500/30 bg-amber-500/10'
+                              : 'text-slate-300'
+                          }`}
+                        >
+                          <option value="Biasa" className="text-slate-900">Biasa</option>
+                          <option value="VIP" className="text-slate-900">VIP</option>
+                        </select>
+                      </td>
+
+                      {/* d. Poin */}
+                      <td className="px-6 py-4 text-center">
+                        <div className="inline-flex items-center gap-1 text-xs font-bold text-amber-400">
+                          <Award size={13} />
+                          <span>{m.points || 0} Poin</span>
+                        </div>
+                      </td>
+
+                      {/* d. Sisa Saldo */}
+                      <td
+                        className="px-6 py-4 text-sm text-emerald-400 font-bold text-right cursor-pointer hover:underline"
+                        onClick={() => handleBalanceChange(m.id, m.balance || 0)}
+                        title="Klik untuk mengatur nominal saldo secara langsung"
+                      >
+                        {formatRupiah(m.balance || 0)} ✏️
+                      </td>
+
+                      {/* d. Tombol Aksi: Tambah/Kurangi Saldo, Sinkron Ulang Nama & Foto FB, Hapus */}
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex gap-1.5 justify-end flex-wrap">
+                          <button
+                            onClick={() => setTopupModal({ isOpen: true, memberId: m.id, action: 'add' })}
+                            className="bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 font-semibold py-1.5 px-2.5 rounded-lg cursor-pointer transition-colors text-[11px] flex items-center gap-1 border border-emerald-500/30"
+                            title="Tambah Saldo Member Facebook"
+                          >
+                            <PlusCircle size={12} /> + Saldo
+                          </button>
+                          <button
+                            onClick={() => setTopupModal({ isOpen: true, memberId: m.id, action: 'subtract' })}
+                            className="bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 font-semibold py-1.5 px-2.5 rounded-lg cursor-pointer transition-colors text-[11px] flex items-center gap-1 border border-amber-500/30"
+                            title="Kurangi Saldo Member Facebook"
+                          >
+                            <MinusCircle size={12} /> - Saldo
+                          </button>
+                          <button
+                            onClick={() => handleSyncFbProfile(m.id)}
+                            disabled={syncingFbId === m.id}
+                            className="bg-[#1877F2]/15 text-sky-400 hover:bg-[#1877F2]/25 font-semibold py-1.5 px-2.5 rounded-lg cursor-pointer transition-colors text-[11px] flex items-center gap-1 border border-[#1877F2]/30 disabled:opacity-50"
+                            title="Sinkron Ulang Nama Akun & Foto Profil Facebook dari Meta Graph API"
+                          >
+                            <RefreshCw size={12} className={syncingFbId === m.id ? 'animate-spin' : ''} />
+                            <span>{syncingFbId === m.id ? 'Sinkron...' : 'Sinkron FB'}</span>
+                          </button>
+                          <button
+                            onClick={() => handleDeleteMember(m.id, fbName)}
+                            className="bg-red-500/15 text-red-400 hover:bg-red-500/25 font-semibold py-1.5 px-2.5 rounded-lg cursor-pointer transition-colors text-[11px] flex items-center gap-1 border border-red-500/30"
+                            title="Hapus Member Facebook"
+                          >
+                            <Trash2 size={12} /> Hapus
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {filteredFbMembers.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-6 py-12 text-center text-slate-400 text-sm">
+                      <div className="max-w-md mx-auto space-y-1.5">
+                        <p className="font-semibold text-slate-300">Belum ada Member Facebook yang tercatat.</p>
+                        <p className="text-xs text-slate-500">
+                          Saat pengguna mengirim pesan ke Bot Facebook Messenger dan memilih tombol <span className="text-sky-400 font-semibold">✨ Daftar Bareng Chuna</span> lalu memverifikasi OTP WhatsApp, akun mereka beserta Nama & Foto Profil Facebook asli akan otomatis tampil di sini.
+                        </p>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -735,29 +1120,62 @@ export function Saldo({ onBack }: { onBack: () => void }) {
         </div>
       )}
 
-      {/* Manual Topup Modal */}
+      {/* Modal Tambah / Kurangi Saldo Manual */}
       {topupModal.isOpen && selectedMember && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-[#0f172a] border border-slate-700/50 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center p-5 border-b border-slate-800/50">
-              <h3 className="text-lg font-semibold text-white">Topup Saldo Manual</h3>
+              <h3 className="text-lg font-semibold text-white">
+                {topupModal.action === 'subtract' ? 'Kurangi Saldo Member' : 'Tambah Saldo Member'}
+              </h3>
               <button 
-                onClick={() => setTopupModal({ isOpen: false, memberId: null })}
+                onClick={() => setTopupModal({ isOpen: false, memberId: null, action: 'add' })}
                 className="text-slate-400 hover:text-white transition-colors cursor-pointer"
               >
                 <X size={20} />
               </button>
             </div>
             <div className="p-5 space-y-4">
+              {/* Pilihan Aksi Tambah / Kurangi */}
+              <div className="grid grid-cols-2 gap-2 p-1 bg-slate-800/60 rounded-xl border border-slate-700/50">
+                <button
+                  type="button"
+                  onClick={() => setTopupModal(prev => ({ ...prev, action: 'add' }))}
+                  className={`py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    topupModal.action === 'add'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <PlusCircle size={14} /> Tambah Saldo (+)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTopupModal(prev => ({ ...prev, action: 'subtract' }))}
+                  className={`py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    topupModal.action === 'subtract'
+                      ? 'bg-amber-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <MinusCircle size={14} /> Kurangi Saldo (-)
+                </button>
+              </div>
+
               <div className="bg-slate-800/30 p-3 rounded-xl border border-slate-700/30">
                 <p className="text-xs text-slate-400 mb-1">Member</p>
-                <p className="text-sm font-medium text-white">{selectedMember.name} <span className="text-slate-500 font-normal">({selectedMember.id})</span></p>
+                <p className="text-sm font-medium text-white">
+                  {selectedMember.fbProfileName || selectedMember.name}{' '}
+                  <span className="text-slate-500 font-normal">({selectedMember.id})</span>
+                </p>
                 <p className="text-xs text-slate-400 mt-2 mb-1">Saldo Saat Ini</p>
-                <p className="text-sm font-medium text-sky-400">{formatRupiah(selectedMember.balance)}</p>
+                <p className="text-sm font-bold text-emerald-400">{formatRupiah(selectedMember.balance)}</p>
               </div>
               
               <div className="flex flex-col gap-2">
-                <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">Nominal Topup</label>
+                <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  {topupModal.action === 'subtract' ? 'Nominal Pengurangan Saldo (Rp)' : 'Nominal Tambah Saldo (Rp)'}
+                </label>
                 <input 
                   type="number" 
                   placeholder="Contoh: 50000" 
@@ -769,16 +1187,20 @@ export function Saldo({ onBack }: { onBack: () => void }) {
 
               <div className="flex gap-3 pt-2">
                 <button 
-                  onClick={() => setTopupModal({ isOpen: false, memberId: null })}
+                  onClick={() => setTopupModal({ isOpen: false, memberId: null, action: 'add' })}
                   className="flex-1 px-4 py-2.5 rounded-xl border border-slate-700/50 text-slate-300 font-medium hover:bg-slate-800/50 transition-colors cursor-pointer"
                 >
                   Batal
                 </button>
                 <button 
                   onClick={handleTopup}
-                  className="flex-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 text-white font-medium hover:from-sky-400 hover:to-indigo-500 transition-colors shadow-lg shadow-sky-900/20 cursor-pointer"
+                  className={`flex-1 px-4 py-2.5 rounded-xl text-white font-semibold transition-colors shadow-lg cursor-pointer ${
+                    topupModal.action === 'subtract'
+                      ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-900/20'
+                      : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/20'
+                  }`}
                 >
-                  Proses Topup
+                  {topupModal.action === 'subtract' ? 'Kurangi Saldo' : 'Tambah Saldo'}
                 </button>
               </div>
             </div>

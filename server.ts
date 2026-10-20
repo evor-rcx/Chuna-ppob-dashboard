@@ -7293,7 +7293,11 @@ Chuna – E4 Store`;
   });
 
   app.get("/api/members", async (req, res) => {
-    const onlineMembers = members.filter(m => m.telegram && m.telegram.startsWith('ID:'));
+    const onlineMembers = members.filter(m =>
+      (m.telegram && (m.telegram.startsWith('ID:') || m.telegram.startsWith('FB:'))) ||
+      Boolean(m.fbPsid) ||
+      m.registeredVia === 'facebook'
+    );
     const enriched = await Promise.all(
       onlineMembers.map(async (m) => {
         const cleanPhone = cleanWaPhone(m.whatsapp || '');
@@ -7326,7 +7330,8 @@ Chuna – E4 Store`;
         }
 
         // 4. Resolusi Data Telegram (Foto & Nama Display)
-        const tgIdStr = String(m.telegram || '').replace(/^ID:/i, '').trim();
+        const isTgMember = Boolean(m.telegram && String(m.telegram).startsWith('ID:'));
+        const tgIdStr = isTgMember ? String(m.telegram || '').replace(/^ID:/i, '').trim() : '';
         const numericTgId = Number(tgIdStr);
         let telegramPhotoUrl: string | null = null;
         let telegramName: string | null = null;
@@ -7345,17 +7350,38 @@ Chuna – E4 Store`;
           }
         }
 
+        // 5. Resolusi Data Facebook Messenger (PSID, Nama Akun FB & Foto Profil FB)
+        const fbPsid = m.fbPsid || (m.telegram && String(m.telegram).startsWith('FB:') ? String(m.telegram).replace(/^FB:/i, '').trim() : null);
+        if (fbPsid && (!m.fbProfileName || m.fbProfileName.startsWith('User FB') || m.fbProfileName.startsWith('Member FB')) && typeof (globalThis as any).__fetchAndCacheFbProfile === 'function') {
+          try {
+            await (globalThis as any).__fetchAndCacheFbProfile(fbPsid, false);
+          } catch (e) {}
+        }
+        const cachedFb = (fbPsid && db.fbProfiles && db.fbProfiles[fbPsid]) ? db.fbProfiles[fbPsid] : null;
+        const fbProfileName = m.fbProfileName || cachedFb?.name || (fbPsid ? m.name : null);
+        const fbPhotoUrl = fbPsid ? `/api/fb-avatar/${fbPsid}` : (m.fbPhotoUrl || cachedFb?.photoUrl || null);
+
         return {
           ...m,
           lid: lid || null,
           waProfileName: waProfileName || null,
           photoUrl: photoUrl || null,
           telegramPhotoUrl: telegramPhotoUrl || null,
-          telegramName: telegramName || null
+          telegramName: telegramName || null,
+          fbPsid: fbPsid || null,
+          fbProfileName: fbProfileName || null,
+          fbPhotoUrl: fbPhotoUrl || null,
+          isFacebookMember: Boolean(fbPsid || m.registeredVia === 'facebook'),
+          isTelegramMember: isTgMember
         };
       })
     );
-    res.json({ success: true, members: enriched });
+    res.json({
+      success: true,
+      members: enriched.filter(m => m.isTelegramMember),
+      facebookMembers: enriched.filter(m => m.isFacebookMember),
+      allOnlineMembers: enriched
+    });
   });
 
   app.get("/api/topup-requests", (req, res) => {
@@ -7370,7 +7396,12 @@ Chuna – E4 Store`;
     if (!topup) return res.status(404).json({ success: false, error: "Permintaan isi saldo tidak ditemukan." });
     if (topup.status === 'approved') return res.status(400).json({ success: false, error: "Permintaan sudah disetujui sebelumnya." });
 
-    const member = dbNow.members.find((m: any) => m.id === topup.memberId || isTelegramMatch(m.telegram, topup.memberTelegram, null));
+    const member = dbNow.members.find((m: any) =>
+      m.id === topup.memberId ||
+      (topup.memberTelegram && m.telegram === topup.memberTelegram) ||
+      (topup.memberTelegram && String(topup.memberTelegram).startsWith('FB:') && m.fbPsid === String(topup.memberTelegram).replace(/^FB:/i, '')) ||
+      isTelegramMatch(m.telegram, topup.memberTelegram, null)
+    );
     if (!member) return res.status(404).json({ success: false, error: "Member akun tidak ditemukan." });
 
     member.balance = (member.balance || 0) + Number(topup.nominalSaldo);
@@ -7382,7 +7413,7 @@ Chuna – E4 Store`;
       id: `TX-TOPUP-${Date.now()}`,
       type: 'topup',
       memberId: member.id,
-      target: member.name,
+      target: member.fbProfileName || member.name,
       product: `Isi Saldo Rp ${Number(topup.nominalSaldo).toLocaleString('id-ID')}`,
       price: topup.nominalSaldo,
       method: 'qris_manual',
@@ -7391,22 +7422,31 @@ Chuna – E4 Store`;
       date: new Date().toISOString()
     });
 
+    // Sinkronkan juga ke array in-memory
+    const memInMem = members.find((m: any) => m.id === member.id);
+    if (memInMem) memInMem.balance = member.balance;
     writeDB(dbNow);
 
+    const approveText =
+      `🎉 *HOREEE! ISI SALDO BERHASIL!* 🥳\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `Halo Kak *${member.fbProfileName || topup.memberName || member.name}*, pengisian saldo sebesar *Rp ${Number(topup.nominalSaldo).toLocaleString('id-ID')}* telah diverifikasi dan disetujui oleh Owner E4 Store!\n\n` +
+      `💳 *Saldo Akun Kakak Saat Ini:* *Rp ${member.balance.toLocaleString('id-ID')}*\n\n` +
+      `Terima kasih telah berbelanja di E4 Store! Selamat bertransaksi kembali ya Kak! 🥰💖`;
+
     try {
-      if (bot && topup.memberTelegram) {
+      const fbPsid = member.fbPsid || (String(topup.memberTelegram || '').startsWith('FB:') ? String(topup.memberTelegram).replace(/^FB:/i, '').trim() : '');
+      if (fbPsid && typeof (globalThis as any).__sendFbNotification === 'function') {
+        await (globalThis as any).__sendFbNotification(fbPsid, approveText);
+      } else if (bot && topup.memberTelegram && !String(topup.memberTelegram).startsWith('FB:')) {
         await bot.telegram.sendMessage(
           topup.memberTelegram,
-          `🎉 *HOREEE! ISI SALDO BERHASIL!* 🥳\n` +
-          `━━━━━━━━━━━━━━━━━━━━━\n` +
-          `Halo Kak *${topup.memberName}*, pengisian saldo sebesar *Rp ${Number(topup.nominalSaldo).toLocaleString('id-ID')}* telah diverifikasi dan disetujui oleh Owner E4 Store!\n\n` +
-          `💳 *Saldo Akun Kakak Saat Ini:* *Rp ${member.balance.toLocaleString('id-ID')}*\n\n` +
-          `Terima kasih telah berbelanja di E4 Store! Selamat bertransaksi kembali ya Kak! 🥰💖`,
+          approveText,
           { parse_mode: 'Markdown' }
         );
       }
     } catch (e: any) {
-      console.log('Failed to notify telegram user:', e.message);
+      console.log('Failed to notify user on topup approve:', e.message);
     }
 
     res.json({ success: true, topup, member });
@@ -7423,18 +7463,24 @@ Chuna – E4 Store`;
     topup.processedAt = new Date().toISOString();
     writeDB(dbNow);
 
+    const rejectText =
+      `❌ *Pemberitahuan Pengisian Saldo*\n\n` +
+      `Halo Kak *${topup.memberName}*, mohon maaf bukti transfer sebesar Rp ${Number(topup.nominalSaldo).toLocaleString('id-ID')} tidak dapat diverifikasi oleh Owner (dana belum masuk atau bukti tidak valid).\n\n` +
+      `Silakan hubungi Owner jika ada pertanyaan atau kendala transfer ya Kak! 😊`;
+
     try {
-      if (bot && topup.memberTelegram) {
+      if (String(topup.memberTelegram || '').startsWith('FB:') && typeof (globalThis as any).__sendFbNotification === 'function') {
+        const fbPsid = String(topup.memberTelegram).replace(/^FB:/i, '').trim();
+        await (globalThis as any).__sendFbNotification(fbPsid, rejectText);
+      } else if (bot && topup.memberTelegram) {
         await bot.telegram.sendMessage(
           topup.memberTelegram,
-          `❌ *Pemberitahuan Pengisian Saldo*\n\n` +
-          `Halo Kak *${topup.memberName}*, mohon maaf bukti transfer sebesar Rp ${Number(topup.nominalSaldo).toLocaleString('id-ID')} tidak dapat diverifikasi oleh Owner (dana belum masuk atau bukti tidak valid).\n\n` +
-          `Silakan hubungi Owner jika ada pertanyaan atau kendala transfer ya Kak! 😊`,
+          rejectText,
           { parse_mode: 'Markdown' }
         );
       }
     } catch (e: any) {
-      console.log('Failed to notify telegram user:', e.message);
+      console.log('Failed to notify user on topup reject:', e.message);
     }
 
     res.json({ success: true, topup });
@@ -7443,6 +7489,12 @@ Chuna – E4 Store`;
   app.get("/api/topup-requests/photo/:fileId", async (req, res) => {
     const { fileId } = req.params;
     try {
+      // Cek apakah foto bukti transfer berasal dari Facebook Messenger yang disimpan di lokal
+      const localReceiptPath = path.join(process.cwd(), "public", "fb_receipts", `${path.basename(fileId)}.jpg`);
+      if (fs.existsSync(localReceiptPath)) {
+        res.setHeader('Content-Type', 'image/jpeg');
+        return res.send(fs.readFileSync(localReceiptPath));
+      }
       if (!bot) return res.status(503).json({ error: "Bot telegram offline" });
       const fileLink = await bot.telegram.getFileLink(fileId);
       const resp = await fetch(fileLink.href);
@@ -7457,29 +7509,42 @@ Chuna – E4 Store`;
 
   app.post("/api/members/:id/topup", async (req, res) => {
     const { id } = req.params;
-    const { amount } = req.body;
+    const { amount, action } = req.body;
     const member = members.find(m => m.id === id);
     if (member) {
-      member.balance += amount;
+      const numericAmount = Number(amount) || 0;
+      const isSubtract = action === 'subtract' || numericAmount < 0;
+      const absAmount = Math.abs(numericAmount);
+
+      if (isSubtract) {
+        member.balance = Math.max(0, (member.balance || 0) - absAmount);
+      } else {
+        member.balance = (member.balance || 0) + absAmount;
+      }
       db.members = members;
       writeDB(db);
       
       const userId = id.replace('MBR-', '');
-      const msgText = `🎉 SALDO MASUK NIH KAK!
+      const displayMemberName = member.fbProfileName || member.name;
+      const msgText = isSubtract
+        ? `ℹ️ *INFO PENYESUAIAN SALDO*\n\nHalo Kak ${displayMemberName}, saldo akun E4 Store Kakak telah dikurangi sebesar *Rp ${absAmount.toLocaleString('id-ID')}* oleh Admin.\n\n💳 *Sisa Saldo Sekarang:* Rp ${member.balance.toLocaleString('id-ID')}`
+        : `🎉 SALDO MASUK NIH KAK!\n\nHalo kak ${displayMemberName}! Chuna mau kasih kabar baik nih~ 💚\n\n💰 Saldo Ditambahkan: Rp ${absAmount.toLocaleString('id-ID')}\n💳 Saldo Sekarang: Rp ${member.balance.toLocaleString('id-ID')}\n\nYuk langsung belanja kak, banyak promo nunggu! 🛍️✨`;
 
-Halo kak ${member.name}! Chuna mau kasih kabar baik nih~ 💚
-
-💰 Saldo Ditambahkan: Rp ${Number(amount).toLocaleString('id-ID')}
-💳 Saldo Sekarang: Rp ${member.balance.toLocaleString('id-ID')}
-
-Yuk langsung belanja kak, banyak promo nunggu! 🛍️✨`;
-
-      try {
-        if (bot) {
-          await bot.telegram.sendMessage(userId, msgText);
+      const fbPsid = member.fbPsid || (member.telegram && String(member.telegram).startsWith('FB:') ? String(member.telegram).replace(/^FB:/i, '').trim() : '');
+      if (fbPsid && typeof (globalThis as any).__sendFbNotification === 'function') {
+        try {
+          await (globalThis as any).__sendFbNotification(fbPsid, msgText);
+        } catch (e) {
+          console.log('Failed to send topup notification to facebook:', e);
         }
-      } catch(e) {
-         console.log('Failed to send topup notification to telegram:', e);
+      } else {
+        try {
+          if (bot && (!member.telegram || !String(member.telegram).startsWith('FB:'))) {
+            await bot.telegram.sendMessage(userId, msgText);
+          }
+        } catch(e) {
+           console.log('Failed to send topup notification to telegram:', e);
+        }
       }
       
       if (waSocket && waStatus.includes('Connected') && member.whatsapp) {
@@ -14008,12 +14073,32 @@ E4 Store`,
   // ============================================================================
   const fbUserStates: Record<string, { step: string; data: any; updatedAt: number }> = {};
   const fbQuickRepliesMainMenu = [
-    { content_type: "text", title: "📱 Pulsa & Data", payload: "FB_MENU_PULSA" },
-    { content_type: "text", title: "⚡ Token PLN", payload: "FB_MENU_PLN" },
-    { content_type: "text", title: "🧾 Cek Tagihan", payload: "FB_MENU_TAGIHAN" },
-    { content_type: "text", title: "💵 Cek Saldo", payload: "FB_MENU_CEK_SALDO" },
-    { content_type: "text", title: "💳 Isi Saldo", payload: "FB_MENU_ISI_SALDO" }
+    { content_type: "text", title: "📱 1. Pulsa & Data", payload: "FB_MENU_PULSA" },
+    { content_type: "text", title: "⚡ 2. Token PLN", payload: "FB_MENU_PLN" },
+    { content_type: "text", title: "🧾 3. Cek Tagihan", payload: "FB_MENU_TAGIHAN" },
+    { content_type: "text", title: "💵 4. Cek Saldo", payload: "FB_MENU_CEK_SALDO" },
+    { content_type: "text", title: "💳 5. Isi Saldo", payload: "FB_MENU_ISI_SALDO" }
   ];
+
+  function buildFbMainMenuText(member: any, customHeader?: string): string {
+    const dispName = member?.fbProfileName || member?.name || member?.waProfileName || "Pelanggan Setia";
+    const saldoStr = `Rp ${(member?.balance || 0).toLocaleString('id-ID')}`;
+    const header = customHeader ||
+      `Halo Kak *${dispName}*! Selamat datang di *E4 Store Official*! 👋\n` +
+      `💳 *Saldo Aktif:* ${saldoStr} (${member?.type || 'Biasa'})`;
+
+    return (
+      `${header}\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🤖 *Chuna ~ Asisten PPOB Otomatis 24 Jam*\n` +
+      `Silakan pilih layanan dengan klik tombol di bawah atau ketik *Angka / Nama Menu*:\n\n` +
+      `1️⃣ *Pulsa & Paket Data* _(Ketik: 1 / Pulsa)_\n` +
+      `2️⃣ *Token Listrik PLN* _(Ketik: 2 / PLN)_\n` +
+      `3️⃣ *Cek Tagihan Pascabayar* _(Ketik: 3 / Tagihan)_\n` +
+      `4️⃣ *Cek Saldo Member* _(Ketik: 4 / Saldo)_\n` +
+      `5️⃣ *Isi Saldo / Topup QRIS* _(Ketik: 5 / Topup)_`
+    );
+  }
 
   function detectIndonesianOperator(phone: string): string | null {
     const clean = phone.replace(/\D/g, '').replace(/^62/, '0');
@@ -14041,6 +14126,199 @@ E4 Store`,
       (m.telegram && String(m.telegram).includes(`FB:${psid}`))
     );
   }
+
+  // Tarik Otomatis Nama Akun Facebook & Foto Profil Facebook Asli dari Meta Graph API + Simpan Cache Lokal
+  async function fetchAndCacheFbProfile(psid: string, forceRefresh = false): Promise<{ name: string | null; photoUrl: string | null }> {
+    if (!psid) return { name: null, photoUrl: null };
+    if (!db.fbProfiles) db.fbProfiles = {};
+
+    const cached = db.fbProfiles[psid];
+    const avatarDir = path.join(process.cwd(), "public", "fb_avatars");
+    const localAvatarPath = path.join(avatarDir, `${psid}.jpg`);
+    const hasLocalAvatar = fs.existsSync(localAvatarPath);
+
+    if (!forceRefresh && cached && cached.name && hasLocalAvatar && (Date.now() - (cached.updatedAt || 0) < 12 * 3600 * 1000)) {
+      return { name: cached.name, photoUrl: `/api/fb-avatar/${psid}` };
+    }
+
+    const pageToken = db.fbConfig?.pageAccessToken || process.env.FB_PAGE_ACCESS_TOKEN;
+    if (!pageToken) {
+      return {
+        name: cached?.name || null,
+        photoUrl: hasLocalAvatar ? `/api/fb-avatar/${psid}` : (cached?.photoUrl || null)
+      };
+    }
+
+    let fbName: string | null = cached?.name || null;
+    let rawPicUrl: string | null = cached?.rawPhotoUrl || null;
+
+    // 1. Coba ambil first_name, last_name, name, profile_pic dari Graph API
+    const fieldCandidates = [
+      "first_name,last_name,name,profile_pic",
+      "first_name,last_name,profile_pic",
+      "name,picture.width(400).height(400)",
+      "first_name,last_name",
+      "name"
+    ];
+
+    for (const fields of fieldCandidates) {
+      try {
+        const res = await fetch(`https://graph.facebook.com/v19.0/${encodeURIComponent(psid)}?fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(pageToken)}`);
+        const data: any = await res.json();
+        if (data && !data.error) {
+          const parsedName = data.name || [data.first_name, data.last_name].filter(Boolean).join(" ").trim();
+          if (parsedName) fbName = parsedName;
+          const parsedPic = data.profile_pic || data.picture?.data?.url;
+          if (parsedPic) rawPicUrl = parsedPic;
+          if (fbName && rawPicUrl) break;
+        }
+      } catch (e) {}
+    }
+
+    // 1b. Fallback Nama Akun Facebook via Conversations Participants API jika direct PSID dibatasi izin Meta
+    if (!fbName) {
+      try {
+        const convRes = await fetch(`https://graph.facebook.com/v19.0/me/conversations?fields=participants&limit=30&access_token=${encodeURIComponent(pageToken)}`);
+        const convData: any = await convRes.json();
+        if (convData && Array.isArray(convData.data)) {
+          for (const conv of convData.data) {
+            const parts = conv?.participants?.data || [];
+            const matchedPart = parts.find((p: any) => String(p.id) === String(psid));
+            if (matchedPart && matchedPart.name) {
+              fbName = String(matchedPart.name).trim();
+              break;
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 2. Jika belum dapat URL foto dari profile_pic, coba endpoint /picture JSON dan direct
+    if (!rawPicUrl) {
+      try {
+        const picJsonRes = await fetch(`https://graph.facebook.com/v19.0/${encodeURIComponent(psid)}/picture?width=400&height=400&redirect=false&access_token=${encodeURIComponent(pageToken)}`);
+        const picJson: any = await picJsonRes.json();
+        if (picJson?.data?.url) {
+          rawPicUrl = picJson.data.url;
+        }
+      } catch (e) {}
+    }
+    if (!rawPicUrl) {
+      rawPicUrl = `https://graph.facebook.com/v19.0/${encodeURIComponent(psid)}/picture?type=large&access_token=${encodeURIComponent(pageToken)}`;
+    }
+
+    // 3. Unduh & simpan foto profil ke disk lokal agar tidak kadaluarsa
+    if (rawPicUrl) {
+      try {
+        const imgRes = await fetch(rawPicUrl);
+        if (imgRes.ok) {
+          const contentType = imgRes.headers.get("content-type") || "";
+          if (contentType.includes("image")) {
+            const arrBuf = await imgRes.arrayBuffer();
+            const buf = Buffer.from(arrBuf);
+            if (buf.length > 200) {
+              if (!fs.existsSync(avatarDir)) fs.mkdirSync(avatarDir, { recursive: true });
+              fs.writeFileSync(localAvatarPath, buf);
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    const finalPhotoUrl = fs.existsSync(localAvatarPath) ? `/api/fb-avatar/${psid}?t=${Date.now()}` : null;
+    db.fbProfiles[psid] = {
+      name: fbName,
+      photoUrl: `/api/fb-avatar/${psid}`,
+      rawPhotoUrl: rawPicUrl,
+      updatedAt: Date.now()
+    };
+
+    // Update juga di objek member jika sudah ada
+    const member = findMemberByFbPsid(psid);
+    if (member) {
+      if (fbName) {
+        member.fbProfileName = fbName;
+        if (!member.name || member.name.startsWith("Pelanggan FB") || member.name.startsWith("Member ") || member.name.startsWith("User FB")) {
+          member.name = fbName;
+        }
+      }
+      member.fbPhotoUrl = `/api/fb-avatar/${psid}`;
+      member.fbPsid = psid;
+      db.members = members;
+    }
+    writeDB(db);
+
+    return { name: fbName, photoUrl: finalPhotoUrl };
+  }
+
+  // Endpoint Gambar Foto Profil Facebook (dengan auto-cache)
+  app.get("/api/fb-avatar/:psid", async (req, res) => {
+    const psid = path.basename(String(req.params.psid || "").trim());
+    if (!psid) return res.sendStatus(404);
+
+    const avatarDir = path.join(process.cwd(), "public", "fb_avatars");
+    const localAvatarPath = path.join(avatarDir, `${psid}.jpg`);
+
+    if (!fs.existsSync(localAvatarPath)) {
+      await fetchAndCacheFbProfile(psid, true).catch(() => {});
+    }
+
+    if (fs.existsSync(localAvatarPath)) {
+      res.setHeader("Content-Type", "image/jpeg");
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      return res.send(fs.readFileSync(localAvatarPath));
+    }
+
+    return res.status(404).send("Avatar not found");
+  });
+
+  // Endpoint Sinkron Ulang Nama & Foto Profil Facebook dari Dashboard Admin
+  app.post("/api/members/:id/sync-fb", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const member = members.find((m: any) => m.id === id);
+      if (!member) {
+        return res.status(404).json({ success: false, error: "Member tidak ditemukan" });
+      }
+
+      const psid = member.fbPsid || (member.telegram && String(member.telegram).startsWith("FB:") ? String(member.telegram).replace(/^FB:/i, "").trim() : "");
+      if (!psid) {
+        return res.status(400).json({ success: false, error: "Member ini tidak memiliki ID Facebook (PSID)" });
+      }
+
+      const fbProf = await fetchAndCacheFbProfile(psid, true);
+      if (fbProf.name) {
+        member.fbProfileName = fbProf.name;
+        member.name = fbProf.name;
+      }
+      member.fbPhotoUrl = `/api/fb-avatar/${psid}`;
+      member.fbPsid = psid;
+
+      // Sekalian sinkronkan foto/nama WhatsApp jika nomor WA ada
+      const cleanWa = cleanWaPhone(member.whatsapp || "");
+      if (cleanWa && cleanWa.length >= 9) {
+        const fromRecent = findNameFromRecentMessages(cleanWa);
+        if (fromRecent.name && (!member.waProfileName || member.waProfileName === "-")) {
+          member.waProfileName = fromRecent.name;
+        }
+        if (fromRecent.photoUrl && !member.photoUrl) {
+          member.photoUrl = fromRecent.photoUrl;
+        }
+      }
+
+      db.members = members;
+      writeDB(db);
+
+      return res.json({
+        success: true,
+        fbProfileName: member.fbProfileName || member.name,
+        fbPhotoUrl: fbProf.photoUrl || `/api/fb-avatar/${psid}`,
+        member
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
 
   async function sendFbMessage(
     recipientPsid: string,
@@ -14138,6 +14416,12 @@ E4 Store`,
     }
     return null;
   }
+
+  // Ekspos helper untuk notifikasi topup/approve dan sinkron profil FB dari endpoint lain
+  (globalThis as any).__sendFbNotification = async (psid: string, text: string) => {
+    return sendFbMessage(psid, { text, quickReplies: fbQuickRepliesMainMenu });
+  };
+  (globalThis as any).__fetchAndCacheFbProfile = fetchAndCacheFbProfile;
 
   // Endpoint Pengaturan Bot Facebook Messenger untuk Dashboard Admin
   app.get("/api/fb/status", (req, res) => {
@@ -14243,7 +14527,7 @@ E4 Store`,
       const snVal = txData.sn || "PROSES-PUSAT";
       const modalPrice = txData.price || product.price || 0;
 
-      const customerName = member?.waProfileName || member?.name || "Pelanggan FB";
+      const customerName = member?.fbProfileName || member?.name || member?.waProfileName || "Pelanggan FB";
       const newTx = {
         id: pay_ref_id,
         memberId: member?.id || `FB-${psid}`,
@@ -14263,8 +14547,14 @@ E4 Store`,
         date: new Date().toISOString()
       };
 
+      // Tambahkan poin ke member setiap transaksi sukses/diproses
+      if (member) {
+        member.points = (member.points || 0) + 10;
+      }
+
       transactions.unshift(newTx);
       db.transactions = transactions;
+      db.members = members;
       writeDB(db);
 
       // Generate Gambar Struk Nota Resmi E4 Store via Canvas
@@ -14273,6 +14563,7 @@ E4 Store`,
       const summaryText =
         `🎉 *TRANSAKSI ${statusRaw.toUpperCase()} - E4 STORE* 🎉\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
+        `👤 *Member:* ${customerName}\n` +
         `📦 *Produk:* ${product.product_name}\n` +
         `🎯 *Tujuan:* ${targetNo}\n` +
         `💰 *Total:* Rp ${totalPrice.toLocaleString('id-ID')}\n` +
@@ -14302,7 +14593,7 @@ E4 Store`,
     }
   }
 
-  // 2. POST /api/fb/webhook — Penanganan Pesan Masuk & Klik Tombol Messenger
+  // 2. POST /api/fb/webhook — Penanganan Pesan Masuk, Pendaftaran Member & Klik Tombol Messenger
   app.post("/api/fb/webhook", express.json(), async (req, res) => {
     const body = req.body;
     if (body.object !== "page") {
@@ -14324,9 +14615,274 @@ E4 Store`,
       const postbackPayload = webhookEvent.postback?.payload || "";
       const activePayload = quickReplyPayload || postbackPayload;
       const attachments = webhookEvent.message?.attachments || [];
+      const lowerMsg = messageText.toLowerCase();
 
-      const member = findMemberByFbPsid(senderPsid);
+      // Tarik otomatis Nama Akun Facebook & Foto Profil Facebook dari Graph API
+      const fbProf = await fetchAndCacheFbProfile(senderPsid).catch(() => ({ name: null, photoUrl: null }));
+      const fbDisplayName = fbProf.name || db.fbProfiles?.[senderPsid]?.name || `Kakak`;
+
+      let member = findMemberByFbPsid(senderPsid);
       const state = fbUserStates[senderPsid];
+
+      // =========================================================================
+      // 1. CEK APAKAH PENGGUNA BELUM TERDAFTAR SEBAGAI MEMBER FACEBOOK E4 STORE
+      // =========================================================================
+      if (!member) {
+        // A. Jika pengguna sedang berada di alur pendaftaran ("Daftar Bareng Chuna")
+        if (state && (state.step === "FB_REGISTER_AWAIT_PHONE" || state.step === "FB_REGISTER_AWAIT_OTP")) {
+          if (activePayload === "FB_CANCEL" || lowerMsg === "batal" || lowerMsg === "❌ batal") {
+            delete fbUserStates[senderPsid];
+            await sendFbMessage(senderPsid, {
+              text:
+                `👋 Halo Kak *${fbDisplayName}*! Pendaftaran dibatalkan.\n\n` +
+                `Kapan pun Kakak siap bergabung di *E4 Store*, silakan klik tombol *"✨ Daftar Bareng Chuna"* di bawah atau ketik *Daftar* ya! 🛍️💚`,
+              quickReplies: [{ content_type: "text", title: "✨ Daftar Bareng Chuna", payload: "FB_REGISTER_START" }]
+            });
+            continue;
+          }
+
+          // Tahap 1: Memasukkan Nomor Telepon / WhatsApp -> Kirim Kode OTP ke WhatsApp
+          if (state.step === "FB_REGISTER_AWAIT_PHONE") {
+            let cleanWa = messageText.replace(/\D/g, "");
+            if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
+            else if (cleanWa.startsWith("8")) cleanWa = "62" + cleanWa;
+
+            if (cleanWa.length < 10) {
+              await sendFbMessage(senderPsid, {
+                text: `⚠️ Nomor telepon sepertinya belum lengkap Kak.\nSilakan ketik *Nomor Telepon / WhatsApp aktif* Kakak (contoh: *081234567890*):`,
+                quickReplies: [{ content_type: "text", title: "❌ Batal", payload: "FB_CANCEL" }]
+              });
+              continue;
+            }
+
+            const localWa = "0" + cleanWa.replace(/^62/, "");
+            const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+            fbUserStates[senderPsid] = {
+              step: "FB_REGISTER_AWAIT_OTP",
+              data: {
+                phone: localWa,
+                cleanWa,
+                generatedOtp: otp,
+                fbName: fbProf.name || `Member FB ${senderPsid.slice(-4)}`
+              },
+              updatedAt: Date.now()
+            };
+
+            if (waSocket && waStatus.includes("Connected")) {
+              const jid = `${cleanWa}@s.whatsapp.net`;
+              try {
+                await waSocket.sendMessage(jid, {
+                  text:
+                    `Halo Kak *${fbDisplayName}*! 👋\n` +
+                    `Ini kode rahasia (*OTP*) buat daftar Member Facebook di *E4 Store*: *${otp}*\n\n` +
+                    `Jangan kasih tau siapa-siapa ya Kak! 🤫💚`
+                });
+                await sendFbMessage(senderPsid, {
+                  text:
+                    `📲 *KODE OTP TERKIRIM!*\n` +
+                    `━━━━━━━━━━━━━━━━━━━━━\n` +
+                    `Kode OTP sudah Chuna kirim ke WhatsApp Kakak (*${localWa}*).\n` +
+                    `⏳ *Status: Menunggu OTP*\n\n` +
+                    `Yuk ketik *6 angka kode OTP*-nya di sini ya Kak:`,
+                  quickReplies: [
+                    { content_type: "text", title: "🔄 Kirim Ulang OTP", payload: "FB_RESEND_OTP" },
+                    { content_type: "text", title: "❌ Batal", payload: "FB_CANCEL" }
+                  ]
+                });
+              } catch (e) {
+                await sendFbMessage(senderPsid, {
+                  text:
+                    `⚠️ Chuna mengalami kendala kirim ke WhatsApp *${localWa}*.\n` +
+                    `Supaya Kakak tetap bisa lanjut daftar, ini kode OTP Kakak: *${otp}*\n\n` +
+                    `Yuk ketik ulang kode *${otp}* di bawah ini:`,
+                  quickReplies: [{ content_type: "text", title: "❌ Batal", payload: "FB_CANCEL" }]
+                });
+              }
+            } else {
+              await sendFbMessage(senderPsid, {
+                text:
+                  `ℹ️ Server WhatsApp Chuna sedang istirahat sebentar.\n` +
+                  `Tenang saja Kak, ini kode OTP pendaftaran Kakak: *${otp}*\n\n` +
+                  `Yuk ketik kode *${otp}* di bawah ini untuk mengaktifkan akun:`,
+                quickReplies: [{ content_type: "text", title: "❌ Batal", payload: "FB_CANCEL" }]
+              });
+            }
+            continue;
+          }
+
+          // Tahap 2: Verifikasi Kode OTP
+          if (state.step === "FB_REGISTER_AWAIT_OTP") {
+            if (activePayload === "FB_RESEND_OTP" || lowerMsg.includes("kirim ulang")) {
+              const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
+              state.data.generatedOtp = newOtp;
+              const jid = `${state.data.cleanWa}@s.whatsapp.net`;
+              if (waSocket && waStatus.includes("Connected")) {
+                try {
+                  await waSocket.sendMessage(jid, {
+                    text: `Halo Kak *${fbDisplayName}*! 👋 Ini kode OTP baru buat daftar di E4 Store: *${newOtp}*\nJangan kasih tau siapa-siapa ya! 🤫`
+                  });
+                  await sendFbMessage(senderPsid, {
+                    text: `📲 Kode OTP baru sudah Chuna kirim ulang ke WhatsApp *${state.data.phone}*. Yuk ketik kodenya di sini:`,
+                    quickReplies: [{ content_type: "text", title: "❌ Batal", payload: "FB_CANCEL" }]
+                  });
+                } catch (e) {
+                  await sendFbMessage(senderPsid, {
+                    text: `Kode OTP baru Kakak adalah: *${newOtp}*. Silakan ketik kode tersebut:`,
+                    quickReplies: [{ content_type: "text", title: "❌ Batal", payload: "FB_CANCEL" }]
+                  });
+                }
+              } else {
+                await sendFbMessage(senderPsid, {
+                  text: `Kode OTP baru Kakak adalah: *${newOtp}*. Silakan ketik kode tersebut:`,
+                  quickReplies: [{ content_type: "text", title: "❌ Batal", payload: "FB_CANCEL" }]
+                });
+              }
+              continue;
+            }
+
+            const inputDigits = messageText.replace(/\D/g, "");
+            if (inputDigits !== state.data.generatedOtp) {
+              await sendFbMessage(senderPsid, {
+                text: `❌ Yah kode OTP-nya belum tepat Kak. Coba cek lagi pesan WhatsApp dari Chuna lalu ketik ulang kode OTP-nya ya!`,
+                quickReplies: [
+                  { content_type: "text", title: "🔄 Kirim Ulang OTP", payload: "FB_RESEND_OTP" },
+                  { content_type: "text", title: "❌ Batal", payload: "FB_CANCEL" }
+                ]
+              });
+              continue;
+            }
+
+            // OTP VALID! Daftarkan Member Facebook menggunakan Nama Akun Facebook & Foto Profil Facebook
+            const realFbName = fbProf.name || state.data.fbName || `User FB ${senderPsid.slice(-4)}`;
+            const cleanUserWa = state.data.cleanWa;
+            const localPhone = state.data.phone;
+
+            const targetList = Array.isArray(members) ? members : (db.members || []);
+            let registeredMember = targetList.find((m: any) => {
+              let mWa = String(m.whatsapp || "").replace(/\D/g, "");
+              if (mWa.startsWith("0")) mWa = "62" + mWa.substring(1);
+              return mWa === cleanUserWa;
+            });
+
+            if (registeredMember) {
+              registeredMember.fbPsid = senderPsid;
+              registeredMember.fbProfileName = realFbName;
+              registeredMember.fbPhotoUrl = `/api/fb-avatar/${senderPsid}`;
+              if (!registeredMember.telegram || String(registeredMember.telegram).startsWith("FB:")) {
+                registeredMember.telegram = `FB:${senderPsid}`;
+                registeredMember.name = realFbName;
+              }
+            } else {
+              registeredMember = {
+                id: `MBR-FB-${senderPsid.slice(-8)}`,
+                name: realFbName,
+                fbProfileName: realFbName,
+                fbPhotoUrl: `/api/fb-avatar/${senderPsid}`,
+                fbPsid: senderPsid,
+                whatsapp: localPhone,
+                telegram: `FB:${senderPsid}`,
+                balance: 0,
+                points: 0,
+                type: "Biasa",
+                registeredVia: "facebook",
+                createdAt: new Date().toISOString()
+              };
+              targetList.push(registeredMember);
+            }
+
+            delete fbUserStates[senderPsid];
+            db.members = targetList;
+            writeDB(db);
+
+            // Kirim Notifikasi ke Owner di Telegram bahwa ada Member Facebook Baru
+            try {
+              const regOwnerMsg =
+                `🎉 *MEMBER FACEBOOK BARU MENDAFTAR!* 🎉\n\n` +
+                `Halo Bos, ada customer baru yang mendaftar lewat Bot Facebook Messenger E4 Store:\n\n` +
+                `👤 *Nama Akun Facebook*: ${realFbName}\n` +
+                `📱 *Nomor Telepon/WA*: +${cleanUserWa} (${localPhone})\n` +
+                `🆔 *ID Facebook (PSID)*: \`${senderPsid}\`\n` +
+                `📅 *Waktu*: ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Makassar' })} WITA\n\n` +
+                `_Data member telah otomatis tercatat di Dashboard Member Facebook._`;
+
+              const localAvatarPath = path.join(process.cwd(), "public", "fb_avatars", `${senderPsid}.jpg`);
+              if (bot && db.owners && db.owners.length > 0) {
+                for (const ownerId of db.owners) {
+                  try {
+                    if (fs.existsSync(localAvatarPath)) {
+                      await bot.telegram.sendPhoto(ownerId, { source: localAvatarPath }, {
+                        caption: regOwnerMsg,
+                        parse_mode: "Markdown"
+                      }).catch(async () => {
+                        await bot.telegram.sendMessage(ownerId, regOwnerMsg).catch(() => {});
+                      });
+                    } else {
+                      await bot.telegram.sendMessage(ownerId, regOwnerMsg, { parse_mode: "Markdown" }).catch(() => {});
+                    }
+                  } catch (e) {}
+                }
+              }
+            } catch (e) {}
+
+            // Kirim Pesan Sukses Pendaftaran seperti di Telegram TANPA Link Grup WhatsApp, lalu tampilkan Menu Utama!
+            const welcomeHeader =
+              `🎉 *YEAY! PENDAFTARAN BERHASIL!* 🥳\n` +
+              `━━━━━━━━━━━━━━━━━━━━━\n` +
+              `Selamat datang di *E4 Store*, Kak *${realFbName}*. 🥳\n` +
+              `Akun Facebook Kakak telah resmi aktif dan siap digunakan untuk transaksi otomatis 24 jam!\n\n` +
+              `👤 *Nama Akun FB:* ${realFbName}\n` +
+              `📱 *No. WhatsApp:* ${localPhone}\n` +
+              `💳 *Saldo Aktif:* Rp ${(registeredMember.balance || 0).toLocaleString('id-ID')} (${registeredMember.type || 'Biasa'})\n` +
+              `Terima kasih telah bergabung bersama Chuna! 😊💚`;
+
+            await sendFbMessage(senderPsid, {
+              text: buildFbMainMenuText(registeredMember, welcomeHeader),
+              quickReplies: fbQuickRepliesMainMenu
+            });
+            continue;
+          }
+        }
+
+        // B. Jika pengguna baru menekan tombol "✨ Daftar Bareng Chuna" atau mengetik "Daftar" / "1"
+        if (
+          activePayload === "FB_REGISTER_START" ||
+          lowerMsg.includes("daftar") ||
+          lowerMsg === "1"
+        ) {
+          fbUserStates[senderPsid] = {
+            step: "FB_REGISTER_AWAIT_PHONE",
+            data: { fbName: fbProf.name || `User FB ${senderPsid.slice(-4)}` },
+            updatedAt: Date.now()
+          };
+          await sendFbMessage(senderPsid, {
+            text:
+              `✨ *DAFTAR BARENG CHUNA - E4 STORE*\n` +
+              `━━━━━━━━━━━━━━━━━━━━━\n` +
+              `Halo Kak *${fbDisplayName}*! 👋\n` +
+              `Yuk masukkan *Nomor Telepon / WhatsApp aktif* Kakak sekarang (contoh: *081234567890*).\n\n` +
+              `Chuna akan langsung mengirimkan 6 digit kode OTP ke WhatsApp Kakak:`,
+            quickReplies: [{ content_type: "text", title: "❌ Batal", payload: "FB_CANCEL" }]
+          });
+          continue;
+        }
+
+        // C. Jika pengguna belum terdaftar dan mengirim pesan apa pun -> Sapaan ramah ala Chuna + Tombol "✨ Daftar Bareng Chuna"
+        await sendFbMessage(senderPsid, {
+          text:
+            `👋 Halo Kak *${fbDisplayName}*! Chuna di sini 🚗💚\n` +
+            `Kakak belum punya akun *E4 Store* nih. Daftar dulu yuk biar bisa langsung belanja otomatis 24 jam! 🛍️\n\n` +
+            `👉 Klik tombol *"✨ Daftar Bareng Chuna"* di bawah ini (atau ketik *Daftar* / *1*):`,
+          quickReplies: [
+            { content_type: "text", title: "✨ Daftar Bareng Chuna", payload: "FB_REGISTER_START" }
+          ]
+        });
+        continue;
+      }
+
+      // =========================================================================
+      // 2. PENGGUNA SUDAH TERDAFTAR SEBAGAI MEMBER -> LAYANI TRANSAKSI PPOB
+      // =========================================================================
 
       // A. Tangani Bukti Transfer Gambar (QRIS untuk Pembelian atau Isi Saldo)
       if (attachments.length > 0 && attachments[0].type === "image") {
@@ -14359,11 +14915,20 @@ E4 Store`,
               const { nominal, totalBayar } = state.data;
               delete fbUserStates[senderPsid];
               const reqId = `TOPUP-FB-${Date.now()}`;
+
+              // Simpan gambar bukti transfer ke disk agar Owner bisa klik "Lihat Foto" di Dashboard
+              try {
+                const receiptsDir = path.join(process.cwd(), "public", "fb_receipts");
+                if (!fs.existsSync(receiptsDir)) fs.mkdirSync(receiptsDir, { recursive: true });
+                fs.writeFileSync(path.join(receiptsDir, `${reqId}.jpg`), imgBuffer);
+              } catch (e) {}
+
               if (!db.topupRequests) db.topupRequests = [];
               db.topupRequests.unshift({
                 id: reqId,
                 memberId: member?.id || `FB-${senderPsid}`,
-                memberName: member?.name || `Pelanggan FB (${senderPsid.slice(-4)})`,
+                memberName: member?.fbProfileName || member?.name || `Pelanggan FB (${senderPsid.slice(-4)})`,
+                memberUsername: `FB: ${member?.fbProfileName || member?.name || senderPsid}`,
                 memberTelegram: `FB:${senderPsid}`,
                 memberWhatsapp: member?.whatsapp || "-",
                 nominalSaldo: nominal,
@@ -14374,14 +14939,15 @@ E4 Store`,
                 dateStr: new Date().toLocaleDateString('id-ID'),
                 timeStr: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
                 targetMerchant: 'E4store, Elektronik',
-                senderName: analysis.senderName || member?.name || 'Pelanggan FB',
+                senderName: analysis.senderName || member?.fbProfileName || member?.name || 'Pelanggan FB',
+                photoFileId: reqId,
                 status: 'pending',
                 createdAt: new Date().toISOString()
               });
               writeDB(db);
 
               await sendFbMessage(senderPsid, {
-                text: `✅ *BUKTI TRANSFER DITERIMA!*\n━━━━━━━━━━━━━━━━━━━━━\nTerima kasih Kak! Pengajuan isi saldo sebesar *Rp ${Number(nominal).toLocaleString('id-ID')}* sedang diverifikasi oleh Owner E4 Store.`,
+                text: `✅ *BUKTI TRANSFER DITERIMA!*\n━━━━━━━━━━━━━━━━━━━━━\nTerima kasih Kak *${member?.fbProfileName || member?.name}*! Pengajuan isi saldo sebesar *Rp ${Number(nominal).toLocaleString('id-ID')}* sedang diverifikasi oleh Owner E4 Store.`,
                 quickReplies: fbQuickRepliesMainMenu
               });
               continue;
@@ -14396,173 +14962,148 @@ E4 Store`,
         }
       }
 
-      // B. Tombol Batal / Reset Menu
-      const lowerMsg = messageText.toLowerCase();
+      // B. Tombol Batal / Reset Menu Utama
       if (
         activePayload === "FB_CANCEL" ||
         activePayload === "GET_STARTED" ||
         lowerMsg === "menu" ||
         lowerMsg === "!menu" ||
         lowerMsg === "halo" ||
+        lowerMsg === "hello" ||
         lowerMsg === "hai" ||
+        lowerMsg === "hi" ||
+        lowerMsg === "p" ||
         lowerMsg === "mulai" ||
         lowerMsg === "batal" ||
         lowerMsg === "❌ batal"
       ) {
         delete fbUserStates[senderPsid];
-        const greeting = member ? `Halo Kak *${member.waProfileName || member.name}*! 👋` : `Halo Kak! Selamat datang di *E4 Store Official*! 👋`;
         await sendFbMessage(senderPsid, {
-          text:
-            `${greeting}\n` +
-            `━━━━━━━━━━━━━━━━━━━━━\n` +
-            `🤖 *Chuna ~ Asisten PPOB Otomatis 24 Jam*\n` +
-            `Silakan pilih layanan transaksi yang Kakak butuhkan melalui tombol di bawah ini:`,
+          text: buildFbMainMenuText(member),
           quickReplies: fbQuickRepliesMainMenu
         });
         continue;
       }
 
-      // C. Penanganan Menu Utama (Quick Reply Payloads)
-      if (activePayload === "FB_MENU_PULSA" || lowerMsg.includes("pulsa & data")) {
-        fbUserStates[senderPsid] = {
-          step: "FB_INPUT_PHONE_PULSA",
-          data: {},
-          updatedAt: Date.now()
-        };
-        await sendFbMessage(senderPsid, {
-          text: `📱 *BELI PULSA & PAKET DATA*\n━━━━━━━━━━━━━━━━━━━━━\nSilakan ketik *Nomor HP Tujuan* Kakak (contoh: 081234567890):`,
-          quickReplies: [{ content_type: "text", title: "❌ Batal", payload: "FB_CANCEL" }]
-        });
-        continue;
-      }
-
-      if (activePayload === "FB_MENU_PLN" || lowerMsg.includes("token pln")) {
-        fbUserStates[senderPsid] = {
-          step: "FB_INPUT_METER_PLN",
-          data: {},
-          updatedAt: Date.now()
-        };
-        await sendFbMessage(senderPsid, {
-          text: `⚡ *BELI TOKEN LISTRIK PLN*\n━━━━━━━━━━━━━━━━━━━━━\nSilakan ketik *Nomor Meter / ID Pelanggan PLN* Kakak (contoh: 45055441815):`,
-          quickReplies: [{ content_type: "text", title: "❌ Batal", payload: "FB_CANCEL" }]
-        });
-        continue;
-      }
-
-      if (activePayload === "FB_MENU_TAGIHAN" || lowerMsg.includes("cek tagihan")) {
-        fbUserStates[senderPsid] = {
-          step: "FB_INPUT_TAGIHAN_NO",
-          data: {},
-          updatedAt: Date.now()
-        };
-        await sendFbMessage(senderPsid, {
-          text: `🧾 *CEK TAGIHAN PASCABAYAR (PLN / PDAM / BPJS / WIFI)*\n━━━━━━━━━━━━━━━━━━━━━\nSilakan ketik *Nomor Pelanggan / ID Tagihan* Kakak:`,
-          quickReplies: [{ content_type: "text", title: "❌ Batal", payload: "FB_CANCEL" }]
-        });
-        continue;
-      }
-
-      if (activePayload === "FB_MENU_CEK_SALDO" || lowerMsg.includes("cek saldo")) {
-        if (!member) {
+      // C. Penanganan Menu Utama (Mendukung Tombol Quick Reply, Angka 1-5 & Kata Kunci Singkat)
+      if (!state) {
+        if (
+          activePayload === "FB_MENU_PULSA" ||
+          lowerMsg === "1" ||
+          lowerMsg.includes("pulsa") ||
+          lowerMsg.includes("paket data") ||
+          lowerMsg === "data" ||
+          lowerMsg === "kuota"
+        ) {
           fbUserStates[senderPsid] = {
-            step: "FB_LINK_WA_NUMBER",
+            step: "FB_INPUT_PHONE_PULSA",
             data: {},
             updatedAt: Date.now()
           };
           await sendFbMessage(senderPsid, {
-            text:
-              `🔗 *HUBUNGKAN AKUN MEMBER E4 STORE*\n` +
-              `━━━━━━━━━━━━━━━━━━━━━\n` +
-              `ID Messenger Kakak (${senderPsid}) belum terhubung dengan akun Member E4 Store.\n\n` +
-              `Silakan ketik *Nomor WhatsApp* Kakak yang terdaftar di E4 Store untuk menyambungkan saldo otomatis:`,
+            text: `📱 *BELI PULSA & PAKET DATA*\n━━━━━━━━━━━━━━━━━━━━━\nSilakan ketik *Nomor HP Tujuan* Kakak (contoh: 081234567890):`,
             quickReplies: [{ content_type: "text", title: "❌ Batal", payload: "FB_CANCEL" }]
           });
-        } else {
-          const dispName = member.waProfileName && member.waProfileName !== '-' ? member.waProfileName : member.name;
+          continue;
+        }
+
+        if (
+          activePayload === "FB_MENU_PLN" ||
+          lowerMsg === "2" ||
+          lowerMsg === "pln" ||
+          lowerMsg.includes("token") ||
+          lowerMsg.includes("listrik")
+        ) {
+          fbUserStates[senderPsid] = {
+            step: "FB_INPUT_METER_PLN",
+            data: {},
+            updatedAt: Date.now()
+          };
+          await sendFbMessage(senderPsid, {
+            text: `⚡ *BELI TOKEN LISTRIK PLN*\n━━━━━━━━━━━━━━━━━━━━━\nSilakan ketik *Nomor Meter / ID Pelanggan PLN* Kakak (contoh: 45055441815):`,
+            quickReplies: [{ content_type: "text", title: "❌ Batal", payload: "FB_CANCEL" }]
+          });
+          continue;
+        }
+
+        if (
+          activePayload === "FB_MENU_TAGIHAN" ||
+          lowerMsg === "3" ||
+          lowerMsg.includes("tagihan") ||
+          lowerMsg.includes("pasca") ||
+          lowerMsg.includes("bpjs") ||
+          lowerMsg.includes("pdam") ||
+          lowerMsg.includes("wifi")
+        ) {
+          fbUserStates[senderPsid] = {
+            step: "FB_INPUT_TAGIHAN_NO",
+            data: {},
+            updatedAt: Date.now()
+          };
+          await sendFbMessage(senderPsid, {
+            text: `🧾 *CEK TAGIHAN PASCABAYAR (PLN / PDAM / BPJS / WIFI)*\n━━━━━━━━━━━━━━━━━━━━━\nSilakan ketik *Nomor Pelanggan / ID Tagihan* Kakak:`,
+            quickReplies: [{ content_type: "text", title: "❌ Batal", payload: "FB_CANCEL" }]
+          });
+          continue;
+        }
+
+        if (
+          activePayload === "FB_MENU_CEK_SALDO" ||
+          lowerMsg === "4" ||
+          lowerMsg === "saldo" ||
+          lowerMsg.includes("cek saldo") ||
+          lowerMsg.includes("info saldo")
+        ) {
+          const dispName = member.fbProfileName || member.name || member.waProfileName;
           await sendFbMessage(senderPsid, {
             text:
-              `💳 *INFORMASI SALDO AKUN E4 STORE*\n` +
+              `💳 *INFORMASI SALDO MEMBER FACEBOOK*\n` +
               `━━━━━━━━━━━━━━━━━━━━━\n` +
-              `👤 *Nama Member:* ${dispName}\n` +
+              `👤 *Nama Facebook:* ${dispName}\n` +
               `📱 *WhatsApp:* ${member.whatsapp || '-'}\n` +
               `⭐ *Tipe Member:* ${member.type || 'Biasa'}\n` +
+              `🎁 *Poin Loyalitas:* ${member.points || 0} Poin\n` +
               `💰 *Saldo Aktif:* Rp ${(member.balance || 0).toLocaleString('id-ID')}\n` +
               `━━━━━━━━━━━━━━━━━━━━━\n` +
               `Siap digunakan untuk transaksi otomatis 24 jam! 🥰`,
             quickReplies: fbQuickRepliesMainMenu
           });
+          continue;
         }
-        continue;
-      }
 
-      if (activePayload === "FB_MENU_ISI_SALDO" || lowerMsg.includes("isi saldo")) {
-        fbUserStates[senderPsid] = {
-          step: "FB_SELECT_TOPUP_NOMINAL",
-          data: {},
-          updatedAt: Date.now()
-        };
-        await sendFbMessage(senderPsid, {
-          text: `💳 *ISI SALDO AKUN E4 STORE*\n━━━━━━━━━━━━━━━━━━━━━\nSilakan pilih atau ketik nominal saldo yang ingin Kakak isi:`,
-          quickReplies: [
-            { content_type: "text", title: "Rp 20.000", payload: "FB_TOPUP_20000" },
-            { content_type: "text", title: "Rp 50.000", payload: "FB_TOPUP_50000" },
-            { content_type: "text", title: "Rp 100.000", payload: "FB_TOPUP_100000" },
-            { content_type: "text", title: "Rp 200.000", payload: "FB_TOPUP_200000" },
-            { content_type: "text", title: "❌ Batal", payload: "FB_CANCEL" }
-          ]
-        });
-        continue;
+        if (
+          activePayload === "FB_MENU_ISI_SALDO" ||
+          lowerMsg === "5" ||
+          lowerMsg.includes("isi saldo") ||
+          lowerMsg.includes("topup") ||
+          lowerMsg.includes("top up") ||
+          lowerMsg.includes("deposit")
+        ) {
+          fbUserStates[senderPsid] = {
+            step: "FB_SELECT_TOPUP_NOMINAL",
+            data: {},
+            updatedAt: Date.now()
+          };
+          await sendFbMessage(senderPsid, {
+            text:
+              `💳 *ISI SALDO AKUN E4 STORE*\n` +
+              `━━━━━━━━━━━━━━━━━━━━━\n` +
+              `Silakan pilih tombol nominal di bawah atau ketik jumlah saldo yang ingin Kakak isi (minimal Rp 10.000):`,
+            quickReplies: [
+              { content_type: "text", title: "Rp 20.000", payload: "FB_TOPUP_20000" },
+              { content_type: "text", title: "Rp 50.000", payload: "FB_TOPUP_50000" },
+              { content_type: "text", title: "Rp 100.000", payload: "FB_TOPUP_100000" },
+              { content_type: "text", title: "Rp 200.000", payload: "FB_TOPUP_200000" },
+              { content_type: "text", title: "❌ Batal", payload: "FB_CANCEL" }
+            ]
+          });
+          continue;
+        }
       }
 
       // D. Penanganan State Alur Interaktif
       if (state) {
-        // 1. Hubungkan Nomor WA Member dengan PSID Facebook
-        if (state.step === "FB_LINK_WA_NUMBER") {
-          const cleanWa = cleanWaPhone(messageText);
-          if (cleanWa.length < 9) {
-            await sendFbMessage(senderPsid, {
-              text: "⚠️ Format nomor WhatsApp tidak valid. Ketik contoh: 081234567890",
-              quickReplies: [{ content_type: "text", title: "❌ Batal", payload: "FB_CANCEL" }]
-            });
-            continue;
-          }
-          const targetList = Array.isArray(members) ? members : (db.members || []);
-          let found = targetList.find((m: any) => cleanWaPhone(m.whatsapp || '') === cleanWa);
-          if (!found) {
-            const fromRecent = findNameFromRecentMessages(cleanWa);
-            found = {
-              id: `MBR-${Date.now()}`,
-              name: fromRecent.name || `Member ${cleanWa.slice(-4)}`,
-              waProfileName: fromRecent.name || null,
-              whatsapp: "0" + cleanWa.replace(/^62/, ''),
-              telegram: `FB:${senderPsid}`,
-              fbPsid: senderPsid,
-              type: 'Biasa',
-              balance: 0,
-              points: 0
-            };
-            targetList.push(found);
-          } else {
-            found.fbPsid = senderPsid;
-          }
-          db.members = targetList;
-          writeDB(db);
-          delete fbUserStates[senderPsid];
-
-          await sendFbMessage(senderPsid, {
-            text:
-              `✅ *AKUN BERHASIL TERHUBUNG!*\n` +
-              `━━━━━━━━━━━━━━━━━━━━━\n` +
-              `👤 *Nama:* ${found.waProfileName || found.name}\n` +
-              `📱 *WhatsApp:* ${found.whatsapp}\n` +
-              `💰 *Saldo Saat Ini:* Rp ${(found.balance || 0).toLocaleString('id-ID')}\n\n` +
-              `Sekarang Kakak bisa bertransaksi langsung menggunakan Saldo maupun QRIS di Messenger! 🎉`,
-            quickReplies: fbQuickRepliesMainMenu
-          });
-          continue;
-        }
-
-        // 2. Input Nomor HP untuk Pulsa & Data (Deteksi Provider Otomatis)
+        // 1. Input Nomor HP untuk Pulsa & Data (Deteksi Provider Otomatis)
         if (state.step === "FB_INPUT_PHONE_PULSA") {
           const cleanPhone = messageText.replace(/\D/g, '');
           if (cleanPhone.length < 9) {
@@ -14596,7 +15137,7 @@ E4 Store`,
           }
 
           const memberType = member?.type || 'Biasa';
-          let listText = `📱 *PROVIDER TERDETEKSI: ${operator || 'SELULER'}*\n🎯 *Nomor Tujuan:* ${cleanPhone}\n━━━━━━━━━━━━━━━━━━━━━\nSilakan pilih nominal produk di bawah ini:\n\n`;
+          let listText = `📱 *PROVIDER TERDETEKSI: ${operator || 'SELULER'}*\n🎯 *Nomor Tujuan:* ${cleanPhone}\n━━━━━━━━━━━━━━━━━━━━━\nSilakan klik tombol atau ketik *Nomor Urut Produk (1-${matchedProducts.length})*:\n\n`;
           const prodQuickReplies: Array<{ content_type: string; title: string; payload: string }> = [];
 
           matchedProducts.forEach((p: any, idx: number) => {
@@ -14605,7 +15146,7 @@ E4 Store`,
             listText += `${idx + 1}. *${p.product_name}* — Rp ${sellPrice.toLocaleString('id-ID')}\n`;
             prodQuickReplies.push({
               content_type: "text",
-              title: `${p.product_name.slice(0, 18)}`,
+              title: `${idx + 1}. ${p.product_name.slice(0, 15)}`,
               payload: `FB_BUY_SKU_${p.buyer_sku_code}`
             });
           });
@@ -14624,7 +15165,7 @@ E4 Store`,
           continue;
         }
 
-        // 3. Input Nomor Meter PLN Prabayar
+        // 2. Input Nomor Meter PLN Prabayar
         if (state.step === "FB_INPUT_METER_PLN") {
           const cleanMeter = messageText.replace(/\D/g, '');
           if (cleanMeter.length < 10) {
@@ -14646,7 +15187,7 @@ E4 Store`,
             .slice(0, 10);
 
           const memberType = member?.type || 'Biasa';
-          let listText = `⚡ *TOKEN LISTRIK PLN PRABAYAR*\n🎯 *No. Meter/ID:* ${cleanMeter}\n━━━━━━━━━━━━━━━━━━━━━\nSilakan pilih nominal Token PLN:\n\n`;
+          let listText = `⚡ *TOKEN LISTRIK PLN PRABAYAR*\n🎯 *No. Meter/ID:* ${cleanMeter}\n━━━━━━━━━━━━━━━━━━━━━\nSilakan klik tombol atau ketik *Nomor Urut Token (1-${plnProducts.length})*:\n\n`;
           const prodQuickReplies: Array<{ content_type: string; title: string; payload: string }> = [];
 
           plnProducts.forEach((p: any, idx: number) => {
@@ -14655,7 +15196,7 @@ E4 Store`,
             listText += `${idx + 1}. *${p.product_name}* — Rp ${sellPrice.toLocaleString('id-ID')}\n`;
             prodQuickReplies.push({
               content_type: "text",
-              title: p.product_name.slice(0, 18),
+              title: `${idx + 1}. ${p.product_name.slice(0, 15)}`,
               payload: `FB_BUY_SKU_${p.buyer_sku_code}`
             });
           });
@@ -14674,19 +15215,25 @@ E4 Store`,
           continue;
         }
 
-        // 4. Pemilihan Produk & Konfirmasi Metode Pembayaran
+        // 3. Pemilihan Produk & Konfirmasi Metode Pembayaran
         if (state.step === "FB_SELECT_PRODUCT") {
           const skuFromPayload = activePayload.startsWith("FB_BUY_SKU_") ? activePayload.replace("FB_BUY_SKU_", "") : "";
           const productsList = state.data.products || [];
-          const selectedProduct = productsList.find((p: any) =>
+          const numChoice = parseInt(messageText.trim(), 10);
+
+          let selectedProduct = productsList.find((p: any) =>
             p.buyer_sku_code === skuFromPayload ||
             p.product_name.toLowerCase() === lowerMsg ||
             p.buyer_sku_code.toLowerCase() === lowerMsg
           );
 
+          if (!selectedProduct && !isNaN(numChoice) && numChoice >= 1 && numChoice <= productsList.length) {
+            selectedProduct = productsList[numChoice - 1];
+          }
+
           if (!selectedProduct) {
             await sendFbMessage(senderPsid, {
-              text: "⚠️ Silakan klik salah satu tombol produk yang tersedia di bawah ini:",
+              text: `⚠️ Pilihan belum dikenali. Silakan ketik *angka nomor urut (1 - ${productsList.length})* atau klik tombol produk di bawah ini:`,
               quickReplies: [{ content_type: "text", title: "❌ Batal", payload: "FB_CANCEL" }]
             });
             continue;
@@ -14708,8 +15255,8 @@ E4 Store`,
 
           const saldoCukup = member && (member.balance || 0) >= totalPrice;
           const payButtons = [
-            { content_type: "text", title: "📲 Bayar QRIS", payload: "FB_PAY_QRIS" },
-            { content_type: "text", title: "💳 Potong Saldo", payload: "FB_PAY_SALDO" },
+            { content_type: "text", title: "1. 📲 Bayar QRIS", payload: "FB_PAY_QRIS" },
+            { content_type: "text", title: "2. 💳 Potong Saldo", payload: "FB_PAY_SALDO" },
             { content_type: "text", title: "❌ Batal", payload: "FB_CANCEL" }
           ];
 
@@ -14720,35 +15267,26 @@ E4 Store`,
               `📦 *Produk:* ${selectedProduct.product_name}\n` +
               `🎯 *Nomor Tujuan:* ${state.data.targetNo}\n` +
               `💎 *Total Bayar:* Rp ${totalPrice.toLocaleString('id-ID')}\n` +
-              (member ? `💰 *Saldo Kakak:* Rp ${(member.balance || 0).toLocaleString('id-ID')} ${saldoCukup ? '(Cukup ✅)' : '(Kurang ⚠️)'}\n` : '') +
+              `💰 *Saldo Kakak:* Rp ${(member?.balance || 0).toLocaleString('id-ID')} ${saldoCukup ? '(Cukup ✅)' : '(Kurang ⚠️)'}\n` +
               `━━━━━━━━━━━━━━━━━━━━━\n` +
-              `Silakan pilih metode pembayaran:`,
+              `Silakan pilih metode pembayaran:\n` +
+              `1️⃣ *Bayar QRIS* _(Ketik: 1 / QRIS)_\n` +
+              `2️⃣ *Potong Saldo* _(Ketik: 2 / Saldo)_`,
             quickReplies: payButtons
           });
           continue;
         }
 
-        // 5. Eksekusi Metode Pembayaran (Potong Saldo / QRIS)
+        // 4. Eksekusi Metode Pembayaran (Potong Saldo / QRIS)
         if (state.step === "FB_CHOOSE_PAYMENT") {
           const { product, targetNo, totalPrice } = state.data;
 
-          if (activePayload === "FB_PAY_SALDO" || lowerMsg.includes("potong saldo") || lowerMsg === "saldo") {
-            if (!member) {
-              await sendFbMessage(senderPsid, {
-                text: "❌ Akun Messenger Kakak belum terhubung dengan Member E4 Store. Silakan pilih *Bayar QRIS* atau hubungkan akun di menu *Cek Saldo*.",
-                quickReplies: [
-                  { content_type: "text", title: "📲 Bayar QRIS", payload: "FB_PAY_QRIS" },
-                  { content_type: "text", title: "💵 Cek Saldo", payload: "FB_MENU_CEK_SALDO" },
-                  { content_type: "text", title: "❌ Batal", payload: "FB_CANCEL" }
-                ]
-              });
-              continue;
-            }
+          if (activePayload === "FB_PAY_SALDO" || lowerMsg === "2" || lowerMsg.includes("potong saldo") || lowerMsg === "saldo") {
             if ((member.balance || 0) < totalPrice) {
               await sendFbMessage(senderPsid, {
-                text: `❌ Saldo Kakak tidak mencukupi (Saldo: Rp ${(member.balance || 0).toLocaleString('id-ID')}, Total: Rp ${totalPrice.toLocaleString('id-ID')}). Silakan pilih *Bayar QRIS* atau *Isi Saldo* terlebih dahulu.`,
+                text: `❌ Saldo Kakak tidak mencukupi (Saldo: Rp ${(member.balance || 0).toLocaleString('id-ID')}, Total: Rp ${totalPrice.toLocaleString('id-ID')}).\n\nSilakan ketik *1* (*Bayar QRIS*) atau *Isi Saldo* terlebih dahulu.`,
                 quickReplies: [
-                  { content_type: "text", title: "📲 Bayar QRIS", payload: "FB_PAY_QRIS" },
+                  { content_type: "text", title: "1. 📲 Bayar QRIS", payload: "FB_PAY_QRIS" },
                   { content_type: "text", title: "💳 Isi Saldo", payload: "FB_MENU_ISI_SALDO" },
                   { content_type: "text", title: "❌ Batal", payload: "FB_CANCEL" }
                 ]
@@ -14766,7 +15304,7 @@ E4 Store`,
             continue;
           }
 
-          if (activePayload === "FB_PAY_QRIS" || lowerMsg.includes("qris")) {
+          if (activePayload === "FB_PAY_QRIS" || lowerMsg === "1" || lowerMsg.includes("qris")) {
             fbUserStates[senderPsid] = {
               step: "FB_WAIT_QRIS_PAYMENT",
               data: { product, targetNo, totalPrice },
@@ -14791,7 +15329,7 @@ E4 Store`,
               `📌 *Cara Bayar:*\n` +
               `1. Scan gambar QRIS di atas memakai m-Banking / DANA / OVO / GoPay / ShopeePay.\n` +
               `2. Masukkan nominal pas *Rp ${totalPrice.toLocaleString('id-ID')}*.\n` +
-              `3. Kirimkan *Foto / Screenshot Bukti Transfer* langsung ke chat Messenger ini, maka pesanan otomatis diproses detik itu juga! ⚡`;
+              `3. Kirimkan *Foto / Screenshot Bukti Transfer* langsung ke chat ini, maka pesanan otomatis diproses detik itu juga! ⚡`;
 
             await sendFbMessage(senderPsid, {
               imageBuffer: qrBuffer,
@@ -14802,7 +15340,7 @@ E4 Store`,
           }
         }
 
-        // 6. Cek Tagihan Pascabayar + Kirim Struk Tagihan Canvas
+        // 5. Cek Tagihan Pascabayar + Kirim Struk Tagihan Canvas
         if (state.step === "FB_INPUT_TAGIHAN_NO") {
           const customerNo = messageText.replace(/\D/g, '');
           if (customerNo.length < 6) {
@@ -14832,7 +15370,7 @@ E4 Store`,
                 bulan: billRes.desc?.detail?.[0]?.periode || "-",
                 tarifDaya: billRes.desc?.tarif ? `${billRes.desc.tarif} / ${billRes.desc.daya || ''}` : "-"
               },
-              waProfileName: member?.waProfileName || member?.name || billRes.customer_name
+              waProfileName: member?.fbProfileName || member?.waProfileName || member?.name || billRes.customer_name
             };
 
             const tagihanBuffer = await generatePascabayarTagihanReceipt(billData).catch(() => null);
@@ -14859,13 +15397,13 @@ E4 Store`,
           continue;
         }
 
-        // 7. Isi Saldo Member via Messenger
+        // 6. Isi Saldo Member via Messenger
         if (state.step === "FB_SELECT_TOPUP_NOMINAL") {
           const rawDigits = (activePayload.startsWith("FB_TOPUP_") ? activePayload.replace("FB_TOPUP_", "") : messageText).replace(/\D/g, '');
           const nominal = Number(rawDigits);
           if (!nominal || nominal < 10000) {
             await sendFbMessage(senderPsid, {
-              text: "⚠️ Minimal pengisian saldo adalah Rp 10.000. Silakan pilih tombol nominal di bawah ini:",
+              text: "⚠️ Minimal pengisian saldo adalah Rp 10.000. Silakan pilih tombol nominal atau ketik angka nominal (contoh: 50000):",
               quickReplies: [
                 { content_type: "text", title: "Rp 20.000", payload: "FB_TOPUP_20000" },
                 { content_type: "text", title: "Rp 50.000", payload: "FB_TOPUP_50000" },
@@ -14897,6 +15435,7 @@ E4 Store`,
             text:
               `🧾 *TAGIHAN ISI SALDO E4 STORE*\n` +
               `━━━━━━━━━━━━━━━━━━━━━\n` +
+              `👤 *Member:* ${member.fbProfileName || member.name}\n` +
               `💰 *Nominal Saldo:* Rp ${nominal.toLocaleString('id-ID')}\n` +
               `💵 *TOTAL BAYAR:* Rp ${totalBayar.toLocaleString('id-ID')}\n` +
               `🏪 *Merchant:* E4store, Elektronik\n` +
@@ -14908,11 +15447,9 @@ E4 Store`,
         }
       }
 
-      // E. Default Fallback: Tampilkan Menu Utama E4 Store
+      // E. Default Fallback untuk Member Terdaftar: Tampilkan Menu Utama Lengkap (Teks Bernomor + Tombol)
       await sendFbMessage(senderPsid, {
-        text:
-          `Halo Kak! 👋 Selamat datang di *E4 Store Official*.\n` +
-          `Silakan pilih menu layanan transaksi otomatis di bawah ini:`,
+        text: buildFbMainMenuText(member),
         quickReplies: fbQuickRepliesMainMenu
       });
     }
