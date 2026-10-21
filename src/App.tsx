@@ -96,8 +96,7 @@ export default function App() {
       case 'transaksi': return <Transaksi onBack={() => setCurrentPage('menu')} />;
       case 'konfig': return <Konfig onBack={() => setCurrentPage('menu')} />;
       case 'bot': return <Bot onBack={() => setCurrentPage('menu')} />;
-      case 'saldo': return <Saldo mode="telegram" onBack={() => setCurrentPage('menu')} />;
-      case 'member-facebook': return <Saldo mode="facebook" onBack={() => setCurrentPage('menu')} />;
+      case 'saldo': return <Saldo onBack={() => setCurrentPage('menu')} />;
       case 'member-offline': return <MemberOffline onBack={() => setCurrentPage('menu')} />;
       case 'kasir-fisik': return <KasirFisik onBack={() => setCurrentPage('menu')} />;
       case 'security': return <SecurityDashboard onBack={() => setCurrentPage('menu')} />;

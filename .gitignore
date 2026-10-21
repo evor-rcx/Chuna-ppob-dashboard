@@ -20,3 +20,5 @@ ecosystem.config.cjs
 tmp_gen_vn_*
 test_wa_image_lokal.ts
 src/utils/bluetoothPrint.ts
+.aistudio/
+public/assets/aistudio/

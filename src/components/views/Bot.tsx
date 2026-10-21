@@ -19,15 +19,6 @@ export function Bot({ onBack }: { onBack: () => void }) {
   const [gmailStatus, setGmailStatus] = useState('Checking...');
   const [gmailLoading, setGmailLoading] = useState(false);
 
-  // State untuk Bot Facebook Messenger
-  const [fbStatus, setFbStatus] = useState('Checking...');
-  const [fbPageToken, setFbPageToken] = useState('');
-  const [fbAppSecret, setFbAppSecret] = useState('');
-  const [fbVerifyToken, setFbVerifyToken] = useState('e4store_fb_token_2026');
-  const [fbPageName, setFbPageName] = useState('E4 Store Official');
-  const [fbLoading, setFbLoading] = useState(false);
-  
-
   useEffect(() => {
     let botInterval: NodeJS.Timeout;
     
@@ -73,18 +64,6 @@ export function Bot({ onBack }: { onBack: () => void }) {
           else setPairingCode('');
         })
         .catch(() => setWaStatus('Disconnected'));
-
-      fetch('/api/fb/status')
-        .then(res => res.json())
-        .then(data => {
-          setFbStatus(data.status || 'Disconnected');
-          if (data.pageAccessToken) setFbPageToken(prev => prev === '' ? data.pageAccessToken : prev);
-          if (data.appSecret) setFbAppSecret(prev => prev === '' ? data.appSecret : prev);
-          if (data.verifyToken) setFbVerifyToken(prev => prev === 'e4store_fb_token_2026' ? data.verifyToken : prev);
-          if (data.pageName) setFbPageName(prev => prev === 'E4 Store Official' ? data.pageName : prev);
-        })
-        .catch(() => setFbStatus('Disconnected'));
-        
     };
 
     checkStatus();
@@ -270,38 +249,11 @@ export function Bot({ onBack }: { onBack: () => void }) {
     }
   };
 
-  const handleUpdateFbConfig = async () => {
-    setFbLoading(true);
-    try {
-      const response = await fetch('/api/fb/configure', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          pageAccessToken: fbPageToken,
-          appSecret: fbAppSecret,
-          verifyToken: fbVerifyToken,
-          pageName: fbPageName
-        })
-      });
-      const data = await response.json();
-      if (data.success) {
-        alert('Pengaturan Bot Facebook Messenger berhasil disimpan dan diaktifkan!');
-        if (data.fbConfig?.pageName) setFbPageName(data.fbConfig.pageName);
-      } else {
-        alert('Gagal menyimpan pengaturan FB: ' + (data.error || 'Unknown error'));
-      }
-    } catch (e) {
-      alert('Terjadi kesalahan saat menyimpan konfigurasi Facebook Messenger.');
-    } finally {
-      setFbLoading(false);
-    }
-  };
-
   return (
     <PageContainer title="Konfigurasi Integrasi Sistem" onBack={onBack}>
       <div className="space-y-6 max-w-xl">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="bg-slate-800/30 p-4 rounded-xl border border-slate-700/50 flex flex-col gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-slate-800/30 p-4 rounded-xl border border-slate-700/50 flex flex-col gap-2">
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center">✉️</div>
               <div className="text-[10px] uppercase text-slate-500 font-bold">Status Gmail</div>
@@ -326,15 +278,6 @@ export function Bot({ onBack }: { onBack: () => void }) {
             </div>
             <div className={`text-sm font-medium break-words ${waStatus?.includes('Connected') ? 'text-green-400' : 'text-amber-400'}`}>
               {waStatus}
-            </div>
-          </div>
-          <div className="bg-slate-800/30 p-4 rounded-xl border border-indigo-500/40 flex flex-col gap-2">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center">⚡</div>
-              <div className="text-[10px] uppercase text-slate-500 font-bold">Bot Facebook Messenger</div>
-            </div>
-            <div className={`text-sm font-medium break-words ${fbStatus?.includes('Connected') ? 'text-green-400' : 'text-amber-400'}`}>
-              {fbStatus}
             </div>
           </div>
         </div>
@@ -504,81 +447,6 @@ export function Bot({ onBack }: { onBack: () => void }) {
           >
             {ownerWaLoading ? 'Menyimpan...' : 'Simpan Nomor WhatsApp Owner'}
           </button>
-        </div>
-
-        {/* Pengaturan Bot Facebook Messenger (PPOB Otomatis) */}
-        <div className="pt-4 border-t border-slate-800/50 space-y-4">
-          <div className="p-4 rounded-2xl bg-indigo-950/30 border border-indigo-500/30 space-y-4">
-            <div className="flex items-center gap-2.5">
-              <span className="text-lg">💙</span>
-              <div>
-                <h3 className="text-sm font-bold text-indigo-300">Pengaturan Bot Facebook Messenger (PPOB)</h3>
-                <p className="text-[11px] text-slate-400">Hubungkan Fanspage E4 Store Official dengan alur transaksi interaktif seperti Bot Telegram</p>
-              </div>
-            </div>
-
-            <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-700/60 space-y-1.5 text-xs">
-              <div className="text-slate-400 font-semibold">🔗 Callback URL Webhook Facebook (Meta Developers):</div>
-              <code className="block p-2 rounded-lg bg-slate-950 text-sky-400 font-mono text-[11px] break-all select-all">
-                {typeof window !== 'undefined' ? `${window.location.origin}/api/fb/webhook` : 'https://domain-anda.com/api/fb/webhook'}
-              </code>
-              <div className="text-[11px] text-slate-400 pt-1">
-                Centang subscription field: <strong className="text-indigo-300">messages</strong> dan <strong className="text-indigo-300">messaging_postbacks</strong>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">Nama Halaman Facebook (Fanspage)</label>
-              <input
-                type="text"
-                placeholder="E4 Store Official"
-                value={fbPageName}
-                onChange={(e) => setFbPageName(e.target.value)}
-                className="w-full bg-slate-800/60 border border-slate-700/60 p-3 rounded-xl text-white text-sm outline-none focus:border-indigo-500/60"
-              />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">Page Access Token (Dari Meta for Developers)</label>
-              <input
-                type="password"
-                placeholder="EAA..."
-                value={fbPageToken}
-                onChange={(e) => setFbPageToken(e.target.value)}
-                className="w-full bg-slate-800/60 border border-slate-700/60 p-3 rounded-xl text-white font-mono text-sm outline-none focus:border-indigo-500/60"
-              />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">App Secret (Opsional)</label>
-              <input
-                type="password"
-                placeholder="Masukkan App Secret aplikasi Meta Anda"
-                value={fbAppSecret}
-                onChange={(e) => setFbAppSecret(e.target.value)}
-                className="w-full bg-slate-800/60 border border-slate-700/60 p-3 rounded-xl text-white font-mono text-sm outline-none focus:border-indigo-500/60"
-              />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">Verify Token Webhook</label>
-              <input
-                type="text"
-                placeholder="e4store_fb_token_2026"
-                value={fbVerifyToken}
-                onChange={(e) => setFbVerifyToken(e.target.value)}
-                className="w-full bg-slate-800/60 border border-slate-700/60 p-3 rounded-xl text-white font-mono text-sm outline-none focus:border-indigo-500/60"
-              />
-            </div>
-
-            <button
-              onClick={handleUpdateFbConfig}
-              disabled={fbLoading}
-              className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-semibold py-3 px-4 rounded-xl cursor-pointer transition-all disabled:opacity-50 shadow-lg shadow-indigo-900/30"
-            >
-              {fbLoading ? 'Menyimpan & Menghubungkan...' : 'Simpan & Aktifkan Bot Facebook Messenger'}
-            </button>
-          </div>
         </div>
       </div>
     </PageContainer>
