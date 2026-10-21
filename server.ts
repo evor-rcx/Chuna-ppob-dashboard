@@ -1399,13 +1399,35 @@ function readDB() {
   }
   return db;
 }
+let lastSelfWriteTime = 0;
 function writeDB(data: any) {
   if (!data.waProfiles) data.waProfiles = {};
   if (!data.waProfilePhotos) data.waProfilePhotos = {};
   if (!data.recentWaMessages) data.recentWaMessages = [];
+  if (typeof db !== 'undefined' && data !== db) {
+    if (Array.isArray(data.members) && typeof members !== 'undefined' && data.members !== members) {
+      members.length = 0;
+      members.push(...data.members);
+    }
+    if (Array.isArray(data.transactions) && typeof transactions !== 'undefined' && data.transactions !== transactions) {
+      transactions.length = 0;
+      transactions.push(...data.transactions);
+    }
+    db = data;
+  }
+  if (typeof members !== 'undefined' && Array.isArray(members)) {
+    for (const m of members) {
+      if (m) m.balance = Number(m.balance) || 0;
+    }
+    data.members = members;
+  }
+  if (typeof transactions !== 'undefined' && Array.isArray(transactions)) {
+    data.transactions = transactions;
+  }
   try {
     securitySuite.auditDatabaseIntegrity(data);
   } catch (e) {}
+  lastSelfWriteTime = Date.now();
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 }
 
@@ -1507,6 +1529,10 @@ let members: any[] = db.members || [];
 
 fs.watchFile(DB_FILE, (curr, prev) => {
   if (curr.mtime !== prev.mtime) {
+    // Ignore self-triggered writes so active in-memory references are never detached mid-transaction
+    if (Date.now() - lastSelfWriteTime < 6000) {
+      return;
+    }
     try {
       const newDb = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
       db = newDb;
@@ -1516,7 +1542,9 @@ fs.watchFile(DB_FILE, (curr, prev) => {
       transactions.push(...(db.transactions || []));
       
       members.length = 0;
-      members.push(...(db.members || []));
+      members.push(...(db.members || []).map((m: any) => ({ ...m, balance: Number(m.balance) || 0 })));
+      db.transactions = transactions;
+      db.members = members;
       
       for (const key of Object.keys(registeredUsers)) { delete registeredUsers[key as any]; }
       Object.assign(registeredUsers, db.registeredUsers || {});
@@ -3654,15 +3682,24 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
     next();
   });
 
+  const webhookProcessingLocks = new Set<string>();
+
   async function processDigiflazzWebhookData(data: any) {
+    const ref_id = data?.ref_id;
+    if (data?.testing) return { success: true };
+    if (!ref_id) return { success: false };
+    const lockKey = String(ref_id);
+    if (webhookProcessingLocks.has(lockKey)) {
+      console.log('Webhook already processing for', ref_id);
+      return { success: true };
+    }
+    webhookProcessingLocks.add(lockKey);
     try {
-        const ref_id = data.ref_id;
         const status = data.status;
-        if (data.testing) return { success: true };
         
         // Use closure variables instead of readDB() to prevent ghost balance bug!
         console.log('Webhook triggered for', ref_id);
-        const txIndex = db.transactions.findIndex((t) => t.id === ref_id);
+        const txIndex = transactions.findIndex((t) => t.id === ref_id);
         console.log('txIndex:', txIndex);
         
         if (txIndex >= 0) {
@@ -3672,7 +3709,6 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
                 tx.status = status;
                 if (data.sn) tx.sn = data.sn;
 
-                
                 const memberIndex = members.findIndex((m) => m.id === tx.memberId);
                 let member = null;
                 let nama = "-";
@@ -3685,10 +3721,17 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
                     } else if (typeof member.telegram === 'string' && member.telegram.length > 0) {
                         isOwnerSelf = db.owners.includes(parseInt(member.telegram.replace(/\D/g, '')));
                     }
-                    if (status === 'Gagal' && tx.method === 'saldo' && !isOwnerSelf) {
-                        member.balance += tx.price;
+                    if (status === 'Gagal' && tx.method === 'saldo' && !isOwnerSelf && !tx.refunded) {
+                        tx.refunded = true;
+                        member.balance = (Number(member.balance) || 0) + (Number(tx.price) || 0);
                     }
                 }
+
+                // Initialize waReceiptSent to processing and persist status + refund immediately before any async call
+                tx.waReceiptSent = "processing";
+                db.transactions = transactions;
+                db.members = members;
+                writeDB(db);
 
                 const isTargetPhone = isLikelyIndonesianPhone(tx.target);
                 const targetRawPhone = isTargetPhone ? (tx.target || "").replace(/\D/g, "") : (member?.whatsapp || "").replace(/\D/g, "");
@@ -3701,9 +3744,6 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
                 tx.customerDisplayName = finalDisplayName;
                 tx.customerName = finalDisplayName;
                 tx.nama = finalDisplayName;
-                
-                // Initialize waReceiptSent to false when first moving from Pending
-                tx.waReceiptSent = "processing";
                 
                 db.transactions = transactions;
                 db.members = members;
@@ -3976,6 +4016,8 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
         
     } catch(e) {
         console.error("Webhook error", e);
+    } finally {
+        webhookProcessingLocks.delete(lockKey);
     }
   }
 
@@ -7350,39 +7392,40 @@ Chuna – E4 Store`;
   });
 
   app.get("/api/topup-requests", (req, res) => {
-    const dbNow = readDB();
-    res.json({ success: true, topupRequests: dbNow.topupRequests || [] });
+    res.json({ success: true, topupRequests: db.topupRequests || [] });
   });
 
   app.post("/api/topup-requests/:id/approve", async (req, res) => {
     const { id } = req.params;
-    const dbNow = readDB();
-    const topup = (dbNow.topupRequests || []).find((t: any) => t.id === id);
+    if (!db.topupRequests) db.topupRequests = [];
+    const topup = db.topupRequests.find((t: any) => t.id === id);
     if (!topup) return res.status(404).json({ success: false, error: "Permintaan isi saldo tidak ditemukan." });
     if (topup.status === 'approved') return res.status(400).json({ success: false, error: "Permintaan sudah disetujui sebelumnya." });
 
-    const member = dbNow.members.find((m: any) => m.id === topup.memberId || isTelegramMatch(m.telegram, topup.memberTelegram, null));
+    const member = members.find((m: any) => m.id === topup.memberId || isTelegramMatch(m.telegram, topup.memberTelegram, null));
     if (!member) return res.status(404).json({ success: false, error: "Member akun tidak ditemukan." });
 
-    member.balance = (member.balance || 0) + Number(topup.nominalSaldo);
+    const nominalAdd = Number(topup.nominalSaldo) || 0;
+    member.balance = (Number(member.balance) || 0) + nominalAdd;
     topup.status = 'approved';
     topup.processedAt = new Date().toISOString();
 
-    if (!dbNow.transactions) dbNow.transactions = [];
-    dbNow.transactions.unshift({
+    transactions.unshift({
       id: `TX-TOPUP-${Date.now()}`,
       type: 'topup',
       memberId: member.id,
       target: member.name,
-      product: `Isi Saldo Rp ${Number(topup.nominalSaldo).toLocaleString('id-ID')}`,
-      price: topup.nominalSaldo,
+      product: `Isi Saldo Rp ${nominalAdd.toLocaleString('id-ID')}`,
+      price: nominalAdd,
       method: 'qris_manual',
       status: 'Sukses',
       sn: topup.transactionId || 'TOPUP-VERIFIED',
       date: new Date().toISOString()
     });
 
-    writeDB(dbNow);
+    db.members = members;
+    db.transactions = transactions;
+    writeDB(db);
 
     try {
       if (bot && topup.memberTelegram) {
@@ -7390,7 +7433,7 @@ Chuna – E4 Store`;
           topup.memberTelegram,
           `🎉 *HOREEE! ISI SALDO BERHASIL!* 🥳\n` +
           `━━━━━━━━━━━━━━━━━━━━━\n` +
-          `Halo Kak *${topup.memberName}*, pengisian saldo sebesar *Rp ${Number(topup.nominalSaldo).toLocaleString('id-ID')}* telah diverifikasi dan disetujui oleh Owner E4 Store!\n\n` +
+          `Halo Kak *${topup.memberName}*, pengisian saldo sebesar *Rp ${nominalAdd.toLocaleString('id-ID')}* telah diverifikasi dan disetujui oleh Owner E4 Store!\n\n` +
           `💳 *Saldo Akun Kakak Saat Ini:* *Rp ${member.balance.toLocaleString('id-ID')}*\n\n` +
           `Terima kasih telah berbelanja di E4 Store! Selamat bertransaksi kembali ya Kak! 🥰💖`,
           { parse_mode: 'Markdown' }
@@ -7405,14 +7448,14 @@ Chuna – E4 Store`;
 
   app.post("/api/topup-requests/:id/reject", async (req, res) => {
     const { id } = req.params;
-    const dbNow = readDB();
-    const topup = (dbNow.topupRequests || []).find((t: any) => t.id === id);
+    if (!db.topupRequests) db.topupRequests = [];
+    const topup = db.topupRequests.find((t: any) => t.id === id);
     if (!topup) return res.status(404).json({ success: false, error: "Permintaan isi saldo tidak ditemukan." });
     if (topup.status !== 'pending') return res.status(400).json({ success: false, error: `Permintaan sudah berstatus ${topup.status}.` });
 
     topup.status = 'rejected';
     topup.processedAt = new Date().toISOString();
-    writeDB(dbNow);
+    writeDB(db);
 
     try {
       if (bot && topup.memberTelegram) {
@@ -7449,9 +7492,10 @@ Chuna – E4 Store`;
   app.post("/api/members/:id/topup", async (req, res) => {
     const { id } = req.params;
     const { amount } = req.body;
+    const numAmount = Number(amount) || 0;
     const member = members.find(m => m.id === id);
     if (member) {
-      member.balance += amount;
+      member.balance = (Number(member.balance) || 0) + numAmount;
       db.members = members;
       writeDB(db);
       
@@ -7460,7 +7504,7 @@ Chuna – E4 Store`;
 
 Halo kak ${member.name}! Chuna mau kasih kabar baik nih~ 💚
 
-💰 Saldo Ditambahkan: Rp ${Number(amount).toLocaleString('id-ID')}
+💰 Saldo Ditambahkan: Rp ${numAmount.toLocaleString('id-ID')}
 💳 Saldo Sekarang: Rp ${member.balance.toLocaleString('id-ID')}
 
 Yuk langsung belanja kak, banyak promo nunggu! 🛍️✨`;
@@ -7499,7 +7543,7 @@ Yuk langsung belanja kak, banyak promo nunggu! 🛍️✨`;
       await securitySuite.atlasLock(`member:${id}`, async () => {
         const member = members.find(m => m.id === id);
         if (member) {
-           member.balance = balance;
+           member.balance = Number(balance) || 0;
            db.members = members;
            writeDB(db);
            res.json({ success: true, member });
@@ -8283,9 +8327,18 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca", forceRefresh: boo
         await bot.stop("Config updated");
       }
       
+      const activePaymentLocks = new Set<string>();
+
       const processPrepaidPayment = async (ctx: any, sku: string, method: string, stateData: any, memberId: string) => {
+        const lockKey = String(ctx.from?.id || memberId);
+        if (activePaymentLocks.has(lockKey)) {
+            return ctx.reply("⏳ Transaksi sebelumnya masih sedang diproses, mohon tunggu sebentar ya Kak!");
+        }
+        activePaymentLocks.add(lockKey);
+
+        try {
         const product = stateData.product;
-        const total = stateData.totalBayar;
+        const total = Number(stateData.totalBayar) || 0;
         const isGame = Boolean(product?.category && product.category.toLowerCase().includes('game')) || (product?.brand && (product.brand.toUpperCase() === "FREE FIRE" || product.brand.toUpperCase() === "MOBILE LEGENDS"));
         const targetNo = cleanTargetNumber(stateData.targetNo || stateData.customerNo || "-", isGame);
         const targetDisplay = stateData.nickname ? `${targetNo} (${stateData.nickname})` : targetNo;
@@ -8298,10 +8351,11 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca", forceRefresh: boo
         
         if (!isOwnerSelf) {
             if (method === 'saldo') {
-                if (member.balance < total) {
-                    return ctx.reply(`❌ TRANSAKSI DITOLAK!Maaf kak, saldo kakak tidak mencukupi untuk melakukan transaksi ini.💳 Saldo Saat Ini: Rp ${member.balance.toLocaleString('id-ID')}💰 Total Bayar: Rp ${total.toLocaleString('id-ID')}Silakan isi ulang saldo kakak terlebih dahulu. 🙏`, { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Fitur Download" }]], resize_keyboard: true } });
+                const currentBalance = Number(member.balance) || 0;
+                if (currentBalance < total) {
+                    return ctx.reply(`❌ TRANSAKSI DITOLAK!Maaf kak, saldo kakak tidak mencukupi untuk melakukan transaksi ini.💳 Saldo Saat Ini: Rp ${currentBalance.toLocaleString('id-ID')}💰 Total Bayar: Rp ${total.toLocaleString('id-ID')}Silakan isi ulang saldo kakak terlebih dahulu. 🙏`, { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Fitur Download" }]], resize_keyboard: true } });
                 }
-                member.balance -= total;
+                member.balance = currentBalance - total;
                 db.members = members;
                 writeDB(db);
             }
@@ -8311,6 +8365,46 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca", forceRefresh: boo
         await ctx.reply(`⏳ Status: Sedang memproses pembelian ${product.product_name} ke nomor ${targetNo} melalui metode ${methodDisplay}. Mohon ditunggu.`);
         
         const pay_ref_id = "PRE-" + Date.now();
+        let isAlreadyRefunded = false;
+        let finalTxStatus = "Pending";
+
+        const upsertPrepaidTx = (txFields: any) => {
+            const existingIdx = transactions.findIndex((t: any) => t.id === pay_ref_id);
+            const record = {
+                id: pay_ref_id,
+                memberId: member.id,
+                type: "prepaid",
+                product: product.product_name,
+                sku: product.buyer_sku_code,
+                target: targetDisplay,
+                price: total,
+                modal: 0,
+                cuan: 0,
+                status: isAlreadyRefunded ? "Gagal" : finalTxStatus,
+                method: method,
+                refunded: isAlreadyRefunded,
+                date: new Date().toISOString(),
+                ...txFields
+            };
+            if (existingIdx >= 0) {
+                transactions[existingIdx] = { ...transactions[existingIdx], ...record };
+            } else {
+                transactions.unshift(record);
+            }
+            db.transactions = transactions;
+            db.members = members;
+            writeDB(db);
+        };
+
+        const refundPrepaidOnce = () => {
+            if (!isAlreadyRefunded && !isOwnerSelf && method === 'saldo') {
+                isAlreadyRefunded = true;
+                member.balance = (Number(member.balance) || 0) + total;
+                db.members = members;
+                writeDB(db);
+            }
+        };
+
         try {
             const signText = digiflazzUsername + digiflazzApiKey + pay_ref_id;
             const sign = crypto.createHash("md5").update(signText).digest("hex");
@@ -8329,7 +8423,8 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca", forceRefresh: boo
             
             if (payJson.data) {
                 const status = payJson.data.status || 'Gagal';
-                const digiflazzPrice = payJson.data.price || 0;
+                finalTxStatus = status;
+                const digiflazzPrice = Number(payJson.data.price) || 0;
                 const cuan = total - digiflazzPrice;
                 
                 let paymentInfo = "";
@@ -8436,11 +8531,18 @@ Daya         : ${parts.slice(1).join(' / ')}`;
                     }
                     tgMsgId = tgMsg.message_id;
                 } else {
-                    if (!isOwnerSelf && method === 'saldo') {
-                        member.balance += total;
-                        db.members = members;
-                        writeDB(db);
-                    }
+                    finalTxStatus = 'Gagal';
+                    refundPrepaidOnce();
+                    upsertPrepaidTx({
+                        nama: customerDisplayName,
+                        customerDisplayName: customerDisplayName,
+                        customerName: customerDisplayName,
+                        modal: digiflazzPrice,
+                        cuan: cuan > 0 ? cuan : 0,
+                        status: 'Gagal',
+                        sn: payJson.data?.sn || "-",
+                        refunded: isAlreadyRefunded
+                    });
                     let refundMsg = method === 'saldo'
                         ? `✅ Saldo Rp ${total.toLocaleString('id-ID')} telah dikembalikan ke akun Kakak.`
                         : (method === 'utang'
@@ -8582,61 +8684,44 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
                 }
                 
                 // ALWAYS save to transaction history so it can be seen
-                transactions.unshift({
-                    id: pay_ref_id,
-                    memberId: member.id,
+                upsertPrepaidTx({
                     nama: customerDisplayName,
                     customerDisplayName: customerDisplayName,
                     customerName: customerDisplayName,
-                    type: "prepaid",
-                    product: product.product_name,
-                    sku: product.buyer_sku_code,
-                    target: targetDisplay,
-                    price: total,
                     modal: digiflazzPrice,
                     cuan: cuan > 0 ? cuan : 0,
-                    status: status,
-                    method: method,
+                    status: isAlreadyRefunded ? "Gagal" : finalTxStatus,
                     sn: payJson.data?.sn || "-",
-                    date: new Date().toISOString(),
                     tgMsgId,
                     waMsgKey,
                     waOriginalMsg,
                     tgChatId: ctx.chat?.id,
                     waJid,
-                    waReceiptSent: status === "Sukses" && waMsgKey !== undefined
+                    waReceiptSent: finalTxStatus === "Sukses" && waMsgKey !== undefined,
+                    refunded: isAlreadyRefunded
                 });
-                db.transactions = transactions;
-                writeDB(db);
                 
             } else {
-                if (!isOwnerSelf && method === 'saldo') {
-                    member.balance += total;
-                    db.members = members;
-                    writeDB(db);
-                }
+                finalTxStatus = 'Gagal';
+                refundPrepaidOnce();
+                upsertPrepaidTx({
+                    status: 'Gagal',
+                    sn: "-",
+                    refunded: isAlreadyRefunded
+                });
                 let refundMsg = method === 'saldo' ? 'Saldo telah dikembalikan.' : (method === 'utang' ? 'Utang telah dibatalkan.' : 'Uang Cash harap dikembalikan.');
                 await ctx.reply(`❌ Pembelian Gagal:${payJson.data?.message || 'Error tidak diketahui'}${refundMsg}`);
             }
         } catch (e: any) {
-            transactions.unshift({
-                id: pay_ref_id,
-                memberId: member.id,
-                type: "prepaid",
-                product: product.product_name,
-                sku: product.buyer_sku_code,
-                target: targetDisplay,
-                price: total,
-                modal: 0,
-                cuan: 0,
-                status: "Pending",
-                method: method,
-                date: new Date().toISOString()
+            const safeStatus = isAlreadyRefunded ? "Gagal" : finalTxStatus;
+            upsertPrepaidTx({
+                status: safeStatus,
+                refunded: isAlreadyRefunded
             });
-            db.transactions = transactions;
-            writeDB(db);
             
-            await ctx.reply(`⏳ Transaksi Sedang Diproses (Network Error)Pesananmu sedang dikonfirmasi oleh sistem pusat meski terjadi gangguan koneksi.Mohon tunggu update otomatis dari Chuna atau hubungi Admin.Pesan Error: ${e.message}`);
+            if (safeStatus === "Pending") {
+                await ctx.reply(`⏳ Transaksi Sedang Diproses (Network Error)Pesananmu sedang dikonfirmasi oleh sistem pusat meski terjadi gangguan koneksi.Mohon tunggu update otomatis dari Chuna atau hubungi Admin.Pesan Error: ${e.message}`);
+            }
         }
 
         delete userStates[ctx.from?.id || 0];
@@ -8661,26 +8746,36 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
                 }
             });
         }
-
+        } finally {
+            activePaymentLocks.delete(lockKey);
+        }
 }
 
 
 async function processPascaPayment(ctx: any, ref_id: string, method: string, stateData: any, memberId: string) {
+        const lockKey = String(ctx.from?.id || memberId);
+        if (activePaymentLocks.has(lockKey)) {
+            return ctx.reply("⏳ Transaksi sebelumnya masih sedang diproses, mohon tunggu sebentar ya Kak!");
+        }
+        activePaymentLocks.add(lockKey);
+
+        try {
         const member = members.find((m: any) => m.id === memberId || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
         if (!member) return ctx.reply("❌ Member tidak ditemukan.");
         
         const isOwnerSelf = db.owners.includes(ctx.from?.id) && isTelegramMatch(member.telegram, ctx.from?.id, ctx.from?.username);
         const checkResult = stateData.checkResult;
-        const total = stateData.totalBayar;
+        const total = Number(stateData.totalBayar) || 0;
         const displayCustomerNo = stateData.customerNo || stateData.checkResult?.customer_no || stateData.targetNo || "-";
         const customerNo = stateData.targetNo || stateData.customerNo || stateData.checkResult?.customer_no || "-";
         
         if (!isOwnerSelf) {
             if (method === 'saldo') {
-                if (member.balance < total) {
-                    return ctx.reply(`❌ TRANSAKSI DITOLAK!Maaf kak, saldo kakak tidak mencukupi untuk melakukan transaksi ini.💳 Saldo Saat Ini: Rp ${member.balance.toLocaleString('id-ID')}💰 Total Bayar: Rp ${total.toLocaleString('id-ID')}Silakan isi ulang saldo kakak terlebih dahulu. 🙏`, { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Fitur Download" }]], resize_keyboard: true } });
+                const currentBalance = Number(member.balance) || 0;
+                if (currentBalance < total) {
+                    return ctx.reply(`❌ TRANSAKSI DITOLAK!Maaf kak, saldo kakak tidak mencukupi untuk melakukan transaksi ini.💳 Saldo Saat Ini: Rp ${currentBalance.toLocaleString('id-ID')}💰 Total Bayar: Rp ${total.toLocaleString('id-ID')}Silakan isi ulang saldo kakak terlebih dahulu. 🙏`, { reply_markup: { keyboard: [[{ text: "💵 Cek Saldo" }], [{ text: "🧾 Cek Tagihan" }], [{ text: "📋 Menu Produk" }], [{ text: "📥 Fitur Download" }]], resize_keyboard: true } });
                 }
-                member.balance -= total;
+                member.balance = currentBalance - total;
                 db.members = members;
                 writeDB(db);
             }
@@ -8690,6 +8785,48 @@ async function processPascaPayment(ctx: any, ref_id: string, method: string, sta
         await ctx.reply(`⏳ Status: Sedang memproses pembayaran tagihan untuk nomor ${displayCustomerNo} melalui metode ${methodDisplay}. Mohon ditunggu.`);
         
         const pay_ref_id = ref_id;
+        let isAlreadyRefunded = false;
+        let finalTxStatus = "Pending";
+
+        const upsertPascaTx = (txFields: any) => {
+            const existingIdx = transactions.findIndex((t: any) => t.id === pay_ref_id);
+            const record = {
+                id: pay_ref_id,
+                memberId: member.id,
+                type: "pasca",
+                product: stateData.product.product_name,
+                sku: stateData.product.buyer_sku_code,
+                target: displayCustomerNo,
+                price: total,
+                modal: 0,
+                cuan: 0,
+                tagihan: stateData.checkResult?.selling_price || 0,
+                admin_pel: stateData.adminFee || 0,
+                status: isAlreadyRefunded ? "Gagal" : finalTxStatus,
+                method: method,
+                refunded: isAlreadyRefunded,
+                date: new Date().toISOString(),
+                ...txFields
+            };
+            if (existingIdx >= 0) {
+                transactions[existingIdx] = { ...transactions[existingIdx], ...record };
+            } else {
+                transactions.unshift(record);
+            }
+            db.transactions = transactions;
+            db.members = members;
+            writeDB(db);
+        };
+
+        const refundPascaOnce = () => {
+            if (!isAlreadyRefunded && !isOwnerSelf && method === 'saldo') {
+                isAlreadyRefunded = true;
+                member.balance = (Number(member.balance) || 0) + total;
+                db.members = members;
+                writeDB(db);
+            }
+        };
+
         try {
             const signText = digiflazzUsername + digiflazzApiKey + pay_ref_id;
             const sign = crypto.createHash("md5").update(signText).digest("hex");
@@ -8709,7 +8846,8 @@ async function processPascaPayment(ctx: any, ref_id: string, method: string, sta
             
             if (payJson.data) {
                 const status = payJson.data.status || 'Gagal';
-                const digiflazzPrice = payJson.data.price || 0;
+                finalTxStatus = status;
+                const digiflazzPrice = Number(payJson.data.price) || 0;
                 const cuan = total - digiflazzPrice;
                 
                 let paymentInfo = "";
@@ -8816,11 +8954,18 @@ Daya         : ${parts.slice(1).join(' / ')}`;
                     }
                     tgMsgId = tgMsg.message_id;
                 } else {
-                    if (!isOwnerSelf && method === 'saldo') {
-                        member.balance += total;
-                        db.members = members;
-                        writeDB(db);
-                    }
+                    finalTxStatus = 'Gagal';
+                    refundPascaOnce();
+                    upsertPascaTx({
+                        nama: customerDisplayName,
+                        customerDisplayName: customerDisplayName,
+                        customerName: customerDisplayName,
+                        modal: digiflazzPrice,
+                        cuan: cuan > 0 ? cuan : 0,
+                        status: 'Gagal',
+                        sn: payJson.data?.sn || "-",
+                        refunded: isAlreadyRefunded
+                    });
                     let refundMsg = method === 'saldo'
                         ? `✅ Saldo Rp ${total.toLocaleString('id-ID')} telah dikembalikan ke akun Kakak.`
                         : (method === 'utang'
@@ -8961,65 +9106,44 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
                     }
                 }
                 
-                transactions.unshift({
-                    id: pay_ref_id,
-                    memberId: member.id,
+                upsertPascaTx({
                     nama: customerDisplayName,
                     customerDisplayName: customerDisplayName,
                     customerName: customerDisplayName,
-                    type: "pasca",
-                    product: stateData.product.product_name,
-                    sku: stateData.product.buyer_sku_code,
-                    target: displayCustomerNo,
-                    price: total,
                     modal: digiflazzPrice,
                     cuan: cuan > 0 ? cuan : 0,
-                    tagihan: stateData.checkResult?.selling_price || 0,
-                    admin_pel: stateData.adminFee || 0,
-                    status: status,
-                    method: method,
+                    status: isAlreadyRefunded ? "Gagal" : finalTxStatus,
                     sn: payJson.data?.sn || "-",
-                    date: new Date().toISOString(),
                     tgMsgId,
                     waMsgKey,
                     waOriginalMsg,
                     tgChatId: ctx.chat?.id,
                     waJid,
-                    waReceiptSent: status === "Sukses" && waMsgKey !== undefined
+                    waReceiptSent: finalTxStatus === "Sukses" && waMsgKey !== undefined,
+                    refunded: isAlreadyRefunded
                 });
-                db.transactions = transactions;
-                writeDB(db);
                 
             } else {
-                if (!isOwnerSelf && method === 'saldo') {
-                    member.balance += total;
-                    db.members = members;
-                    writeDB(db);
-                }
+                finalTxStatus = 'Gagal';
+                refundPascaOnce();
+                upsertPascaTx({
+                    status: 'Gagal',
+                    sn: "-",
+                    refunded: isAlreadyRefunded
+                });
                 let refundMsg = method === 'saldo' ? 'Saldo telah dikembalikan.' : (method === 'utang' ? 'Utang telah dibatalkan.' : 'Uang Cash harap dikembalikan.');
                 await ctx.reply(`❌ Pembelian Gagal:${payJson.data?.message || 'Error tidak diketahui'}${refundMsg}`);
             }
         } catch (e: any) {
-            transactions.unshift({
-                id: pay_ref_id,
-                memberId: member.id,
-                type: "pasca",
-                product: stateData.product.product_name,
-                sku: stateData.product.buyer_sku_code,
-                target: displayCustomerNo,
-                price: total,
-                modal: 0,
-                cuan: 0,
-                tagihan: stateData.checkResult?.selling_price || 0,
-                admin_pel: stateData.adminFee || 0,
-                status: "Pending",
-                method: method,
-                date: new Date().toISOString()
+            const safeStatus = isAlreadyRefunded ? "Gagal" : finalTxStatus;
+            upsertPascaTx({
+                status: safeStatus,
+                refunded: isAlreadyRefunded
             });
-            db.transactions = transactions;
-            writeDB(db);
             
-            await ctx.reply(`⏳ Transaksi Sedang Diproses (Network Error)Pesananmu sedang dikonfirmasi oleh sistem pusat meski terjadi gangguan koneksi.Mohon tunggu update otomatis dari Chuna atau hubungi Admin.Pesan Error: ${e.message}`);
+            if (safeStatus === "Pending") {
+                await ctx.reply(`⏳ Transaksi Sedang Diproses (Network Error)Pesananmu sedang dikonfirmasi oleh sistem pusat meski terjadi gangguan koneksi.Mohon tunggu update otomatis dari Chuna atau hubungi Admin.Pesan Error: ${e.message}`);
+            }
         }
         
 
@@ -9045,7 +9169,9 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
                 }
             });
         }
-
+        } finally {
+            activePaymentLocks.delete(lockKey);
+        }
 }
 
       
@@ -9481,34 +9607,36 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
         if (!db.owners.includes(userId)) return ctx.answerCbQuery("Akses khusus Owner!");
         
         const reqId = ctx.match[1];
-        const dbNow = readDB();
-        const topup = (dbNow.topupRequests || []).find((t: any) => t.id === reqId);
+        if (!db.topupRequests) db.topupRequests = [];
+        const topup = db.topupRequests.find((t: any) => t.id === reqId);
         if (!topup) return ctx.answerCbQuery("Permintaan tidak ditemukan!");
         if (topup.status === 'approved') return ctx.answerCbQuery("Permintaan ini sudah disetujui sebelumnya!");
         if (topup.status === 'rejected') return ctx.answerCbQuery("Permintaan ini sudah ditolak!");
 
-        const member = dbNow.members.find((m: any) => m.id === topup.memberId || isTelegramMatch(m.telegram, topup.memberTelegram, null));
+        const member = members.find((m: any) => m.id === topup.memberId || isTelegramMatch(m.telegram, topup.memberTelegram, null));
         if (!member) return ctx.answerCbQuery("Member tidak ditemukan!");
 
-        member.balance = (member.balance || 0) + Number(topup.nominalSaldo);
+        const nominalAdd = Number(topup.nominalSaldo) || 0;
+        member.balance = (Number(member.balance) || 0) + nominalAdd;
         topup.status = 'approved';
         topup.processedAt = new Date().toISOString();
 
-        if (!dbNow.transactions) dbNow.transactions = [];
-        dbNow.transactions.unshift({
+        transactions.unshift({
           id: `TX-TOPUP-${Date.now()}`,
           type: 'topup',
           memberId: member.id,
           target: member.name,
-          product: `Isi Saldo Rp ${Number(topup.nominalSaldo).toLocaleString('id-ID')}`,
-          price: topup.nominalSaldo,
+          product: `Isi Saldo Rp ${nominalAdd.toLocaleString('id-ID')}`,
+          price: nominalAdd,
           method: 'qris_manual',
           status: 'Sukses',
           sn: topup.transactionId || 'TOPUP-VERIFIED',
           date: new Date().toISOString()
         });
 
-        writeDB(dbNow);
+        db.members = members;
+        db.transactions = transactions;
+        writeDB(db);
         await ctx.answerCbQuery("✅ Berhasil disetujui & saldo telah ditambahkan!");
 
         try {
@@ -9516,7 +9644,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
             `✅ *PERMINTAAN ISI SALDO TELAH DISETUJUI*\n` +
             `━━━━━━━━━━━━━━━━━━━━━\n` +
             `👤 *Member:* ${topup.memberName}\n` +
-            `💰 *Saldo Ditambahkan:* Rp ${Number(topup.nominalSaldo).toLocaleString('id-ID')}\n` +
+            `💰 *Saldo Ditambahkan:* Rp ${nominalAdd.toLocaleString('id-ID')}\n` +
             `💳 *Saldo Akhir Member:* Rp ${member.balance.toLocaleString('id-ID')}\n` +
             `🆔 *ID Ref Struk:* ${topup.transactionId || '-'}\n` +
             `⏰ *Waktu Disetujui:* ${new Date().toLocaleString('id-ID')}\n` +
@@ -9531,7 +9659,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
             topup.memberTelegram,
             `🎉 *HOREEE! ISI SALDO BERHASIL!* 🥳\n` +
             `━━━━━━━━━━━━━━━━━━━━━\n` +
-            `Halo Kak *${topup.memberName}*, pengisian saldo sebesar *Rp ${Number(topup.nominalSaldo).toLocaleString('id-ID')}* telah diverifikasi dan disetujui oleh Owner E4 Store!\n\n` +
+            `Halo Kak *${topup.memberName}*, pengisian saldo sebesar *Rp ${nominalAdd.toLocaleString('id-ID')}* telah diverifikasi dan disetujui oleh Owner E4 Store!\n\n` +
             `💳 *Saldo Akun Kakak Saat Ini:* *Rp ${member.balance.toLocaleString('id-ID')}*\n\n` +
             `Terima kasih telah berbelanja di E4 Store! Selamat bertransaksi kembali ya Kak! 🥰💖`,
             { parse_mode: 'Markdown' }
@@ -9546,14 +9674,14 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
         if (!db.owners.includes(userId)) return ctx.answerCbQuery("Akses khusus Owner!");
 
         const reqId = ctx.match[1];
-        const dbNow = readDB();
-        const topup = (dbNow.topupRequests || []).find((t: any) => t.id === reqId);
+        if (!db.topupRequests) db.topupRequests = [];
+        const topup = db.topupRequests.find((t: any) => t.id === reqId);
         if (!topup) return ctx.answerCbQuery("Permintaan tidak ditemukan!");
         if (topup.status !== 'pending') return ctx.answerCbQuery(`Permintaan sudah berstatus ${topup.status}!`);
 
         topup.status = 'rejected';
         topup.processedAt = new Date().toISOString();
-        writeDB(dbNow);
+        writeDB(db);
 
         await ctx.answerCbQuery("Permintaan isi saldo ditolak.");
         try {
@@ -10444,7 +10572,9 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
              });
         }
         
-        await processPrepaidPayment(ctx, sku, method, state.data, state.data.memberId || `MBR-${ctx.from?.id}`);
+        const sdPrepaid = state.data;
+        delete userStates[ctx.from?.id || 0];
+        await processPrepaidPayment(ctx, sku, method, sdPrepaid, sdPrepaid.memberId || `MBR-${ctx.from?.id}`);
       });
       bot.action(/^pay_pasca_(.+?)(?:_(cash|utang|saldo))?$/, async (ctx) => {
         await ctx.answerCbQuery();
@@ -10472,7 +10602,9 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
              });
         }
         
-        await processPascaPayment(ctx, ref_id, method, state.data, state.data.memberId || `MBR-${ctx.from?.id}`);
+        const sdPasca = state.data;
+        delete userStates[ctx.from?.id || 0];
+        await processPascaPayment(ctx, ref_id, method, sdPasca, sdPasca.memberId || `MBR-${ctx.from?.id}`);
       });
       bot.action("cancel_pasca", async (ctx) => {
         await ctx.answerCbQuery();
@@ -11018,13 +11150,12 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
               const member = members.find(m => m.id === memberId || isTelegramMatch(m.telegram, userId, ctx.from?.username));
 
               if (state?.step !== 'AWAITING_TOPUP_RECEIPT') {
-                  const dbNow = readDB();
                   await ctx.reply(
                       `Halo Kak! Untuk mengisi saldo akun, silakan klik tombol *💳 Isi Saldo* dan pilih nominal terlebih dahulu, lalu kirimkan foto struk bukti transfernya ya Kak! 😊`,
                       {
                           parse_mode: 'Markdown',
                           reply_markup: {
-                              keyboard: getCustomerMenuKeyboard(dbNow.owners.includes(userId)),
+                              keyboard: getCustomerMenuKeyboard(db.owners.includes(userId)),
                               resize_keyboard: true
                           }
                       }
@@ -11041,7 +11172,6 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                   const arrayBuffer = await response.arrayBuffer();
                   const buffer = Buffer.from(arrayBuffer);
 
-                  const dbNow = readDB();
                   const nominalSaldo = state?.data?.nominal || 0;
                   const pajak = state?.data?.pajak || (nominalSaldo >= 400000 ? Math.ceil(nominalSaldo * 0.003) : 0);
                   const totalBayar = state?.data?.totalBayar || (nominalSaldo + pajak);
@@ -11070,9 +11200,9 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                       createdAt: new Date().toISOString()
                   };
 
-                  if (!dbNow.topupRequests) dbNow.topupRequests = [];
-                  dbNow.topupRequests.unshift(topupReq);
-                  writeDB(dbNow);
+                  if (!db.topupRequests) db.topupRequests = [];
+                  db.topupRequests.unshift(topupReq);
+                  writeDB(db);
                   delete userStates[userId];
 
                   // Kirim konfirmasi ke Customer
@@ -11092,14 +11222,14 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                       {
                           parse_mode: 'Markdown',
                           reply_markup: {
-                              keyboard: getCustomerMenuKeyboard(dbNow.owners.includes(userId)),
+                              keyboard: getCustomerMenuKeyboard(db.owners.includes(userId)),
                               resize_keyboard: true
                           }
                       }
                   );
 
                   // Forward foto bukti transfer + detail rincian ke semua Telegram Owner
-                  for (const ownerId of dbNow.owners) {
+                  for (const ownerId of db.owners) {
                       try {
                           const ownerMsg = 
                               `📥 *PERMINTAAN ISI SALDO MASUK (BUKTI TRANSFER)*\n` +
@@ -11308,9 +11438,9 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                         }
                         return ctx.reply(wrongMsg);
                     }
-                    await ctx.reply("✅ Yey! PIN-nya benar. Chuna langsung proses transaksinya sekarang ya sayang! 🚀✨*(Demi keamanan, pesan berisi PIN-mu jangan lupa dihapus sendiri ya)*", { parse_mode: 'Markdown' });
                     const sd = state.data;
                     delete userStates[userId];
+                    await ctx.reply("✅ Yey! PIN-nya benar. Chuna langsung proses transaksinya sekarang ya sayang! 🚀✨*(Demi keamanan, pesan berisi PIN-mu jangan lupa dihapus sendiri ya)*", { parse_mode: 'Markdown' });
                     await processPrepaidPayment(ctx, sd.sku, sd.method, sd, sd.memberId || `MBR-${userId}`);
                     return;
                 }
@@ -11338,9 +11468,9 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                         }
                         return ctx.reply(wrongMsg);
                     }
-                    await ctx.reply("✅ Yey! PIN-nya benar. Chuna langsung proses transaksinya sekarang ya sayang! 🚀✨*(Demi keamanan, pesan berisi PIN-mu jangan lupa dihapus sendiri ya)*", { parse_mode: 'Markdown' });
                     const sd = state.data;
                     delete userStates[userId];
+                    await ctx.reply("✅ Yey! PIN-nya benar. Chuna langsung proses transaksinya sekarang ya sayang! 🚀✨*(Demi keamanan, pesan berisi PIN-mu jangan lupa dihapus sendiri ya)*", { parse_mode: 'Markdown' });
                     await processPascaPayment(ctx, sd.ref_id, sd.method, sd, sd.memberId || `MBR-${userId}`);
                     return;
                 }
@@ -12104,7 +12234,9 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                         }
                     });
                 }
-                await processPrepaidPayment(ctx, state.data.skuToPay, method, state.data, state.data.memberId || `MBR-${ctx.from?.id}`);
+                const sdPrepaidOwner = state.data;
+                delete userStates[userId];
+                await processPrepaidPayment(ctx, sdPrepaidOwner.skuToPay, method, sdPrepaidOwner, sdPrepaidOwner.memberId || `MBR-${ctx.from?.id}`);
                 break;
               }
               case 'WAIT_NOMINAL_UTANG': {
@@ -12297,7 +12429,9 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                         }
                     });
                 }
-                await processPascaPayment(ctx, state.data.ref_id, method, state.data, state.data.memberId || `MBR-${ctx.from?.id}`);
+                const sdPascaOwner = state.data;
+                delete userStates[userId];
+                await processPascaPayment(ctx, sdPascaOwner.ref_id, method, sdPascaOwner, sdPascaOwner.memberId || `MBR-${ctx.from?.id}`);
                 break;
               }
               case 'OWNER_ADD_MEMBER_WA':
