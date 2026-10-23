@@ -3269,10 +3269,13 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
     } catch (e) {}
   };
 
-  // 1. Helmet Security Headers (Posisi Paling Atas)
+  // 1. Helmet Security Headers (Posisi Paling Atas - Mengizinkan iframe Preview AI Studio)
   app.use(helmet({
     contentSecurityPolicy: false,
-    crossOriginEmbedderPolicy: false
+    crossOriginEmbedderPolicy: false,
+    frameguard: false,
+    crossOriginResourcePolicy: false,
+    crossOriginOpenerPolicy: false
   }));
 
   // 2. Body Parser dengan Raw Body Capture untuk Verifikasi HMAC Webhook
@@ -3284,14 +3287,17 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
   }));
   app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
-  // 3. Layer 1 & 2: EGIS WAF Inspector & NYXGUARD Sentry (Berjalan sebelum rute API apa pun)
+  // 3. Layer 1 & 2: EGIS WAF Inspector & NYXGUARD Sentry (Khusus memproteksi jalur /api/* dan /webhook*)
   app.use((req, res, next) => {
-    securitySuite.egisInspector(req, res, next, triggerHeliosOwnerAlert);
+    if (req.path.startsWith('/api') || req.path.startsWith('/webhook')) {
+      return securitySuite.egisInspector(req, res, next, triggerHeliosOwnerAlert);
+    }
+    next();
   });
 
-  // 4. Layer 4: PURGE - Prototype Pollution & Sensitive Payload Redaction Middleware
+  // 4. Layer 4: PURGE - Prototype Pollution & Sensitive Payload Redaction Middleware (Khusus jalur /api/* dan /webhook*)
   app.use((req, res, next) => {
-    if (req.body && typeof req.body === 'object') {
+    if ((req.path.startsWith('/api') || req.path.startsWith('/webhook')) && req.body && typeof req.body === 'object') {
       delete (req.body as any)['__proto__'];
       delete (req.body as any)['constructor'];
       delete (req.body as any)['prototype'];
@@ -3302,12 +3308,14 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
   // 5. Rate Limiting (Anti-Bot & Anti-DDoS)
   const limiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 1000,
+    max: 1500,
     message: { success: false, error: "Terlalu banyak request dari IP ini, coba lagi nanti. (Anti-Bot Protection)" },
     standardHeaders: true,
     legacyHeaders: false,
     skip: (req) => {
-      return req.path.includes('/webhook') || req.path.includes('/api/digiflazz-webhook') || req.path.includes('/api/digiflazz/webhook');
+      const p = req.path || '';
+      if (!p.startsWith('/api') && !p.startsWith('/webhook')) return true;
+      return p.includes('/webhook') || p.includes('/api/digiflazz-webhook') || p.includes('/api/digiflazz/webhook');
     }
   });
   app.use(limiter);
@@ -3406,13 +3414,21 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
   const LOGIN_MAX_ATTEMPTS = 5;
 
   app.post("/api/auth/login", (req, res) => {
-    const { username, password } = req.body || {};
-    const clientIp = req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.socket.remoteAddress || '127.0.0.1';
+    const { username, password, deviceFingerprint } = req.body || {};
+    const clientIp = securitySuite.extractClientIP(req);
     const now = Date.now();
 
     // 1. Cek Whitelist IP Admin jika diaktifkan
     if (!securitySuite.auditCheckAdminIPAllowed(clientIp)) {
-      securitySuite.logThreat('Audit', 'critical', clientIp, 'Admin Login Blocked', 'Login Dashboard ditolak: IP tidak terdaftar di Whitelist IP Admin.');
+      securitySuite.logThreat(
+        'Audit',
+        'critical',
+        clientIp,
+        'Admin Login Blocked (IP Not Whitelisted)',
+        `Login Dashboard ditolak: IP ${clientIp} mencoba masuk sebagai '${String(username || '-').slice(0, 30)}' tetapi tidak terdaftar di Whitelist IP Admin.`,
+        triggerHeliosOwnerAlert,
+        { req, deviceFingerprint }
+      );
       return res.status(403).json({
         success: false,
         error: 'Akses Ditolak: IP Anda tidak terdaftar dalam Whitelist IP Admin Resmi.'
@@ -3452,19 +3468,14 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
           'Warden',
           'critical',
           clientIp,
-          'Dashboard Brute-Force Lockout',
-          `IP ${clientIp} diblokir sementara (15 menit) karena 5x gagal login berturut-turut ke Dashboard Utama.`
-        );
-        triggerHeliosOwnerAlert(
-          `🚨 *PERINGATAN KEAMANAN E4 STORE*\n\n` +
-          `Terdeteksi *5x percobaan Login Gagal (Brute-Force)* pada Dashboard Utama!\n` +
-          `• *IP Penyerang:* \`${clientIp}\`\n` +
-          `• *Username Dicoba:* \`${String(username || '-').slice(0, 30)}\`\n` +
-          `• *Tindakan:* IP dikunci otomatis selama 15 menit.`
+          'Dashboard Brute-Force Lockout (5x Gagal)',
+          `IP ${clientIp} dikunci otomatis (15 menit) karena 5x gagal login ke Dashboard Utama (Username dicoba: '${String(username || '-').slice(0, 30)}').`,
+          triggerHeliosOwnerAlert,
+          { req, deviceFingerprint }
         );
         return res.status(429).json({
           success: false,
-          error: 'IP Anda dikunci selama 15 menit karena 5x percobaan login gagal berturut-turut! Notifikasi keamanan telah dikirim ke Owner.'
+          error: 'IP Anda dikunci selama 15 menit karena 5x percobaan login gagal berturut-turut! Lokasi & perangkat Anda telah tercatat dan dilaporkan ke Owner.'
         });
       }
 
@@ -3472,10 +3483,12 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
       const remaining = Math.max(0, LOGIN_MAX_ATTEMPTS - current.count);
       securitySuite.logThreat(
         'Warden',
-        'medium',
+        'high',
         clientIp,
-        'Failed Dashboard Login',
-        `Percobaan login gagal ke Dashboard Utama (Sisa percobaan: ${remaining}).`
+        `Failed Dashboard Login (${current.count}/${LOGIN_MAX_ATTEMPTS})`,
+        `Percobaan login gagal ke Dashboard Utama dengan username '${String(username || '-').slice(0, 30)}' (Sisa percobaan: ${remaining}x).`,
+        triggerHeliosOwnerAlert,
+        { req, deviceFingerprint }
       );
       return res.status(401).json({
         success: false,

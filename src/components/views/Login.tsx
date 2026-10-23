@@ -54,6 +54,31 @@ export function Login({ onLogin }: { onLogin: (token?: string) => void }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUnlocking, setIsUnlocking] = useState(false);
 
+  const collectDeviceFingerprint = () => {
+    let gpu = 'Unknown GPU';
+    try {
+      const canvas = document.createElement('canvas');
+      const gl = (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')) as WebGLRenderingContext | null;
+      if (gl) {
+        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+        if (debugInfo) {
+          gpu = String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || 'Unknown GPU');
+        }
+      }
+    } catch (e) {}
+
+    return {
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Unknown',
+      language: (navigator.languages && navigator.languages.length > 0 ? navigator.languages.join(', ') : navigator.language) || 'Unknown',
+      screen: `${window.screen?.width || 0}x${window.screen?.height || 0} (${window.devicePixelRatio || 1}x)`,
+      platform: (navigator as any).userAgentData?.platform || navigator.platform || 'Unknown',
+      cores: navigator.hardwareConcurrency || 'Unknown',
+      memory: (navigator as any).deviceMemory ? `${(navigator as any).deviceMemory} GB` : 'Unknown',
+      gpu,
+      userAgent: navigator.userAgent || 'Unknown'
+    };
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting || isUnlocking) return;
@@ -66,10 +91,15 @@ export function Login({ onLogin }: { onLogin: (token?: string) => void }) {
     setError('');
 
     try {
+      const deviceFingerprint = collectDeviceFingerprint();
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: username.trim(), password })
+        body: JSON.stringify({
+          username: username.trim(),
+          password,
+          deviceFingerprint
+        })
       });
       const data = await res.json();
 

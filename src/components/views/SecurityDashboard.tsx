@@ -56,6 +56,31 @@ interface SecurityTelemetry {
     source: string;
     action: string;
     details: string;
+    geoInfo?: {
+      ip: string;
+      country: string;
+      region: string;
+      city: string;
+      isp: string;
+      asn: string;
+      isVpnOrHosting: boolean;
+      connectionType: string;
+      lat?: number;
+      lon?: number;
+      mapsUrl?: string;
+      ipTimezone?: string;
+    };
+    deviceInfo?: {
+      userAgent: string;
+      timezone?: string;
+      language?: string;
+      screen?: string;
+      platform?: string;
+      gpu?: string;
+      cores?: string | number;
+      memory?: string;
+      vpnMismatch?: boolean;
+    };
   }[];
 }
 
@@ -1658,11 +1683,11 @@ echo "[+] Hardening Selesai! Server STB E4 Store Anda kini 100% terlindungi."`}<
               <thead className="text-[10px] uppercase font-bold text-slate-400 bg-slate-900/50 border-b border-slate-700/50">
                 <tr>
                   <th className="py-2.5 px-3">Waktu (WITA)</th>
-                  <th className="py-2.5 px-3">Layer</th>
-                  <th className="py-2.5 px-3">Severity</th>
-                  <th className="py-2.5 px-3">Sumber</th>
-                  <th className="py-2.5 px-3">Tindakan</th>
-                  <th className="py-2.5 px-3">Keterangan</th>
+                  <th className="py-2.5 px-3">Layer & Severity</th>
+                  <th className="py-2.5 px-3">IP & Lokasi Geo-Tracker</th>
+                  <th className="py-2.5 px-3">ISP & Jaringan</th>
+                  <th className="py-2.5 px-3">Perangkat (Fingerprint)</th>
+                  <th className="py-2.5 px-3">Tindakan & Detail</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700/30 font-mono">
@@ -1674,27 +1699,94 @@ echo "[+] Hardening Selesai! Server STB E4 Store Anda kini 100% terlindungi."`}<
                     </td>
                   </tr>
                 ) : (
-                  data.threatLogs.map((log) => (
-                    <tr key={log.id} className="hover:bg-slate-800/30 transition-colors">
-                      <td className="py-2.5 px-3 text-slate-400 whitespace-nowrap">{log.timestamp}</td>
-                      <td className="py-2.5 px-3 font-bold text-indigo-300">{log.layer}</td>
-                      <td className="py-2.5 px-3">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                          log.severity === 'critical' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
-                          log.severity === 'high' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' :
-                          log.severity === 'medium' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
-                          'bg-slate-700/50 text-slate-300'
-                        }`}>
-                          {log.severity.toUpperCase()}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3 text-slate-300">{log.source}</td>
-                      <td className="py-2.5 px-3 text-emerald-400 font-semibold">{log.action}</td>
-                      <td className="py-2.5 px-3 text-slate-400 max-w-xs truncate" title={log.details}>
-                        {log.details}
-                      </td>
-                    </tr>
-                  ))
+                  data.threatLogs.map((log) => {
+                    const locText = log.geoInfo
+                      ? [log.geoInfo.city, log.geoInfo.region, log.geoInfo.country].filter(Boolean).filter(x => x !== '-').join(', ')
+                      : '';
+                    return (
+                      <tr key={log.id} className="hover:bg-slate-800/30 transition-colors align-top">
+                        <td className="py-2.5 px-3 text-slate-400 whitespace-nowrap">{log.timestamp}</td>
+                        <td className="py-2.5 px-3 space-y-1">
+                          <div className="font-bold text-indigo-300">{log.layer}</div>
+                          <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
+                            log.severity === 'critical' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                            log.severity === 'high' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' :
+                            log.severity === 'medium' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
+                            'bg-slate-700/50 text-slate-300'
+                          }`}>
+                            {log.severity.toUpperCase()}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-200 space-y-1">
+                          <div className="font-bold text-white">{log.source}</div>
+                          {locText && (
+                            <div className="text-[11px] text-sky-300 font-sans">
+                              📍 {locText}
+                            </div>
+                          )}
+                          {log.geoInfo?.mapsUrl && (
+                            <a
+                              href={log.geoInfo.mapsUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 px-2 py-0.5 mt-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-[10px] font-sans font-semibold transition-colors"
+                            >
+                              🗺️ Buka Google Maps
+                            </a>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-300 space-y-1 font-sans">
+                          {log.geoInfo ? (
+                            <>
+                              <div className="text-[11px] font-semibold text-slate-200">{log.geoInfo.isp}</div>
+                              <div className="text-[10px] text-slate-400 font-mono">{log.geoInfo.asn}</div>
+                              <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                log.geoInfo.isVpnOrHosting
+                                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                                  : 'bg-teal-500/20 text-teal-300 border border-teal-500/30'
+                              }`}>
+                                {log.geoInfo.connectionType}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-slate-500 text-[11px]">-</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-300 space-y-1 font-sans max-w-[220px]">
+                          {log.deviceInfo ? (
+                            <>
+                              {log.deviceInfo.platform && (
+                                <div className="text-[11px] text-slate-200 font-semibold">
+                                  💻 {log.deviceInfo.platform} {log.deviceInfo.screen ? `(${log.deviceInfo.screen})` : ''}
+                                </div>
+                              )}
+                              {log.deviceInfo.timezone && (
+                                <div className="text-[10px] text-amber-300 font-mono">
+                                  🕒 TZ Asli: {log.deviceInfo.timezone}
+                                </div>
+                              )}
+                              {log.deviceInfo.vpnMismatch && (
+                                <div className="px-1.5 py-0.5 rounded bg-red-500/20 border border-red-500/40 text-red-300 text-[10px] font-bold">
+                                  🚨 Terdeteksi Pakai VPN (Jam Fisik Berbeda!)
+                                </div>
+                              )}
+                              <div className="text-[10px] text-slate-400 truncate font-mono" title={log.deviceInfo.userAgent}>
+                                {log.deviceInfo.userAgent}
+                              </div>
+                            </>
+                          ) : (
+                            <span className="text-slate-500 text-[11px]">-</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 space-y-1 max-w-xs">
+                          <div className="text-emerald-400 font-semibold">{log.action}</div>
+                          <div className="text-slate-400 text-[11px] font-sans break-words" title={log.details}>
+                            {log.details}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

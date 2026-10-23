@@ -56,6 +56,33 @@ export type SecurityLayerName =
   | 'Hook'
   | 'Audit';
 
+export interface AttackerGeoInfo {
+  ip: string;
+  country: string;
+  region: string;
+  city: string;
+  isp: string;
+  asn: string;
+  isVpnOrHosting: boolean;
+  connectionType: string;
+  lat?: number;
+  lon?: number;
+  mapsUrl?: string;
+  ipTimezone?: string;
+}
+
+export interface AttackerDeviceInfo {
+  userAgent: string;
+  timezone?: string;
+  language?: string;
+  screen?: string;
+  platform?: string;
+  gpu?: string;
+  cores?: string | number;
+  memory?: string;
+  vpnMismatch?: boolean;
+}
+
 export interface SecurityThreatLog {
   id: string;
   timestamp: string;
@@ -64,6 +91,8 @@ export interface SecurityThreatLog {
   source: string; // IP or UserID
   action: string;
   details: string;
+  geoInfo?: AttackerGeoInfo;
+  deviceInfo?: AttackerDeviceInfo;
 }
 
 export interface AuditRecord {
@@ -278,14 +307,184 @@ class SecurityShieldSuite {
     }
   }
 
+  // GEO-TRACKER CACHE: Menyimpan hasil pelacakan IP penyerang selama 6 jam
+  private geoCache: Map<string, { info: AttackerGeoInfo; expiresAt: number }> = new Map();
+
+  public extractClientIP(req: Request): string {
+    const cfIp = req.headers['cf-connecting-ip'];
+    if (typeof cfIp === 'string' && cfIp.trim()) {
+      return cfIp.trim().replace(/^::ffff:/, '');
+    }
+    const realIp = req.headers['x-real-ip'];
+    if (typeof realIp === 'string' && realIp.trim()) {
+      return realIp.trim().replace(/^::ffff:/, '');
+    }
+    const xff = req.headers['x-forwarded-for'];
+    if (typeof xff === 'string' && xff.trim()) {
+      const firstIp = xff.split(',')[0].trim();
+      if (firstIp) return firstIp.replace(/^::ffff:/, '');
+    }
+    const raw = req.socket?.remoteAddress || '127.0.0.1';
+    return raw.replace(/^::ffff:/, '');
+  }
+
+  public isPrivateOrLocalIP(ip: string): boolean {
+    if (!ip || ip === 'unknown' || ip === '127.0.0.1' || ip === '::1' || ip === 'localhost') return true;
+    if (ip.startsWith('10.') || ip.startsWith('192.168.') || ip.startsWith('169.254.')) return true;
+    if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(ip)) return true;
+    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip) && !ip.includes(':')) return true;
+    return false;
+  }
+
+  public async lookupAttackerGeo(ip: string, cfCountry?: string): Promise<AttackerGeoInfo> {
+    const cleanIp = (ip || 'unknown').trim().replace(/^::ffff:/, '');
+    const now = Date.now();
+    const cached = this.geoCache.get(cleanIp);
+    if (cached && cached.expiresAt > now) {
+      return cached.info;
+    }
+
+    if (this.isPrivateOrLocalIP(cleanIp)) {
+      const localInfo: AttackerGeoInfo = {
+        ip: cleanIp,
+        country: cfCountry ? `Cloudflare (${cfCountry})` : 'Jaringan Lokal / Internal',
+        region: 'Localhost / Private LAN',
+        city: 'Internal Server',
+        isp: 'Local Loopback / Internal Network',
+        asn: 'LOCAL-NET',
+        isVpnOrHosting: false,
+        connectionType: 'Jaringan Lokal / Internal'
+      };
+      return localInfo;
+    }
+
+    const vpnHostingKeywords = /(vpn|proxy|tor|hosting|datacenter|cloud|digitalocean|cloudflare|amazonaws|aws|google cloud|linode|vultr|choopa|ovh|hetzner|m247|datacamp|contabo|leaseweb|alibaba|tencent|microsoft)/i;
+
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3500);
+      const res = await fetch(
+        `http://ip-api.com/json/${encodeURIComponent(cleanIp)}?fields=status,message,country,countryCode,regionName,city,lat,lon,timezone,isp,org,as,mobile,proxy,hosting,query`,
+        { signal: controller.signal }
+      );
+      clearTimeout(timeout);
+
+      if (res.ok) {
+        const data: any = await res.json();
+        if (data && data.status === 'success') {
+          const ispCombined = [data.isp, data.org].filter(Boolean).join(' / ') || 'Unknown ISP';
+          const asnStr = data.as || '-';
+          const isVpn = Boolean(data.proxy || data.hosting || vpnHostingKeywords.test(ispCombined) || vpnHostingKeywords.test(asnStr));
+          const connType = isVpn
+            ? '⚠️ VPN / Proxy / Server Hosting (VPS)'
+            : data.mobile
+            ? '📱 Jaringan Seluler (Mobile Data)'
+            : '🏠 ISP Rumahan / Fixed Broadband';
+          const lat = typeof data.lat === 'number' ? data.lat : undefined;
+          const lon = typeof data.lon === 'number' ? data.lon : undefined;
+
+          const geo: AttackerGeoInfo = {
+            ip: cleanIp,
+            country: `${data.country || 'Unknown'} (${data.countryCode || cfCountry || '-'})`,
+            region: data.regionName || '-',
+            city: data.city || '-',
+            isp: ispCombined,
+            asn: asnStr,
+            isVpnOrHosting: isVpn,
+            connectionType: connType,
+            lat,
+            lon,
+            mapsUrl: lat !== undefined && lon !== undefined ? `https://www.google.com/maps?q=${lat},${lon}` : undefined,
+            ipTimezone: data.timezone || undefined
+          };
+          this.geoCache.set(cleanIp, { info: geo, expiresAt: now + 6 * 3600 * 1000 });
+          return geo;
+        }
+      }
+    } catch (e) {}
+
+    // Fallback ke ipwho.is jika ip-api.com gagal/limit
+    try {
+      const controller2 = new AbortController();
+      const timeout2 = setTimeout(() => controller2.abort(), 3500);
+      const res2 = await fetch(`https://ipwho.is/${encodeURIComponent(cleanIp)}`, { signal: controller2.signal });
+      clearTimeout(timeout2);
+
+      if (res2.ok) {
+        const d: any = await res2.json();
+        if (d && d.success !== false) {
+          const ispName = d.connection?.isp || d.connection?.org || 'Unknown ISP';
+          const asnStr = d.connection?.asn ? `AS${d.connection.asn}` : '-';
+          const isVpn = Boolean(vpnHostingKeywords.test(ispName));
+          const lat = typeof d.latitude === 'number' ? d.latitude : undefined;
+          const lon = typeof d.longitude === 'number' ? d.longitude : undefined;
+
+          const geo: AttackerGeoInfo = {
+            ip: cleanIp,
+            country: `${d.country || 'Unknown'} (${d.country_code || cfCountry || '-'})`,
+            region: d.region || '-',
+            city: d.city || '-',
+            isp: ispName,
+            asn: asnStr,
+            isVpnOrHosting: isVpn,
+            connectionType: isVpn ? '⚠️ VPN / Proxy / Server Hosting (VPS)' : '🏠 ISP / Jaringan Reguler',
+            lat,
+            lon,
+            mapsUrl: lat !== undefined && lon !== undefined ? `https://www.google.com/maps?q=${lat},${lon}` : undefined,
+            ipTimezone: d.timezone?.id || undefined
+          };
+          this.geoCache.set(cleanIp, { info: geo, expiresAt: now + 6 * 3600 * 1000 });
+          return geo;
+        }
+      }
+    } catch (e) {}
+
+    return {
+      ip: cleanIp,
+      country: cfCountry ? `Negara: ${cfCountry}` : 'Tidak Diketahui',
+      region: '-',
+      city: '-',
+      isp: 'Tidak Teridentifikasi',
+      asn: '-',
+      isVpnOrHosting: false,
+      connectionType: 'Tidak Diketahui'
+    };
+  }
+
+  public buildDeviceInfo(req?: Request, rawFp?: any, ipTimezone?: string): AttackerDeviceInfo | undefined {
+    if (!req && !rawFp) return undefined;
+    const ua = req ? String(req.headers['user-agent'] || 'Unknown').slice(0, 180) : String(rawFp?.userAgent || 'Unknown').slice(0, 180);
+    const devTz = rawFp?.timezone ? String(rawFp.timezone).slice(0, 60) : undefined;
+    let vpnMismatch = false;
+    if (devTz && ipTimezone && devTz.toLowerCase() !== ipTimezone.toLowerCase()) {
+      // Contoh: IP di America/Singapore tapi jam perangkat Asia/Jakarta atau Asia/Makassar
+      vpnMismatch = true;
+    }
+    return {
+      userAgent: ua,
+      timezone: devTz,
+      language: rawFp?.language ? String(rawFp.language).slice(0, 50) : undefined,
+      screen: rawFp?.screen ? String(rawFp.screen).slice(0, 50) : undefined,
+      platform: rawFp?.platform ? String(rawFp.platform).slice(0, 60) : undefined,
+      gpu: rawFp?.gpu ? String(rawFp.gpu).slice(0, 100) : undefined,
+      cores: rawFp?.cores ? String(rawFp.cores).slice(0, 20) : undefined,
+      memory: rawFp?.memory ? String(rawFp.memory).slice(0, 20) : undefined,
+      vpnMismatch
+    };
+  }
+
   public logThreat(
     layer: SecurityLayerName,
     severity: 'low' | 'medium' | 'high' | 'critical',
     source: string,
     action: string,
     details: string,
-    onAlertOwner?: (alertText: string) => void
+    onAlertOwner?: (alertText: string) => void,
+    context?: { req?: Request; deviceFingerprint?: any }
   ) {
+    const cfCountry = context?.req ? (context.req.headers['cf-ipcountry'] as string | undefined) : undefined;
+    const deviceInfo = this.buildDeviceInfo(context?.req, context?.deviceFingerprint);
+
     const entry: SecurityThreatLog = {
       id: 'SEC-' + Math.random().toString(36).substring(2, 9).toUpperCase(),
       timestamp: new Date().toLocaleString('id-ID', { timeZone: 'Asia/Makassar' }),
@@ -293,7 +492,8 @@ class SecurityShieldSuite {
       severity,
       source,
       action,
-      details
+      details,
+      deviceInfo
     };
 
     this.threatLogs.unshift(entry);
@@ -301,7 +501,57 @@ class SecurityShieldSuite {
       this.threatLogs.pop();
     }
 
-    if ((severity === 'high' || severity === 'critical') && onAlertOwner) {
+    // Lakukan pelacakan Geo-IP otomatis dan kirim laporan intelijen lengkap ke Owner
+    const shouldLookupIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(source) || source.includes(':') || source === '127.0.0.1';
+    if (shouldLookupIp) {
+      this.lookupAttackerGeo(source, cfCountry).then((geo) => {
+        entry.geoInfo = geo;
+        if (entry.deviceInfo && geo.ipTimezone && entry.deviceInfo.timezone) {
+          entry.deviceInfo.vpnMismatch = entry.deviceInfo.timezone.toLowerCase() !== geo.ipTimezone.toLowerCase();
+        }
+
+        if ((severity === 'high' || severity === 'critical') && onAlertOwner) {
+          const locStr = [geo.city, geo.region, geo.country].filter(x => x && x !== '-').join(', ') || geo.country;
+          let deviceBlock = '';
+          if (entry.deviceInfo) {
+            deviceBlock += `\n💻 *Perangkat/Browser:* \`${entry.deviceInfo.userAgent.slice(0, 90)}\``;
+            if (entry.deviceInfo.platform || entry.deviceInfo.screen) {
+              deviceBlock += `\n📱 *OS & Layar:* \`${entry.deviceInfo.platform || '-'} | ${entry.deviceInfo.screen || '-'}\``;
+            }
+            if (entry.deviceInfo.timezone) {
+              deviceBlock += `\n🕒 *Zona Waktu Asli Perangkat:* \`${entry.deviceInfo.timezone}\``;
+            }
+            if (entry.deviceInfo.gpu) {
+              deviceBlock += `\n🎮 *GPU Hardware:* \`${entry.deviceInfo.gpu.slice(0, 70)}\``;
+            }
+            if (entry.deviceInfo.vpnMismatch) {
+              deviceBlock += `\n🚨 *JEBAKAN VPN TERDETEKSI:* IP berada di \`${geo.ipTimezone || '-'}\`, tetapi jam fisik perangkat penyerang adalah \`${entry.deviceInfo.timezone}\`!`;
+            }
+          }
+          const mapsLine = geo.mapsUrl ? `\n🗺️ *Titik Peta Lokasi:* [Buka Google Maps](${geo.mapsUrl})` : '';
+
+          const alertMsg = `🛡️ *[HELIOS GEO-INTELLIGENCE ALERT]*\n` +
+            `⚠️ Ancaman Keamanan & Pelacakan Penyerang!\n` +
+            `━━━━━━━━━━━━━━━━━━━━━\n` +
+            `🛡️ Layer: *${layer.toUpperCase()}*\n` +
+            `🚨 Severity: *${severity.toUpperCase()}*\n` +
+            `🎯 IP Penyerang: \`${source}\`\n` +
+            `📍 Lokasi: *${locStr}*\n` +
+            `📡 Provider/ISP: \`${geo.isp} (${geo.asn})\`\n` +
+            `🌐 Jenis Koneksi: *${geo.connectionType}*` +
+            deviceBlock +
+            mapsLine + `\n` +
+            `⚡ Tindakan: *${action}*\n` +
+            `📝 Detail: ${details}\n` +
+            `⏰ Waktu: ${entry.timestamp} WITA\n` +
+            `━━━━━━━━━━━━━━━━━━━━━\n` +
+            `_Sistem keamanan telah menetralkan ancaman & mengunci jejak penyerang secara otomatis._`;
+          try {
+            onAlertOwner(alertMsg);
+          } catch (e) {}
+        }
+      }).catch(() => {});
+    } else if ((severity === 'high' || severity === 'critical') && onAlertOwner) {
       const alertMsg = `🛡️ *[HELIOS INTELLIGENCE ALERT]*\n` +
         `⚠️ Ancaman Keamanan Terdeteksi!\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
@@ -324,10 +574,10 @@ class SecurityShieldSuite {
   // ==========================================
   public egisInspector(req: Request, res: Response, next: NextFunction, alertOwner?: (msg: string) => void) {
     this.stats.inspectedPackets++;
-    const clientIP = (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
+    const clientIP = this.extractClientIP(req);
 
-    // Allow unban and security stats endpoints without quarantine lock
-    const isSecurityAdminPath = req.path.startsWith('/api/security');
+    // Allow unban, auth session check, and security stats endpoints without quarantine lock
+    const isSecurityAdminPath = req.path.startsWith('/api/security') || req.path.startsWith('/api/auth/session');
 
     // 1. Check if IP is currently quarantined by Nyxguard
     const banInfo = this.bannedIPs.get(clientIP);
@@ -347,10 +597,10 @@ class SecurityShieldSuite {
       'sqlmap', 'nikto', 'havij', 'acunetix', 'masscan', 'nmap', 'zgrab', 'dirbuster',
       'gobuster', 'wpscan', 'burpsuite', 'nessus', 'python-requests/2.', 'curl/7.1', 'libwww'
     ];
-    const isWebhookPath = req.path.includes('/webhook') || req.path.includes('/api/digiflazz-webhook');
+    const isWebhookPath = req.path.includes('/webhook') || req.path.includes('/api/digiflazz-webhook') || req.path.includes('/api/digiflazz/webhook');
     if (!isWebhookPath && maliciousUAPatterns.some(p => ua.includes(p))) {
       this.stats.blockedAttacks++;
-      this.recordStrike(clientIP, 'Egis: Malicious Scanner Detected: ' + ua, alertOwner);
+      this.recordStrike(clientIP, 'Egis: Malicious Scanner Detected: ' + ua, alertOwner, req);
       return res.status(403).json({
         success: false,
         error: '[EGIS WAF] Malicious Scanner / Automation tool detected and neutralized.'
@@ -369,7 +619,7 @@ class SecurityShieldSuite {
     // Check Canary Token leak
     if (combinedPayload.includes(this.canaryToken.toLowerCase())) {
       this.canaryTripped = true;
-      this.logThreat('Warden', 'critical', clientIP, 'Canary Token Tripped', 'A confidential canary token was leaked in request payload!', alertOwner);
+      this.logThreat('Warden', 'critical', clientIP, 'Canary Token Tripped', 'A confidential canary token was leaked in request payload!', alertOwner, { req });
     }
 
     const attackPatterns: { name: string; regex: RegExp; severity: 'high' | 'critical' }[] = [
@@ -384,8 +634,8 @@ class SecurityShieldSuite {
     for (const pattern of attackPatterns) {
       if (pattern.regex.test(combinedPayload)) {
         this.stats.blockedAttacks++;
-        this.recordStrike(clientIP, `Egis: ${pattern.name} in request`, alertOwner);
-        this.logThreat('Egis', pattern.severity, clientIP, `Blocked ${pattern.name}`, `URL: ${req.originalUrl.substring(0, 100)}`, alertOwner);
+        this.recordStrike(clientIP, `Egis: ${pattern.name} in request`, alertOwner, req);
+        this.logThreat('Egis', pattern.severity, clientIP, `Blocked ${pattern.name}`, `URL: ${req.originalUrl.substring(0, 100)}`, alertOwner, { req });
         return res.status(403).json({
           success: false,
           error: `[EGIS FIREWALL] Akses ditolak: Percobaan serangan (${pattern.name}) berhasil dicegah.`
@@ -399,7 +649,7 @@ class SecurityShieldSuite {
   // ==========================================
   // LAYER 2: NYXGUARD (Intelligent Quarantining & Bot Defender)
   // ==========================================
-  public recordStrike(ip: string, reason: string, alertOwner?: (msg: string) => void) {
+  public recordStrike(ip: string, reason: string, alertOwner?: (msg: string) => void, req?: Request) {
     const existing = this.bannedIPs.get(ip) || { until: 0, reason, strikes: 0 };
     existing.strikes += 1;
     existing.reason = reason;
@@ -417,7 +667,8 @@ class SecurityShieldSuite {
       ip,
       `Quarantined (${Math.round(banDurationMs / 60000)} menit)`,
       `Strike #${existing.strikes}: ${reason}`,
-      alertOwner
+      alertOwner,
+      { req }
     );
   }
 
