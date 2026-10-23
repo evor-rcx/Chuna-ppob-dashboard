@@ -75,6 +75,8 @@ export default function App() {
       fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
       sessionStorage.removeItem('chuna_auth');
       sessionStorage.removeItem('chuna_auth_token');
+      localStorage.removeItem('chuna_auth');
+      localStorage.removeItem('chuna_auth_token');
       setIsAuthenticated(false);
     };
     window.addEventListener('logout', handleLogout as EventListener);
@@ -89,17 +91,21 @@ export default function App() {
         if (data && data.authenticated) {
           if (data.token) {
             sessionStorage.setItem('chuna_auth_token', data.token);
+            localStorage.setItem('chuna_auth_token', data.token);
           }
           sessionStorage.setItem('chuna_auth', 'true');
+          localStorage.setItem('chuna_auth', 'true');
           setIsAuthenticated(true);
         } else {
           sessionStorage.removeItem('chuna_auth');
           sessionStorage.removeItem('chuna_auth_token');
+          localStorage.removeItem('chuna_auth');
+          localStorage.removeItem('chuna_auth_token');
           setIsAuthenticated(false);
         }
       } catch (e) {
-        const auth = sessionStorage.getItem('chuna_auth');
-        const token = sessionStorage.getItem('chuna_auth_token');
+        const auth = sessionStorage.getItem('chuna_auth') || localStorage.getItem('chuna_auth');
+        const token = sessionStorage.getItem('chuna_auth_token') || localStorage.getItem('chuna_auth_token');
         if (auth === 'true' && token) {
           setIsAuthenticated(true);
         }
@@ -111,8 +117,10 @@ export default function App() {
   const handleLogin = (token?: string) => {
     if (token) {
       sessionStorage.setItem('chuna_auth_token', token);
+      localStorage.setItem('chuna_auth_token', token);
     }
     sessionStorage.setItem('chuna_auth', 'true');
+    localStorage.setItem('chuna_auth', 'true');
     setIsAuthenticated(true);
   };
 

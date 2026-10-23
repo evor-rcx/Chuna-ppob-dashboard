@@ -339,7 +339,7 @@ class SecurityShieldSuite {
     if (!ip || ip === 'unknown' || ip === '127.0.0.1' || ip === '::1' || ip === 'localhost') return true;
     if (ip.startsWith('10.') || ip.startsWith('192.168.') || ip.startsWith('169.254.')) return true;
     if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(ip)) return true;
-    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip) && !ip.includes(':')) return true;
+      if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip) && !ip.includes(':')) return true;
     return false;
   }
 
@@ -366,97 +366,133 @@ class SecurityShieldSuite {
     }
 
     const vpnHostingKeywords = /(vpn|proxy|tor|hosting|datacenter|cloud|digitalocean|cloudflare|amazonaws|aws|google cloud|linode|vultr|choopa|ovh|hetzner|m247|datacamp|contabo|leaseweb|alibaba|tencent|microsoft)/i;
-    const cellularCarrierKeywords = /(telkomsel|telekomunikasi selular|indosat|ooredoo|xl axiata|axis|hutchison|three|tri indonesia|smartfren|sampoerna telekomunikasi)/i;
+    const cellularCarrierKeywords = /(telkomsel|telekomunikasi selular|as23693|indosat|ooredoo|as4761|xl axiata|axis|as24203|hutchison|three|tri indonesia|as45727|smartfren|as38511|sampoerna telekomunikasi)/i;
 
-    try {
+    const fetchWithTimeout = async (url: string, timeoutMs = 3200) => {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3500);
-      const res = await fetch(
-        `http://ip-api.com/json/${encodeURIComponent(cleanIp)}?fields=status,message,country,countryCode,regionName,city,lat,lon,timezone,isp,org,as,mobile,proxy,hosting,query`,
-        { signal: controller.signal }
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const r = await fetch(url, { signal: controller.signal });
+        clearTimeout(timer);
+        if (!r.ok) return null;
+        return await r.json();
+      } catch {
+        clearTimeout(timer);
+        return null;
+      }
+    };
+
+    // Multi-provider Geo-IP paralel (ipwho.is + ipinfo.io + ip-api.com) untuk akurasi sub-regional terbaik (misal: Bontang vs Samarinda)
+    const [ipwhoData, ipinfoData, ipapiData] = await Promise.all([
+      fetchWithTimeout(`https://ipwho.is/${encodeURIComponent(cleanIp)}`),
+      fetchWithTimeout(`https://ipinfo.io/${encodeURIComponent(cleanIp)}/json`),
+      fetchWithTimeout(`http://ip-api.com/json/${encodeURIComponent(cleanIp)}?fields=status,message,country,countryCode,regionName,city,zip,lat,lon,timezone,isp,org,as,mobile,proxy,hosting,query`)
+    ]);
+
+    const validIpwho = ipwhoData && ipwhoData.success !== false ? ipwhoData : null;
+    const validIpinfo = ipinfoData && ipinfoData.ip && !ipinfoData.bogon ? ipinfoData : null;
+    const validIpapi = ipapiData && ipapiData.status === 'success' ? ipapiData : null;
+
+    if (validIpwho || validIpinfo || validIpapi) {
+      // 1. Gabungkan informasi ISP & ASN dari ketiga sumber
+      const ispCandidates = [
+        validIpapi?.isp,
+        validIpapi?.org,
+        validIpwho?.connection?.isp,
+        validIpwho?.connection?.org,
+        validIpinfo?.org?.replace(/^AS\d+\s+/i, '')
+      ].filter(Boolean);
+      const uniqueIsp = Array.from(new Set(ispCandidates));
+      const ispCombined = uniqueIsp.slice(0, 2).join(' / ') || 'Unknown ISP';
+
+      const asnStr =
+        validIpapi?.as ||
+        (validIpinfo?.org && /^AS\d+/i.test(validIpinfo.org) ? validIpinfo.org : '') ||
+        (validIpwho?.connection?.asn ? `AS${validIpwho.connection.asn} ${validIpwho.connection.isp || ''}`.trim() : '') ||
+        '-';
+
+      // 2. Prioritas Utama: Deteksi Operator Seluler Resmi Indonesia (Telkomsel AS23693, Indosat, XL, Tri, Smartfren)
+      // Meskipun ip-api mengirim hosting:true/proxy:true, jika ISP/ASN adalah operator seluler resmi maka WAJIB terbaca Jaringan Seluler!
+      const isCellularCarrier = Boolean(
+        validIpapi?.mobile ||
+        cellularCarrierKeywords.test(ispCombined) ||
+        cellularCarrierKeywords.test(asnStr)
       );
-      clearTimeout(timeout);
 
-      if (res.ok) {
-        const data: any = await res.json();
-        if (data && data.status === 'success') {
-          const ispCombined = [data.isp, data.org].filter(Boolean).join(' / ') || 'Unknown ISP';
-          const asnStr = data.as || '-';
-          const isCellularCarrier = Boolean(data.mobile || cellularCarrierKeywords.test(ispCombined) || cellularCarrierKeywords.test(asnStr));
-          const isDatacenterOrVpn = Boolean(
-            data.hosting ||
+      const isDatacenterOrVpn = isCellularCarrier
+        ? false
+        : Boolean(
+            validIpapi?.hosting ||
+            validIpapi?.proxy ||
             vpnHostingKeywords.test(ispCombined) ||
-            vpnHostingKeywords.test(asnStr) ||
-            (data.proxy && !isCellularCarrier)
+            vpnHostingKeywords.test(asnStr)
           );
-          const connType = isDatacenterOrVpn
-            ? '⚠️ VPN / Proxy / Server Hosting (VPS)'
-            : isCellularCarrier
-            ? '📱 Jaringan Seluler (Mobile Data - CGNAT)'
-            : '🏠 ISP Rumahan / Fixed Broadband';
-          const lat = typeof data.lat === 'number' ? data.lat : undefined;
-          const lon = typeof data.lon === 'number' ? data.lon : undefined;
 
-          const geo: AttackerGeoInfo = {
-            ip: cleanIp,
-            country: `${data.country || 'Unknown'} (${data.countryCode || cfCountry || '-'})`,
-            region: data.regionName || '-',
-            city: data.city || '-',
-            isp: ispCombined,
-            asn: asnStr,
-            isVpnOrHosting: isDatacenterOrVpn,
-            connectionType: connType,
-            lat,
-            lon,
-            mapsUrl: lat !== undefined && lon !== undefined ? `https://www.google.com/maps/search/?api=1&query=${lat},${lon}` : undefined,
-            ipTimezone: data.timezone || undefined
-          };
-          this.geoCache.set(cleanIp, { info: geo, expiresAt: now + 6 * 3600 * 1000 });
-          return geo;
-        }
+      const connType = isCellularCarrier
+        ? '📱 Jaringan Seluler (Mobile Data - CGNAT)'
+        : isDatacenterOrVpn
+        ? '⚠️ VPN / Proxy / Server Hosting (VPS)'
+        : '🏠 ISP Rumahan / Fixed Broadband';
+
+      // 3. Pilih Kota, Kode Pos, dan Koordinat Paling Akurat (Prioritaskan ipinfo.io & ipwho.is karena akurat hingga level Kota/Kabupaten seperti Bontang)
+      let rawCity = validIpinfo?.city || validIpwho?.city || validIpapi?.city || '-';
+      const postal = validIpinfo?.postal || validIpwho?.postal || validIpapi?.zip || '';
+      if (rawCity && rawCity !== '-' && postal) {
+        rawCity = `${rawCity} (Kode Pos: ${postal})`;
       }
-    } catch (e) {}
 
-    // Fallback ke ipwho.is jika ip-api.com gagal/limit
-    try {
-      const controller2 = new AbortController();
-      const timeout2 = setTimeout(() => controller2.abort(), 3500);
-      const res2 = await fetch(`https://ipwho.is/${encodeURIComponent(cleanIp)}`, { signal: controller2.signal });
-      clearTimeout(timeout2);
+      const regionName =
+        (validIpinfo?.region && validIpinfo.region !== 'Kalimantan' ? validIpinfo.region : '') ||
+        validIpapi?.regionName ||
+        validIpwho?.region ||
+        '-';
 
-      if (res2.ok) {
-        const d: any = await res2.json();
-        if (d && d.success !== false) {
-          const ispName = d.connection?.isp || d.connection?.org || 'Unknown ISP';
-          const asnStr = d.connection?.asn ? `AS${d.connection.asn}` : '-';
-          const isCellularCarrier = Boolean(cellularCarrierKeywords.test(ispName));
-          const isVpn = Boolean(!isCellularCarrier && vpnHostingKeywords.test(ispName));
-          const lat = typeof d.latitude === 'number' ? d.latitude : undefined;
-          const lon = typeof d.longitude === 'number' ? d.longitude : undefined;
+      const countryName = validIpwho?.country || validIpapi?.country || validIpinfo?.country || 'Unknown';
+      const countryCode = validIpwho?.country_code || validIpapi?.countryCode || validIpinfo?.country || cfCountry || '-';
 
-          const geo: AttackerGeoInfo = {
-            ip: cleanIp,
-            country: `${d.country || 'Unknown'} (${d.country_code || cfCountry || '-'})`,
-            region: d.region || '-',
-            city: d.city || '-',
-            isp: ispName,
-            asn: asnStr,
-            isVpnOrHosting: isVpn,
-            connectionType: isVpn
-              ? '⚠️ VPN / Proxy / Server Hosting (VPS)'
-              : isCellularCarrier
-              ? '📱 Jaringan Seluler (Mobile Data - CGNAT)'
-              : '🏠 ISP / Jaringan Reguler',
-            lat,
-            lon,
-            mapsUrl: lat !== undefined && lon !== undefined ? `https://www.google.com/maps/search/?api=1&query=${lat},${lon}` : undefined,
-            ipTimezone: d.timezone?.id || undefined
-          };
-          this.geoCache.set(cleanIp, { info: geo, expiresAt: now + 6 * 3600 * 1000 });
-          return geo;
+      let lat: number | undefined;
+      let lon: number | undefined;
+
+      if (typeof validIpwho?.latitude === 'number' && typeof validIpwho?.longitude === 'number') {
+        lat = Number(validIpwho.latitude.toFixed(6));
+        lon = Number(validIpwho.longitude.toFixed(6));
+      } else if (typeof validIpinfo?.loc === 'string' && validIpinfo.loc.includes(',')) {
+        const [latStr, lonStr] = validIpinfo.loc.split(',');
+        const parsedLat = parseFloat(latStr);
+        const parsedLon = parseFloat(lonStr);
+        if (!isNaN(parsedLat) && !isNaN(parsedLon)) {
+          lat = parsedLat;
+          lon = parsedLon;
         }
+      } else if (typeof validIpapi?.lat === 'number' && typeof validIpapi?.lon === 'number') {
+        lat = validIpapi.lat;
+        lon = validIpapi.lon;
       }
-    } catch (e) {}
+
+      const ipTimezone =
+        validIpinfo?.timezone ||
+        validIpwho?.timezone?.id ||
+        validIpapi?.timezone ||
+        undefined;
+
+      const geo: AttackerGeoInfo = {
+        ip: cleanIp,
+        country: `${countryName} (${countryCode})`,
+        region: regionName,
+        city: rawCity,
+        isp: ispCombined,
+        asn: asnStr,
+        isVpnOrHosting: isDatacenterOrVpn,
+        connectionType: connType,
+        lat,
+        lon,
+        mapsUrl: lat !== undefined && lon !== undefined ? `https://www.google.com/maps/search/?api=1&query=${lat},${lon}` : undefined,
+        ipTimezone
+      };
+
+      this.geoCache.set(cleanIp, { info: geo, expiresAt: now + 6 * 3600 * 1000 });
+      return geo;
+    }
 
     return {
       ip: cleanIp,
@@ -557,10 +593,10 @@ class SecurityShieldSuite {
           const locStr = [geo.city, geo.region, geo.country].filter(x => x && x !== '-').join(', ') || geo.country;
           const hasRealGps = entry.deviceInfo?.gpsLat !== undefined && entry.deviceInfo?.gpsLon !== undefined;
 
-          // Prioritas 1: Koordinat GPS Satelit Fisik Perangkat (Akurat Meter) jika tersedia; Prioritas 2: Titik Sentral Gateway ISP
+          // Hanya kirim Share Location Peta Interaktif Telegram jika Koordinat GPS Satelit Fisik perangkat berhasil tertangkap
           const primaryCoords = hasRealGps
             ? { lat: entry.deviceInfo!.gpsLat!, lon: entry.deviceInfo!.gpsLon! }
-            : (geo.lat !== undefined && geo.lon !== undefined ? { lat: geo.lat, lon: geo.lon } : undefined);
+            : undefined;
 
           let locationBlock = '';
           if (hasRealGps) {
@@ -576,6 +612,7 @@ class SecurityShieldSuite {
               locationBlock += `\n🧭 *Koordinat Sentral ISP:* \`${geo.lat}, ${geo.lon}\``;
               locationBlock += `\n📍 *Pin Merah Peta ISP:* [Tancapkan Pin Merah di Google Maps](${geo.mapsUrl})`;
             }
+            locationBlock += `\n⚠️ *Keterangan Lokasi:* _Pusat Sentral/Gerbang Provinsi ISP (Bukan Titik GPS Fisik HP karena pelaku memakai cURL/Script)_`;
           }
 
           let forensicBlock = `\n\n🚔 *[DATA BUKTI FORENSIK LAPORAN POLISI / CYBER CRIME]*`;

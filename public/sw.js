@@ -1,15 +1,16 @@
-self.addEventListener('install', (e) => {
+self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (e) => {
-  e.waitUntil(self.clients.claim());
-});
-
-self.addEventListener('fetch', (e) => {
-  e.respondWith(
-    fetch(e.request).catch(() => {
-      return new Response('Network error occurred.');
+  e.waitUntil(
+    self.registration.unregister().then(() => self.clients.matchAll()).then((clients) => {
+      clients.forEach((client) => {
+        if (client && 'navigate' in client) {
+          // Biarkan browser menangani navigasi langsung tanpa intervensi SW
+        }
+      });
     })
   );
 });
+

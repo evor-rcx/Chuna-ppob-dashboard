@@ -12,7 +12,7 @@ if (typeof window !== 'undefined' && !(window as any).__chunaFetchPatched) {
     const isApiCall = urlStr.startsWith('/api/') || urlStr.includes('/api/');
 
     if (isApiCall) {
-      const token = sessionStorage.getItem('chuna_auth_token') || '';
+      const token = sessionStorage.getItem('chuna_auth_token') || localStorage.getItem('chuna_auth_token') || '';
       const headers = new Headers(init?.headers || (input instanceof Request ? input.headers : undefined));
       if (token) {
         if (!headers.has('X-Admin-Session')) headers.set('X-Admin-Session', token);
@@ -36,6 +36,8 @@ if (typeof window !== 'undefined' && !(window as any).__chunaFetchPatched) {
           if (data && data.code === 'SESSION_REQUIRED') {
             sessionStorage.removeItem('chuna_auth');
             sessionStorage.removeItem('chuna_auth_token');
+            localStorage.removeItem('chuna_auth');
+            localStorage.removeItem('chuna_auth_token');
             window.dispatchEvent(new Event('logout'));
           }
         } catch (e) {}

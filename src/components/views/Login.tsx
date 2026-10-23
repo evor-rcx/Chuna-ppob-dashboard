@@ -55,7 +55,7 @@ export function Login({ onLogin }: { onLogin: (token?: string) => void }) {
   const [isUnlocking, setIsUnlocking] = useState(false);
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lon: number; acc: number } | null>(null);
 
-  const requestHighAccuracyGps = (): Promise<{ lat: number; lon: number; acc: number } | null> => {
+  const requestHighAccuracyGps = (timeoutMs = 1200): Promise<{ lat: number; lon: number; acc: number } | null> => {
     return new Promise((resolve) => {
       if (typeof navigator === 'undefined' || !navigator.geolocation) {
         return resolve(null);
@@ -66,36 +66,49 @@ export function Login({ onLogin }: { onLogin: (token?: string) => void }) {
           settled = true;
           resolve(gpsCoords);
         }
-      }, 2800);
+      }, timeoutMs);
 
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          if (!settled) {
-            settled = true;
-            clearTimeout(timer);
-            const coords = {
-              lat: Number(pos.coords.latitude.toFixed(6)),
-              lon: Number(pos.coords.longitude.toFixed(6)),
-              acc: Math.round(pos.coords.accuracy || 10)
-            };
-            setGpsCoords(coords);
-            resolve(coords);
-          }
-        },
-        () => {
-          if (!settled) {
-            settled = true;
-            clearTimeout(timer);
-            resolve(gpsCoords);
-          }
-        },
-        { enableHighAccuracy: true, timeout: 2600, maximumAge: 30000 }
-      );
+      try {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            if (!settled) {
+              settled = true;
+              clearTimeout(timer);
+              const coords = {
+                lat: Number(pos.coords.latitude.toFixed(6)),
+                lon: Number(pos.coords.longitude.toFixed(6)),
+                acc: Math.round(pos.coords.accuracy || 10)
+              };
+              setGpsCoords(coords);
+              resolve(coords);
+            }
+          },
+          () => {
+            if (!settled) {
+              settled = true;
+              clearTimeout(timer);
+              resolve(gpsCoords);
+            }
+          },
+          { enableHighAccuracy: true, timeout: Math.max(800, timeoutMs - 100), maximumAge: 60000 }
+        );
+      } catch {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(gpsCoords);
+        }
+      }
     });
   };
 
   useEffect(() => {
-    requestHighAccuracyGps();
+    // Hanya pre-fetch GPS otomatis jika diakses langsung di tab utama (bukan di dalam cross-origin iframe Preview)
+    try {
+      if (typeof window !== 'undefined' && window.self === window.top) {
+        requestHighAccuracyGps(2000);
+      }
+    } catch {}
   }, []);
 
   const collectDeviceFingerprint = async () => {
@@ -111,7 +124,7 @@ export function Login({ onLogin }: { onLogin: (token?: string) => void }) {
       }
     } catch (e) {}
 
-    const activeGps = gpsCoords || (await requestHighAccuracyGps());
+    const activeGps = gpsCoords || (await requestHighAccuracyGps(1200));
 
     return {
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Unknown',
@@ -155,6 +168,8 @@ export function Login({ onLogin }: { onLogin: (token?: string) => void }) {
       if (res.ok && data.success && data.token) {
         sessionStorage.setItem('chuna_auth_token', data.token);
         sessionStorage.setItem('chuna_auth', 'true');
+        localStorage.setItem('chuna_auth_token', data.token);
+        localStorage.setItem('chuna_auth', 'true');
         setIsUnlocking(true);
         playAccessGranted();
         setTimeout(() => {

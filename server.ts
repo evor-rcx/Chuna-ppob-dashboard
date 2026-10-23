@@ -3281,7 +3281,9 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
     crossOriginEmbedderPolicy: false,
     frameguard: false,
     crossOriginResourcePolicy: false,
-    crossOriginOpenerPolicy: false
+    crossOriginOpenerPolicy: false,
+    strictTransportSecurity: false,
+    originAgentCluster: false
   }));
 
   // 2. Body Parser dengan Raw Body Capture untuk Verifikasi HMAC Webhook
