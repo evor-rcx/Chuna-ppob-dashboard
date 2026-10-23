@@ -47,22 +47,47 @@ const SakuraRain = () => {
   );
 };
 
-export function Login({ onLogin }: { onLogin: () => void }) {
+export function Login({ onLogin }: { onLogin: (token?: string) => void }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUnlocking, setIsUnlocking] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (username === 'chuna' && password === 'Chuna_loli1904') {
-      setIsUnlocking(true);
-      playAccessGranted();
-      setTimeout(() => {
-        onLogin();
-      }, 1000);
-    } else {
-      setError('Ara ara~ Username atau password salah ya!');
+    if (isSubmitting || isUnlocking) return;
+    if (!username.trim() || !password) {
+      setError('Masukkan username dan password terlebih dahulu!');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError('');
+
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username.trim(), password })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success && data.token) {
+        sessionStorage.setItem('chuna_auth_token', data.token);
+        sessionStorage.setItem('chuna_auth', 'true');
+        setIsUnlocking(true);
+        playAccessGranted();
+        setTimeout(() => {
+          onLogin(data.token);
+        }, 1000);
+      } else {
+        setError(data.error || 'Ara ara~ Username atau password salah ya!');
+      }
+    } catch (err) {
+      setError('Gagal menghubungi server autentikasi. Coba lagi.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -162,9 +187,10 @@ export function Login({ onLogin }: { onLogin: () => void }) {
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 type="submit"
-                className="w-full bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-400 hover:to-purple-500 text-white font-bold py-4 rounded-2xl transition-all shadow-[0_0_20px_rgba(236,72,153,0.4)] hover:shadow-[0_0_30px_rgba(236,72,153,0.6)] cursor-pointer tracking-widest uppercase text-sm mt-4"
+                disabled={isSubmitting}
+                className="w-full bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-400 hover:to-purple-500 disabled:opacity-60 text-white font-bold py-4 rounded-2xl transition-all shadow-[0_0_20px_rgba(236,72,153,0.4)] hover:shadow-[0_0_30px_rgba(236,72,153,0.6)] cursor-pointer tracking-widest uppercase text-sm mt-4"
               >
-                Masuk
+                {isSubmitting ? 'Memverifikasi...' : 'Masuk'}
               </motion.button>
               
               <div className="text-center mt-6">

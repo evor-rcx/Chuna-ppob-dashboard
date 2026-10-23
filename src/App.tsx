@@ -71,19 +71,47 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const handleLogout = () => setIsAuthenticated(false);
+    const handleLogout = () => {
+      fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+      sessionStorage.removeItem('chuna_auth');
+      sessionStorage.removeItem('chuna_auth_token');
+      setIsAuthenticated(false);
+    };
     window.addEventListener('logout', handleLogout as EventListener);
     return () => window.removeEventListener('logout', handleLogout as EventListener);
   }, []);
 
   useEffect(() => {
-    const auth = sessionStorage.getItem('chuna_auth');
-    if (auth === 'true') {
-      setIsAuthenticated(true);
-    }
+    const verifyServerSession = async () => {
+      try {
+        const res = await fetch('/api/auth/session');
+        const data = await res.json();
+        if (data && data.authenticated) {
+          if (data.token) {
+            sessionStorage.setItem('chuna_auth_token', data.token);
+          }
+          sessionStorage.setItem('chuna_auth', 'true');
+          setIsAuthenticated(true);
+        } else {
+          sessionStorage.removeItem('chuna_auth');
+          sessionStorage.removeItem('chuna_auth_token');
+          setIsAuthenticated(false);
+        }
+      } catch (e) {
+        const auth = sessionStorage.getItem('chuna_auth');
+        const token = sessionStorage.getItem('chuna_auth_token');
+        if (auth === 'true' && token) {
+          setIsAuthenticated(true);
+        }
+      }
+    };
+    verifyServerSession();
   }, []);
 
-  const handleLogin = () => {
+  const handleLogin = (token?: string) => {
+    if (token) {
+      sessionStorage.setItem('chuna_auth_token', token);
+    }
     sessionStorage.setItem('chuna_auth', 'true');
     setIsAuthenticated(true);
   };

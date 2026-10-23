@@ -3254,45 +3254,7 @@ const app = express();
 // Menggunakan filter IP internal untuk trust proxy agar aman dari spoofing X-Forwarded-For
 app.set('trust proxy', 'loopback, linklocal, uniquelocal');
 
-  // Cyber Security Measures (Anti-hacker, Anti-bot)
-  app.use(helmet({
-    contentSecurityPolicy: false, // disabled for some react apps if it breaks inline scripts, adjust if needed
-    crossOriginEmbedderPolicy: false
-  }));
-  
-  // Basic rate limiting to prevent brute force & bot attacks
-  const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 1000, // limit each IP to 1000 requests per windowMs
-    message: { success: false, error: "Terlalu banyak request dari IP ini, coba lagi nanti. (Anti-Bot Protection)" },
-    standardHeaders: true,
-    legacyHeaders: false,
-    skip: (req) => {
-      // Bebaskan webhook dari rate limit agar notifikasi dari Digiflazz tidak terblokir
-      return req.path.includes('/webhook') || req.path.includes('/api/digiflazz-webhook');
-    }
-  });
-  app.use(limiter);
-  
-  // Specific stricter rate limit for API endpoints
-  const apiLimiter = rateLimit({
-    windowMs: 5 * 60 * 1000, // 5 minutes
-    max: 200, 
-    message: { success: false, error: "Limit request API tercapai. (Anti-DDoS Protection)" },
-    skip: (req) => {
-      // Bebaskan webhook dari rate limit
-      return req.path.includes('/webhook') || req.path.includes('/api/digiflazz-webhook');
-    }
-  });
-  app.use("/api/", apiLimiter);
-
-  app.get("/api/dump", (req, res) => {
-    res.json({ registeredUsers, dbRegistered: db.registeredUsers });
-  });
   const PORT = 3000;
-
-  app.use(express.json({ limit: '10mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
   // =========================================================================
   // 5-LAYER SUPERFORTRESS CYBER DEFENSE SUITE (Egis, Nyxguard, Anchor, Purge, Helios)
@@ -3306,6 +3268,325 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
       }
     } catch (e) {}
   };
+
+  // 1. Helmet Security Headers (Posisi Paling Atas)
+  app.use(helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false
+  }));
+
+  // 2. Body Parser dengan Raw Body Capture untuk Verifikasi HMAC Webhook
+  app.use(express.json({
+    limit: '25mb',
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf.toString('utf8');
+    }
+  }));
+  app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+
+  // 3. Layer 1 & 2: EGIS WAF Inspector & NYXGUARD Sentry (Berjalan sebelum rute API apa pun)
+  app.use((req, res, next) => {
+    securitySuite.egisInspector(req, res, next, triggerHeliosOwnerAlert);
+  });
+
+  // 4. Layer 4: PURGE - Prototype Pollution & Sensitive Payload Redaction Middleware
+  app.use((req, res, next) => {
+    if (req.body && typeof req.body === 'object') {
+      delete (req.body as any)['__proto__'];
+      delete (req.body as any)['constructor'];
+      delete (req.body as any)['prototype'];
+    }
+    next();
+  });
+
+  // 5. Rate Limiting (Anti-Bot & Anti-DDoS)
+  const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 1000,
+    message: { success: false, error: "Terlalu banyak request dari IP ini, coba lagi nanti. (Anti-Bot Protection)" },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => {
+      return req.path.includes('/webhook') || req.path.includes('/api/digiflazz-webhook') || req.path.includes('/api/digiflazz/webhook');
+    }
+  });
+  app.use(limiter);
+
+  const apiLimiter = rateLimit({
+    windowMs: 5 * 60 * 1000, // 5 minutes
+    max: 300,
+    message: { success: false, error: "Limit request API tercapai. (Anti-DDoS Protection)" },
+    skip: (req) => {
+      return req.path.includes('/webhook') || req.path.includes('/api/digiflazz-webhook') || req.path.includes('/api/digiflazz/webhook');
+    }
+  });
+  app.use("/api/", apiLimiter);
+
+  // =========================================================================
+  // SERVER-SIDE ADMIN AUTHENTICATION & SESSION GUARD (ZERO-GAP API PROTECTION)
+  // =========================================================================
+  interface AdminSessionInfo {
+    token: string;
+    createdAt: number;
+    expiresAt: number;
+    ip: string;
+    userAgent: string;
+  }
+
+  const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 Jam
+  const adminSessions = new Map<string, AdminSessionInfo>();
+
+  // Muat sesi aktif dari db jika ada agar tidak ter-logout saat PM2 restart
+  if (db.adminSessions && Array.isArray(db.adminSessions)) {
+    const now = Date.now();
+    for (const s of db.adminSessions) {
+      if (s && s.token && s.expiresAt > now) {
+        adminSessions.set(s.token, s);
+      }
+    }
+  }
+
+  const persistAdminSessions = () => {
+    try {
+      const now = Date.now();
+      for (const [k, v] of adminSessions.entries()) {
+        if (v.expiresAt <= now) adminSessions.delete(k);
+      }
+      db.adminSessions = Array.from(adminSessions.values());
+      writeDB(db);
+    } catch (e) {}
+  };
+
+  const parseCookies = (cookieHeader?: string): Record<string, string> => {
+    const list: Record<string, string> = {};
+    if (!cookieHeader) return list;
+    cookieHeader.split(';').forEach((cookie) => {
+      const parts = cookie.split('=');
+      const key = parts.shift()?.trim();
+      if (key) {
+        list[key] = decodeURIComponent(parts.join('=').trim());
+      }
+    });
+    return list;
+  };
+
+  const extractSessionToken = (req: express.Request): string => {
+    const cookies = parseCookies(req.headers.cookie);
+    if (cookies['chuna_admin_session']) {
+      return cookies['chuna_admin_session'];
+    }
+    const headerToken = req.headers['x-admin-session'];
+    if (typeof headerToken === 'string' && headerToken.trim()) {
+      return headerToken.trim();
+    }
+    const authHeader = req.headers['authorization'];
+    if (typeof authHeader === 'string' && authHeader.toLowerCase().startsWith('bearer ')) {
+      return authHeader.slice(7).trim();
+    }
+    if (typeof req.query?.token === 'string' && req.query.token.trim()) {
+      return req.query.token.trim();
+    }
+    return '';
+  };
+
+  const isSessionTokenValid = (token: string): boolean => {
+    if (!token || token.length < 32) return false;
+    const session = adminSessions.get(token);
+    if (!session) return false;
+    if (Date.now() > session.expiresAt) {
+      adminSessions.delete(token);
+      return false;
+    }
+    return true;
+  };
+
+  // Brute-force tracker khusus untuk /api/auth/login (Maks 5x gagal per IP dalam 15 menit)
+  const loginBruteForceMap = new Map<string, { count: number; firstAttemptAt: number; lockedUntil: number }>();
+  const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+  const LOGIN_MAX_ATTEMPTS = 5;
+
+  app.post("/api/auth/login", (req, res) => {
+    const { username, password } = req.body || {};
+    const clientIp = req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.socket.remoteAddress || '127.0.0.1';
+    const now = Date.now();
+
+    // 1. Cek Whitelist IP Admin jika diaktifkan
+    if (!securitySuite.auditCheckAdminIPAllowed(clientIp)) {
+      securitySuite.logThreat('Audit', 'critical', clientIp, 'Admin Login Blocked', 'Login Dashboard ditolak: IP tidak terdaftar di Whitelist IP Admin.');
+      return res.status(403).json({
+        success: false,
+        error: 'Akses Ditolak: IP Anda tidak terdaftar dalam Whitelist IP Admin Resmi.'
+      });
+    }
+
+    // 2. Cek Brute-Force Lockout per IP (5x gagal dalam 15 menit)
+    let bfRecord = loginBruteForceMap.get(clientIp);
+    if (bfRecord) {
+      if (bfRecord.lockedUntil > now) {
+        const remainingMin = Math.max(1, Math.ceil((bfRecord.lockedUntil - now) / 60000));
+        return res.status(429).json({
+          success: false,
+          error: `Terlalu banyak percobaan login gagal! IP Anda diblokir sementara selama ${remainingMin} menit.`
+        });
+      }
+      if (now - bfRecord.firstAttemptAt > LOGIN_WINDOW_MS) {
+        loginBruteForceMap.delete(clientIp);
+        bfRecord = undefined;
+      }
+    }
+
+    const expectedUsername = process.env.ADMIN_USERNAME || 'chuna';
+    const expectedPassword = process.env.ADMIN_LOGIN_PASSWORD || 'Chuna_loli1904';
+
+    const isUserValid = securitySuite.wardenTimingSafeEqual(String(username || '').trim(), expectedUsername);
+    const isPassValid = securitySuite.wardenTimingSafeEqual(String(password || ''), expectedPassword);
+
+    if (!isUserValid || !isPassValid) {
+      const current = bfRecord || { count: 0, firstAttemptAt: now, lockedUntil: 0 };
+      current.count += 1;
+
+      if (current.count >= LOGIN_MAX_ATTEMPTS) {
+        current.lockedUntil = now + LOGIN_WINDOW_MS;
+        loginBruteForceMap.set(clientIp, current);
+        securitySuite.logThreat(
+          'Warden',
+          'critical',
+          clientIp,
+          'Dashboard Brute-Force Lockout',
+          `IP ${clientIp} diblokir sementara (15 menit) karena 5x gagal login berturut-turut ke Dashboard Utama.`
+        );
+        triggerHeliosOwnerAlert(
+          `🚨 *PERINGATAN KEAMANAN E4 STORE*\n\n` +
+          `Terdeteksi *5x percobaan Login Gagal (Brute-Force)* pada Dashboard Utama!\n` +
+          `• *IP Penyerang:* \`${clientIp}\`\n` +
+          `• *Username Dicoba:* \`${String(username || '-').slice(0, 30)}\`\n` +
+          `• *Tindakan:* IP dikunci otomatis selama 15 menit.`
+        );
+        return res.status(429).json({
+          success: false,
+          error: 'IP Anda dikunci selama 15 menit karena 5x percobaan login gagal berturut-turut! Notifikasi keamanan telah dikirim ke Owner.'
+        });
+      }
+
+      loginBruteForceMap.set(clientIp, current);
+      const remaining = Math.max(0, LOGIN_MAX_ATTEMPTS - current.count);
+      securitySuite.logThreat(
+        'Warden',
+        'medium',
+        clientIp,
+        'Failed Dashboard Login',
+        `Percobaan login gagal ke Dashboard Utama (Sisa percobaan: ${remaining}).`
+      );
+      return res.status(401).json({
+        success: false,
+        error: `Ara ara~ Username atau password salah ya! (Sisa percobaan aman: ${remaining}x)`
+      });
+    }
+
+    // Login sukses: bersihkan catatan gagal & buat token kriptografi 256-bit
+    loginBruteForceMap.delete(clientIp);
+    const sessionToken = crypto.randomBytes(32).toString('hex');
+    const sessionInfo: AdminSessionInfo = {
+      token: sessionToken,
+      createdAt: now,
+      expiresAt: now + SESSION_TTL_MS,
+      ip: clientIp,
+      userAgent: String(req.headers['user-agent'] || 'Unknown').slice(0, 180)
+    };
+    adminSessions.set(sessionToken, sessionInfo);
+    persistAdminSessions();
+
+    securitySuite.auditRecordAction('admin', 'DASHBOARD_LOGIN', 'Main Login Gate', null, 'SESSION_CREATED', clientIp);
+
+    res.setHeader(
+      'Set-Cookie',
+      `chuna_admin_session=${sessionToken}; HttpOnly; Path=/; Max-Age=86400; SameSite=Lax`
+    );
+    return res.json({
+      success: true,
+      token: sessionToken,
+      expiresAt: sessionInfo.expiresAt
+    });
+  });
+
+  app.post("/api/auth/logout", (req, res) => {
+    const token = extractSessionToken(req);
+    if (token && adminSessions.has(token)) {
+      adminSessions.delete(token);
+      persistAdminSessions();
+    }
+    res.setHeader(
+      'Set-Cookie',
+      'chuna_admin_session=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax'
+    );
+    return res.json({ success: true });
+  });
+
+  app.get("/api/auth/session", (req, res) => {
+    const token = extractSessionToken(req);
+    if (isSessionTokenValid(token)) {
+      return res.json({
+        success: true,
+        authenticated: true,
+        token
+      });
+    }
+    return res.json({
+      success: true,
+      authenticated: false
+    });
+  });
+
+  // Middleware Pengunci Seluruh Endpoint /api/* (requireAdminAuth)
+  const requireAdminAuth: express.RequestHandler = (req, res, next) => {
+    const subPath = req.path || '';
+    const fullPath = req.originalUrl || '';
+
+    // 1. Kecualikan endpoint autentikasi login/session/logout
+    if (
+      subPath.startsWith('/auth/login') ||
+      subPath.startsWith('/auth/logout') ||
+      subPath.startsWith('/auth/session')
+    ) {
+      return next();
+    }
+
+    // 2. Kecualikan webhook resmi Digiflazz
+    if (
+      subPath.startsWith('/digiflazz/webhook') ||
+      subPath.startsWith('/digiflazz-webhook') ||
+      fullPath.startsWith('/api/digiflazz/webhook') ||
+      fullPath.startsWith('/api/digiflazz-webhook')
+    ) {
+      return next();
+    }
+
+    const token = extractSessionToken(req);
+    if (isSessionTokenValid(token)) {
+      return next();
+    }
+
+    const clientIp = req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.socket.remoteAddress || '127.0.0.1';
+    securitySuite.logThreat(
+      'Warden',
+      'medium',
+      clientIp,
+      'Unauthorized API Access Blocked',
+      `Percobaan akses langsung tanpa sesi login ke ${req.method} ${fullPath} ditolak.`
+    );
+
+    return res.status(401).json({
+      success: false,
+      code: 'SESSION_REQUIRED',
+      error: 'Akses Ditolak: Sesi login Owner tidak valid atau sudah berakhir. Silakan login terlebih dahulu.'
+    });
+  };
+
+  app.use("/api", requireAdminAuth);
+
+  app.get("/api/dump", (req, res) => {
+    res.json({ registeredUsers, dbRegistered: db.registeredUsers });
+  });
 
   // Layer 5: HELIOS Telemetry & Security Management Endpoints (Unrestricted for Admin Dashboard)
   app.get("/api/security/stats", (req, res) => {
@@ -3667,21 +3948,6 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
     }
   });
 
-  // Layer 1 & 2: EGIS WAF Inspector & NYXGUARD Sentry
-  app.use((req, res, next) => {
-    securitySuite.egisInspector(req, res, next, triggerHeliosOwnerAlert);
-  });
-
-  // Layer 4: PURGE - Sensitive Payload Redaction Middleware
-  app.use((req, res, next) => {
-    if (req.body && typeof req.body === 'object') {
-      // Clean potential prototype pollutions
-      delete (req.body as any)['__proto__'];
-      delete (req.body as any)['constructor'];
-    }
-    next();
-  });
-
   const webhookProcessingLocks = new Set<string>();
 
   async function processDigiflazzWebhookData(data: any) {
@@ -4025,8 +4291,25 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
   // Auto-check pending transactions every 30 seconds
 
 
-  app.post(["/api/digiflazz-webhook", "/webhook"], express.json(), async (req, res) => {
+  app.post(["/api/digiflazz/webhook", "/api/digiflazz-webhook", "/webhook"], express.json(), async (req: any, res) => {
     try {
+        const clientIp = req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.socket.remoteAddress || '127.0.0.1';
+        const webhookSecret = String(process.env.DIGIFLAZZ_WEBHOOK_SECRET || (db.digiflazz && (db.digiflazz as any).webhookSecret) || '').trim();
+        if (webhookSecret) {
+            const sigHeader = String(req.headers['x-hub-signature'] || '').trim();
+            const rawBody = typeof req.rawBody === 'string' ? req.rawBody : JSON.stringify(req.body || {});
+            const expectedSig = 'sha1=' + crypto.createHmac('sha1', webhookSecret).update(rawBody).digest('hex');
+            if (!sigHeader || !securitySuite.wardenTimingSafeEqual(sigHeader, expectedSig)) {
+                securitySuite.logThreat(
+                  'Hook',
+                  'critical',
+                  clientIp,
+                  'Forged Digiflazz Webhook Blocked',
+                  `Signature X-Hub-Signature pada webhook Digiflazz tidak valid atau palsu dari IP ${clientIp}.`
+                );
+                return res.status(403).json({ success: false, error: "Invalid X-Hub-Signature" });
+            }
+        }
         const payload = req.body;
         if (!payload || !payload.data) return res.json({ success: false, msg: "No payload" });
         await processDigiflazzWebhookData(payload.data);
