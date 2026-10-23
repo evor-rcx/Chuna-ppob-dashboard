@@ -81,6 +81,13 @@ export interface AttackerDeviceInfo {
   cores?: string | number;
   memory?: string;
   vpnMismatch?: boolean;
+  gpsLat?: number;
+  gpsLon?: number;
+  gpsAccuracyMeters?: number;
+  gpsMapsUrl?: string;
+  sourcePort?: string | number;
+  cfRay?: string;
+  isoTimestamp?: string;
 }
 
 export interface SecurityThreatLog {
@@ -359,6 +366,7 @@ class SecurityShieldSuite {
     }
 
     const vpnHostingKeywords = /(vpn|proxy|tor|hosting|datacenter|cloud|digitalocean|cloudflare|amazonaws|aws|google cloud|linode|vultr|choopa|ovh|hetzner|m247|datacamp|contabo|leaseweb|alibaba|tencent|microsoft)/i;
+    const cellularCarrierKeywords = /(telkomsel|telekomunikasi selular|indosat|ooredoo|xl axiata|axis|hutchison|three|tri indonesia|smartfren|sampoerna telekomunikasi)/i;
 
     try {
       const controller = new AbortController();
@@ -374,11 +382,17 @@ class SecurityShieldSuite {
         if (data && data.status === 'success') {
           const ispCombined = [data.isp, data.org].filter(Boolean).join(' / ') || 'Unknown ISP';
           const asnStr = data.as || '-';
-          const isVpn = Boolean(data.proxy || data.hosting || vpnHostingKeywords.test(ispCombined) || vpnHostingKeywords.test(asnStr));
-          const connType = isVpn
+          const isCellularCarrier = Boolean(data.mobile || cellularCarrierKeywords.test(ispCombined) || cellularCarrierKeywords.test(asnStr));
+          const isDatacenterOrVpn = Boolean(
+            data.hosting ||
+            vpnHostingKeywords.test(ispCombined) ||
+            vpnHostingKeywords.test(asnStr) ||
+            (data.proxy && !isCellularCarrier)
+          );
+          const connType = isDatacenterOrVpn
             ? '⚠️ VPN / Proxy / Server Hosting (VPS)'
-            : data.mobile
-            ? '📱 Jaringan Seluler (Mobile Data)'
+            : isCellularCarrier
+            ? '📱 Jaringan Seluler (Mobile Data - CGNAT)'
             : '🏠 ISP Rumahan / Fixed Broadband';
           const lat = typeof data.lat === 'number' ? data.lat : undefined;
           const lon = typeof data.lon === 'number' ? data.lon : undefined;
@@ -390,11 +404,11 @@ class SecurityShieldSuite {
             city: data.city || '-',
             isp: ispCombined,
             asn: asnStr,
-            isVpnOrHosting: isVpn,
+            isVpnOrHosting: isDatacenterOrVpn,
             connectionType: connType,
             lat,
             lon,
-            mapsUrl: lat !== undefined && lon !== undefined ? `https://www.google.com/maps?q=${lat},${lon}` : undefined,
+            mapsUrl: lat !== undefined && lon !== undefined ? `https://www.google.com/maps/search/?api=1&query=${lat},${lon}` : undefined,
             ipTimezone: data.timezone || undefined
           };
           this.geoCache.set(cleanIp, { info: geo, expiresAt: now + 6 * 3600 * 1000 });
@@ -415,7 +429,8 @@ class SecurityShieldSuite {
         if (d && d.success !== false) {
           const ispName = d.connection?.isp || d.connection?.org || 'Unknown ISP';
           const asnStr = d.connection?.asn ? `AS${d.connection.asn}` : '-';
-          const isVpn = Boolean(vpnHostingKeywords.test(ispName));
+          const isCellularCarrier = Boolean(cellularCarrierKeywords.test(ispName));
+          const isVpn = Boolean(!isCellularCarrier && vpnHostingKeywords.test(ispName));
           const lat = typeof d.latitude === 'number' ? d.latitude : undefined;
           const lon = typeof d.longitude === 'number' ? d.longitude : undefined;
 
@@ -427,10 +442,14 @@ class SecurityShieldSuite {
             isp: ispName,
             asn: asnStr,
             isVpnOrHosting: isVpn,
-            connectionType: isVpn ? '⚠️ VPN / Proxy / Server Hosting (VPS)' : '🏠 ISP / Jaringan Reguler',
+            connectionType: isVpn
+              ? '⚠️ VPN / Proxy / Server Hosting (VPS)'
+              : isCellularCarrier
+              ? '📱 Jaringan Seluler (Mobile Data - CGNAT)'
+              : '🏠 ISP / Jaringan Reguler',
             lat,
             lon,
-            mapsUrl: lat !== undefined && lon !== undefined ? `https://www.google.com/maps?q=${lat},${lon}` : undefined,
+            mapsUrl: lat !== undefined && lon !== undefined ? `https://www.google.com/maps/search/?api=1&query=${lat},${lon}` : undefined,
             ipTimezone: d.timezone?.id || undefined
           };
           this.geoCache.set(cleanIp, { info: geo, expiresAt: now + 6 * 3600 * 1000 });
@@ -457,9 +476,26 @@ class SecurityShieldSuite {
     const devTz = rawFp?.timezone ? String(rawFp.timezone).slice(0, 60) : undefined;
     let vpnMismatch = false;
     if (devTz && ipTimezone && devTz.toLowerCase() !== ipTimezone.toLowerCase()) {
-      // Contoh: IP di America/Singapore tapi jam perangkat Asia/Jakarta atau Asia/Makassar
       vpnMismatch = true;
     }
+
+    const gpsLat = typeof rawFp?.gpsLat === 'number' && !isNaN(rawFp.gpsLat) ? rawFp.gpsLat : undefined;
+    const gpsLon = typeof rawFp?.gpsLon === 'number' && !isNaN(rawFp.gpsLon) ? rawFp.gpsLon : undefined;
+    const gpsAccuracyMeters = typeof rawFp?.gpsAccuracyMeters === 'number' && !isNaN(rawFp.gpsAccuracyMeters)
+      ? Math.round(rawFp.gpsAccuracyMeters)
+      : undefined;
+    const gpsMapsUrl = gpsLat !== undefined && gpsLon !== undefined
+      ? `https://www.google.com/maps/search/?api=1&query=${gpsLat},${gpsLon}`
+      : undefined;
+
+    const sourcePort = req
+      ? (req.headers['cf-connecting-port'] as string) ||
+        (req.headers['x-forwarded-port'] as string) ||
+        req.socket?.remotePort ||
+        '-'
+      : '-';
+    const cfRay = req ? ((req.headers['cf-ray'] as string) || 'Direct / Non-CF') : '-';
+
     return {
       userAgent: ua,
       timezone: devTz,
@@ -469,7 +505,14 @@ class SecurityShieldSuite {
       gpu: rawFp?.gpu ? String(rawFp.gpu).slice(0, 100) : undefined,
       cores: rawFp?.cores ? String(rawFp.cores).slice(0, 20) : undefined,
       memory: rawFp?.memory ? String(rawFp.memory).slice(0, 20) : undefined,
-      vpnMismatch
+      vpnMismatch,
+      gpsLat,
+      gpsLon,
+      gpsAccuracyMeters,
+      gpsMapsUrl,
+      sourcePort,
+      cfRay,
+      isoTimestamp: new Date().toISOString()
     };
   }
 
@@ -479,7 +522,7 @@ class SecurityShieldSuite {
     source: string,
     action: string,
     details: string,
-    onAlertOwner?: (alertText: string) => void,
+    onAlertOwner?: (alertText: string, coords?: { lat: number; lon: number }) => void,
     context?: { req?: Request; deviceFingerprint?: any }
   ) {
     const cfCountry = context?.req ? (context.req.headers['cf-ipcountry'] as string | undefined) : undefined;
@@ -501,7 +544,7 @@ class SecurityShieldSuite {
       this.threatLogs.pop();
     }
 
-    // Lakukan pelacakan Geo-IP otomatis dan kirim laporan intelijen lengkap ke Owner
+    // Lakukan pelacakan Geo-IP otomatis dan kirim laporan intelijen + bukti forensik kepolisian ke Owner
     const shouldLookupIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(source) || source.includes(':') || source === '127.0.0.1';
     if (shouldLookupIp) {
       this.lookupAttackerGeo(source, cfCountry).then((geo) => {
@@ -512,42 +555,68 @@ class SecurityShieldSuite {
 
         if ((severity === 'high' || severity === 'critical') && onAlertOwner) {
           const locStr = [geo.city, geo.region, geo.country].filter(x => x && x !== '-').join(', ') || geo.country;
-          let deviceBlock = '';
-          if (entry.deviceInfo) {
-            deviceBlock += `\n💻 *Perangkat/Browser:* \`${entry.deviceInfo.userAgent.slice(0, 90)}\``;
-            if (entry.deviceInfo.platform || entry.deviceInfo.screen) {
-              deviceBlock += `\n📱 *OS & Layar:* \`${entry.deviceInfo.platform || '-'} | ${entry.deviceInfo.screen || '-'}\``;
-            }
-            if (entry.deviceInfo.timezone) {
-              deviceBlock += `\n🕒 *Zona Waktu Asli Perangkat:* \`${entry.deviceInfo.timezone}\``;
-            }
-            if (entry.deviceInfo.gpu) {
-              deviceBlock += `\n🎮 *GPU Hardware:* \`${entry.deviceInfo.gpu.slice(0, 70)}\``;
-            }
-            if (entry.deviceInfo.vpnMismatch) {
-              deviceBlock += `\n🚨 *JEBAKAN VPN TERDETEKSI:* IP berada di \`${geo.ipTimezone || '-'}\`, tetapi jam fisik perangkat penyerang adalah \`${entry.deviceInfo.timezone}\`!`;
+          const hasRealGps = entry.deviceInfo?.gpsLat !== undefined && entry.deviceInfo?.gpsLon !== undefined;
+
+          // Prioritas 1: Koordinat GPS Satelit Fisik Perangkat (Akurat Meter) jika tersedia; Prioritas 2: Titik Sentral Gateway ISP
+          const primaryCoords = hasRealGps
+            ? { lat: entry.deviceInfo!.gpsLat!, lon: entry.deviceInfo!.gpsLon! }
+            : (geo.lat !== undefined && geo.lon !== undefined ? { lat: geo.lat, lon: geo.lon } : undefined);
+
+          let locationBlock = '';
+          if (hasRealGps) {
+            const gLat = entry.deviceInfo!.gpsLat!;
+            const gLon = entry.deviceInfo!.gpsLon!;
+            const acc = entry.deviceInfo!.gpsAccuracyMeters ? `±${entry.deviceInfo!.gpsAccuracyMeters}m` : 'High-Accuracy';
+            locationBlock += `\n🎯 *LOKASI GPS SATELIT ASLI (REAL-TIME):* \`${gLat}, ${gLon}\` (Akurasi: *${acc}*)`;
+            locationBlock += `\n📍 *Pin Merah GPS Fisik:* [Tancapkan Pin Merah di Google Maps](${entry.deviceInfo!.gpsMapsUrl})`;
+            locationBlock += `\n📡 *Sentral Gerbang ISP (Geo-IP):* ${locStr} ${geo.lat !== undefined ? `(\`${geo.lat}, ${geo.lon}\`)` : ''}`;
+          } else {
+            locationBlock += `\n📡 *Lokasi Gerbang Jaringan ISP (Geo-IP):* *${locStr}*`;
+            if (geo.lat !== undefined && geo.lon !== undefined && geo.mapsUrl) {
+              locationBlock += `\n🧭 *Koordinat Sentral ISP:* \`${geo.lat}, ${geo.lon}\``;
+              locationBlock += `\n📍 *Pin Merah Peta ISP:* [Tancapkan Pin Merah di Google Maps](${geo.mapsUrl})`;
             }
           }
-          const mapsLine = geo.mapsUrl ? `\n🗺️ *Titik Peta Lokasi:* [Buka Google Maps](${geo.mapsUrl})` : '';
 
-          const alertMsg = `🛡️ *[HELIOS GEO-INTELLIGENCE ALERT]*\n` +
-            `⚠️ Ancaman Keamanan & Pelacakan Penyerang!\n` +
+          let forensicBlock = `\n\n🚔 *[DATA BUKTI FORENSIK LAPORAN POLISI / CYBER CRIME]*`;
+          forensicBlock += `\n• *ID Insiden:* \`${entry.id}\``;
+          forensicBlock += `\n• *IP Publik & Port Sumber:* \`${source}:${entry.deviceInfo?.sourcePort || '-'}\``;
+          forensicBlock += `\n• *Provider Resmi & ASN:* \`${geo.isp} (${geo.asn})\``;
+          forensicBlock += `\n• *Cloudflare Ray-ID:* \`${entry.deviceInfo?.cfRay || '-'}\``;
+          forensicBlock += `\n• *Waktu Presisi (UTC):* \`${entry.deviceInfo?.isoTimestamp || new Date().toISOString()}\``;
+          forensicBlock += `\n• *Waktu Lokal (WITA):* \`${entry.timestamp} WITA\``;
+
+          let deviceBlock = '';
+          if (entry.deviceInfo) {
+            deviceBlock += `\n• *User-Agent / Alat:* \`${entry.deviceInfo.userAgent.slice(0, 95)}\``;
+            if (entry.deviceInfo.platform || entry.deviceInfo.screen) {
+              deviceBlock += `\n• *OS & Layar Fisik:* \`${entry.deviceInfo.platform || '-'} | ${entry.deviceInfo.screen || '-'}\``;
+            }
+            if (entry.deviceInfo.timezone) {
+              deviceBlock += `\n• *Zona Waktu Fisik Perangkat:* \`${entry.deviceInfo.timezone}\``;
+            }
+            if (entry.deviceInfo.gpu) {
+              deviceBlock += `\n• *GPU Hardware:* \`${entry.deviceInfo.gpu.slice(0, 75)}\``;
+            }
+            if (entry.deviceInfo.vpnMismatch) {
+              deviceBlock += `\n🚨 *JEBAKAN VPN TERDETEKSI:* IP berada di \`${geo.ipTimezone || '-'}\`, tetapi jam fisik perangkat pelaku adalah \`${entry.deviceInfo.timezone}\`!`;
+            }
+          }
+
+          const alertMsg = `🛡️ *[HELIOS GEO-INTELLIGENCE & FORENSIC ALERT]*\n` +
+            `⚠️ Ancaman Keamanan & Bukti Pelacakan Pelaku!\n` +
             `━━━━━━━━━━━━━━━━━━━━━\n` +
-            `🛡️ Layer: *${layer.toUpperCase()}*\n` +
-            `🚨 Severity: *${severity.toUpperCase()}*\n` +
-            `🎯 IP Penyerang: \`${source}\`\n` +
-            `📍 Lokasi: *${locStr}*\n` +
-            `📡 Provider/ISP: \`${geo.isp} (${geo.asn})\`\n` +
-            `🌐 Jenis Koneksi: *${geo.connectionType}*` +
-            deviceBlock +
-            mapsLine + `\n` +
+            `🛡️ Layer: *${layer.toUpperCase()}* | 🚨 Severity: *${severity.toUpperCase()}*\n` +
             `⚡ Tindakan: *${action}*\n` +
             `📝 Detail: ${details}\n` +
-            `⏰ Waktu: ${entry.timestamp} WITA\n` +
+            `🌐 Jenis Koneksi: *${geo.connectionType}*` +
+            locationBlock +
+            forensicBlock +
+            deviceBlock + `\n` +
             `━━━━━━━━━━━━━━━━━━━━━\n` +
-            `_Sistem keamanan telah menetralkan ancaman & mengunci jejak penyerang secara otomatis._`;
+            `_Catatan: Simpan bukti IP:Port + Waktu Presisi detik di atas untuk pengajuan lacak nomor MSISDN/IMEI pelaku ke Provider/Kepolisian._`;
           try {
-            onAlertOwner(alertMsg);
+            onAlertOwner(alertMsg, primaryCoords);
           } catch (e) {}
         }
       }).catch(() => {});
@@ -572,7 +641,7 @@ class SecurityShieldSuite {
   // ==========================================
   // LAYER 1: EGIS (Deep Packet Inspection & WAF)
   // ==========================================
-  public egisInspector(req: Request, res: Response, next: NextFunction, alertOwner?: (msg: string) => void) {
+  public egisInspector(req: Request, res: Response, next: NextFunction, alertOwner?: (msg: string, coords?: { lat: number; lon: number }) => void) {
     this.stats.inspectedPackets++;
     const clientIP = this.extractClientIP(req);
 
@@ -649,7 +718,7 @@ class SecurityShieldSuite {
   // ==========================================
   // LAYER 2: NYXGUARD (Intelligent Quarantining & Bot Defender)
   // ==========================================
-  public recordStrike(ip: string, reason: string, alertOwner?: (msg: string) => void, req?: Request) {
+  public recordStrike(ip: string, reason: string, alertOwner?: (msg: string, coords?: { lat: number; lon: number }) => void, req?: Request) {
     const existing = this.bannedIPs.get(ip) || { until: 0, reason, strikes: 0 };
     existing.strikes += 1;
     existing.reason = reason;

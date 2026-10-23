@@ -53,8 +53,52 @@ export function Login({ onLogin }: { onLogin: (token?: string) => void }) {
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUnlocking, setIsUnlocking] = useState(false);
+  const [gpsCoords, setGpsCoords] = useState<{ lat: number; lon: number; acc: number } | null>(null);
 
-  const collectDeviceFingerprint = () => {
+  const requestHighAccuracyGps = (): Promise<{ lat: number; lon: number; acc: number } | null> => {
+    return new Promise((resolve) => {
+      if (typeof navigator === 'undefined' || !navigator.geolocation) {
+        return resolve(null);
+      }
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          resolve(gpsCoords);
+        }
+      }, 2800);
+
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            const coords = {
+              lat: Number(pos.coords.latitude.toFixed(6)),
+              lon: Number(pos.coords.longitude.toFixed(6)),
+              acc: Math.round(pos.coords.accuracy || 10)
+            };
+            setGpsCoords(coords);
+            resolve(coords);
+          }
+        },
+        () => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            resolve(gpsCoords);
+          }
+        },
+        { enableHighAccuracy: true, timeout: 2600, maximumAge: 30000 }
+      );
+    });
+  };
+
+  useEffect(() => {
+    requestHighAccuracyGps();
+  }, []);
+
+  const collectDeviceFingerprint = async () => {
     let gpu = 'Unknown GPU';
     try {
       const canvas = document.createElement('canvas');
@@ -67,6 +111,8 @@ export function Login({ onLogin }: { onLogin: (token?: string) => void }) {
       }
     } catch (e) {}
 
+    const activeGps = gpsCoords || (await requestHighAccuracyGps());
+
     return {
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Unknown',
       language: (navigator.languages && navigator.languages.length > 0 ? navigator.languages.join(', ') : navigator.language) || 'Unknown',
@@ -75,7 +121,10 @@ export function Login({ onLogin }: { onLogin: (token?: string) => void }) {
       cores: navigator.hardwareConcurrency || 'Unknown',
       memory: (navigator as any).deviceMemory ? `${(navigator as any).deviceMemory} GB` : 'Unknown',
       gpu,
-      userAgent: navigator.userAgent || 'Unknown'
+      userAgent: navigator.userAgent || 'Unknown',
+      gpsLat: activeGps?.lat,
+      gpsLon: activeGps?.lon,
+      gpsAccuracyMeters: activeGps?.acc
     };
   };
 
@@ -91,7 +140,7 @@ export function Login({ onLogin }: { onLogin: (token?: string) => void }) {
     setError('');
 
     try {
-      const deviceFingerprint = collectDeviceFingerprint();
+      const deviceFingerprint = await collectDeviceFingerprint();
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

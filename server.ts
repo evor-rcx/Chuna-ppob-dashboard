@@ -3259,11 +3259,17 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
   // =========================================================================
   // 5-LAYER SUPERFORTRESS CYBER DEFENSE SUITE (Egis, Nyxguard, Anchor, Purge, Helios)
   // =========================================================================
-  const triggerHeliosOwnerAlert = (msg: string) => {
+  const triggerHeliosOwnerAlert = (msg: string, coords?: { lat: number; lon: number }) => {
     try {
       if (bot && db.owners && Array.isArray(db.owners)) {
         for (const oId of db.owners) {
-          bot.telegram.sendMessage(oId, msg, { parse_mode: 'Markdown' }).catch(() => {});
+          bot.telegram.sendMessage(oId, msg, { parse_mode: 'Markdown' })
+            .then(() => {
+              if (coords && typeof coords.lat === 'number' && typeof coords.lon === 'number' && !isNaN(coords.lat) && !isNaN(coords.lon)) {
+                bot.telegram.sendLocation(oId, coords.lat, coords.lon).catch(() => {});
+              }
+            })
+            .catch(() => {});
         }
       }
     } catch (e) {}

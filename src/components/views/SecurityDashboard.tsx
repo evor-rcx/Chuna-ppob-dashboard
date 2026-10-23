@@ -80,6 +80,13 @@ interface SecurityTelemetry {
       cores?: string | number;
       memory?: string;
       vpnMismatch?: boolean;
+      gpsLat?: number;
+      gpsLon?: number;
+      gpsAccuracyMeters?: number;
+      gpsMapsUrl?: string;
+      sourcePort?: string | number;
+      cfRay?: string;
+      isoTimestamp?: string;
     };
   }[];
 }
@@ -1703,9 +1710,16 @@ echo "[+] Hardening Selesai! Server STB E4 Store Anda kini 100% terlindungi."`}<
                     const locText = log.geoInfo
                       ? [log.geoInfo.city, log.geoInfo.region, log.geoInfo.country].filter(Boolean).filter(x => x !== '-').join(', ')
                       : '';
+                    const hasGps = log.deviceInfo?.gpsLat !== undefined && log.deviceInfo?.gpsLon !== undefined;
                     return (
                       <tr key={log.id} className="hover:bg-slate-800/30 transition-colors align-top">
-                        <td className="py-2.5 px-3 text-slate-400 whitespace-nowrap">{log.timestamp}</td>
+                        <td className="py-2.5 px-3 text-slate-400 whitespace-nowrap space-y-0.5">
+                          <div>{log.timestamp}</div>
+                          {log.deviceInfo?.isoTimestamp && (
+                            <div className="text-[9px] text-slate-500">UTC: {log.deviceInfo.isoTimestamp}</div>
+                          )}
+                          <div className="text-[9px] text-indigo-400">ID: {log.id}</div>
+                        </td>
                         <td className="py-2.5 px-3 space-y-1">
                           <div className="font-bold text-indigo-300">{log.layer}</div>
                           <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
@@ -1718,10 +1732,36 @@ echo "[+] Hardening Selesai! Server STB E4 Store Anda kini 100% terlindungi."`}<
                           </span>
                         </td>
                         <td className="py-2.5 px-3 text-slate-200 space-y-1">
-                          <div className="font-bold text-white">{log.source}</div>
+                          <div className="font-bold text-white">
+                            {log.source}{log.deviceInfo?.sourcePort && log.deviceInfo.sourcePort !== '-' ? `:${log.deviceInfo.sourcePort}` : ''}
+                          </div>
+                          {log.deviceInfo?.cfRay && log.deviceInfo.cfRay !== '-' && (
+                            <div className="text-[10px] text-slate-400">CF-Ray: {log.deviceInfo.cfRay}</div>
+                          )}
+                          {hasGps && (
+                            <div className="p-1.5 rounded bg-emerald-950/60 border border-emerald-500/40 space-y-1 font-sans">
+                              <div className="text-[10px] font-bold text-emerald-300">
+                                🎯 GPS Satelit Fisik (±{log.deviceInfo?.gpsAccuracyMeters || 10}m):
+                              </div>
+                              <div className="text-[10px] font-mono text-white">
+                                {log.deviceInfo?.gpsLat}, {log.deviceInfo?.gpsLon}
+                              </div>
+                              {log.deviceInfo?.gpsMapsUrl && (
+                                <a
+                                  href={log.deviceInfo.gpsMapsUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-500/30 hover:bg-red-500/40 text-red-200 border border-red-400/40 text-[10px] font-bold transition-colors"
+                                >
+                                  📍 Pin Merah GPS Asli
+                                </a>
+                              )}
+                            </div>
+                          )}
                           {locText && (
                             <div className="text-[11px] text-sky-300 font-sans">
-                              📍 {locText}
+                              📡 Sentral ISP: {locText}
+                              {log.geoInfo?.lat !== undefined && log.geoInfo?.lon !== undefined ? ` (${log.geoInfo.lat}, ${log.geoInfo.lon})` : ''}
                             </div>
                           )}
                           {log.geoInfo?.mapsUrl && (
@@ -1731,7 +1771,7 @@ echo "[+] Hardening Selesai! Server STB E4 Store Anda kini 100% terlindungi."`}<
                               rel="noopener noreferrer"
                               className="inline-flex items-center gap-1 px-2 py-0.5 mt-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-[10px] font-sans font-semibold transition-colors"
                             >
-                              🗺️ Buka Google Maps
+                              📍 Pin Merah Peta ISP
                             </a>
                           )}
                         </td>
@@ -1762,7 +1802,12 @@ echo "[+] Hardening Selesai! Server STB E4 Store Anda kini 100% terlindungi."`}<
                               )}
                               {log.deviceInfo.timezone && (
                                 <div className="text-[10px] text-amber-300 font-mono">
-                                  🕒 TZ Asli: {log.deviceInfo.timezone}
+                                  🕒 TZ Fisik: {log.deviceInfo.timezone}
+                                </div>
+                              )}
+                              {log.deviceInfo.gpu && (
+                                <div className="text-[10px] text-purple-300 truncate" title={log.deviceInfo.gpu}>
+                                  🎮 {log.deviceInfo.gpu}
                                 </div>
                               )}
                               {log.deviceInfo.vpnMismatch && (
