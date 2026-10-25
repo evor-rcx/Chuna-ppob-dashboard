@@ -3295,6 +3295,54 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
   }));
   app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
+  // 2.5. BLOKIR EKSPLISIT (HTTP 403 FORBIDDEN) FILE & FOLDER SENSITIF DI LUAR /API
+  app.use((req, res, next) => {
+    const rawPath = decodeURIComponent(req.path || '/').toLowerCase();
+    const isSensitivePrefix =
+      rawPath === '/.env' ||
+      rawPath.startsWith('/.env.') ||
+      rawPath === '/.git' ||
+      rawPath.startsWith('/.git/') ||
+      rawPath === '/db.json' ||
+      rawPath === '/config.json' ||
+      rawPath === '/.ds_store' ||
+      rawPath === '/wa_auth' ||
+      rawPath.startsWith('/wa_auth/') ||
+      rawPath === '/backups' ||
+      rawPath.startsWith('/backups/') ||
+      rawPath === '/package.json' ||
+      rawPath === '/package-lock.json' ||
+      rawPath === '/tsconfig.json' ||
+      rawPath === '/server.ts' ||
+      rawPath === '/app_debug.log';
+
+    const isSensitiveExt = /\.(log|sh|sql|bak|key|pem|env)$/i.test(rawPath);
+
+    if (isSensitivePrefix || isSensitiveExt) {
+      const clientIp = securitySuite.extractClientIP(req);
+      securitySuite.recordStrike(
+        clientIp,
+        `Egis: Forbidden Sensitive File Probe (${req.originalUrl.slice(0, 80)})`,
+        triggerHeliosOwnerAlert,
+        req
+      );
+      securitySuite.logThreat(
+        'Egis',
+        'critical',
+        clientIp,
+        'Blocked Sensitive File Access (403)',
+        `Percobaan akses ilegal ke file/folder rahasia sistem (${req.method} ${req.originalUrl.slice(0, 100)}) dijatuhkan dengan HTTP 403 Forbidden.`,
+        triggerHeliosOwnerAlert,
+        { req }
+      );
+      return res.status(403).json({
+        success: false,
+        error: '[EGIS FIREWALL] 403 Forbidden: Akses ke file atau direktori rahasia sistem ditolak keras.'
+      });
+    }
+    next();
+  });
+
   // 3. Layer 1 & 2: EGIS WAF Inspector & NYXGUARD Sentry (Khusus memproteksi jalur /api/* dan /webhook*)
   app.use((req, res, next) => {
     if (req.path.startsWith('/api') || req.path.startsWith('/webhook')) {
@@ -3349,8 +3397,22 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
     userAgent: string;
   }
 
+  interface PendingOtpChallenge {
+    challengeId: string;
+    otp: string;
+    ip: string;
+    userAgent: string;
+    deviceFingerprint?: any;
+    createdAt: number;
+    expiresAt: number;
+    attempts: number;
+  }
+
   const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 Jam
+  const OTP_TTL_MS = 3 * 60 * 1000; // 3 Menit
+  const OTP_MAX_ATTEMPTS = 3; // Maksimal 3x salah langsung hangus
   const adminSessions = new Map<string, AdminSessionInfo>();
+  const pendingOtpChallenges = new Map<string, PendingOtpChallenge>();
 
   // Muat sesi aktif dari db jika ada agar tidak ter-logout saat PM2 restart
   if (db.adminSessions && Array.isArray(db.adminSessions)) {
@@ -3373,6 +3435,57 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
     } catch (e) {}
   };
 
+  // Fungsi darurat untuk mematikan seluruh sesi aktif & memblokir IP dari jarak jauh via tombol Telegram Owner
+  (global as any).__killAllAdminSessionsAndBanIP = (targetIp?: string) => {
+    const count = adminSessions.size;
+    adminSessions.clear();
+    pendingOtpChallenges.clear();
+    persistAdminSessions();
+    if (targetIp && targetIp !== 'unknown') {
+      securitySuite.banIPManual(
+        targetIp,
+        24 * 60 * 60 * 1000,
+        'Emergency Kill-Switch: Seluruh sesi dimatikan & IP diblokir 24 jam oleh Owner via Telegram.'
+      );
+    }
+    return count;
+  };
+
+  const sendTelegramSecurityMessageToOwners = async (text: string, extra?: any): Promise<boolean> => {
+    const ownerIds: number[] = Array.isArray(db.owners) ? db.owners : [];
+    if (ownerIds.length === 0) return false;
+    let delivered = false;
+
+    for (const oId of ownerIds) {
+      try {
+        if (bot && bot.telegram) {
+          await bot.telegram.sendMessage(oId, text, { parse_mode: 'Markdown', ...(extra || {}) });
+          delivered = true;
+          continue;
+        }
+      } catch (e) {}
+
+      // Fallback langsung ke API resmi Telegram jika instance bot sedang di-skip (misal di environment preview)
+      const tgToken = process.env.TELEGRAM_BOT_TOKEN || db.telegramToken;
+      if (tgToken) {
+        try {
+          const r = await fetch(`https://api.telegram.org/bot${tgToken.trim()}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: oId,
+              text,
+              parse_mode: 'Markdown',
+              ...(extra || {})
+            })
+          });
+          if (r.ok) delivered = true;
+        } catch (e) {}
+      }
+    }
+    return delivered;
+  };
+
   const parseCookies = (cookieHeader?: string): Record<string, string> => {
     const list: Record<string, string> = {};
     if (!cookieHeader) return list;
@@ -3386,6 +3499,7 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
     return list;
   };
 
+  // 4. KUNCI SESI: Hapus pengambilan token dari req.query.token agar tidak pernah bocor di URL/log
   const extractSessionToken = (req: express.Request): string => {
     const cookies = parseCookies(req.headers.cookie);
     if (cookies['chuna_admin_session']) {
@@ -3399,21 +3513,43 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
     if (typeof authHeader === 'string' && authHeader.toLowerCase().startsWith('bearer ')) {
       return authHeader.slice(7).trim();
     }
-    if (typeof req.query?.token === 'string' && req.query.token.trim()) {
-      return req.query.token.trim();
-    }
     return '';
   };
 
-  const isSessionTokenValid = (token: string): boolean => {
+  // Validasi Token Sesi + Device Binding (User-Agent)
+  const isSessionTokenValid = (token: string, req?: express.Request): boolean => {
     if (!token || token.length < 32) return false;
     const session = adminSessions.get(token);
     if (!session) return false;
     if (Date.now() > session.expiresAt) {
       adminSessions.delete(token);
+      persistAdminSessions();
       return false;
     }
+    if (req) {
+      const currentUA = String(req.headers['user-agent'] || 'Unknown').slice(0, 180);
+      if (session.userAgent && session.userAgent !== currentUA) {
+        const clientIp = securitySuite.extractClientIP(req);
+        adminSessions.delete(token);
+        persistAdminSessions();
+        securitySuite.logThreat(
+          'Warden',
+          'high',
+          clientIp,
+          'Session Hijacking Blocked (User-Agent Mismatch)',
+          `Token sesi dicabut otomatis karena User-Agent berubah di tengah jalan (Asli: '${session.userAgent.slice(0, 50)}' vs Baru: '${currentUA.slice(0, 50)}').`,
+          triggerHeliosOwnerAlert,
+          { req }
+        );
+        return false;
+      }
+    }
     return true;
+  };
+
+  const buildHardenedSessionCookie = (req: express.Request, sessionToken: string, maxAgeSec: number): string => {
+    const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+    return `chuna_admin_session=${sessionToken}; HttpOnly; Path=/; Max-Age=${maxAgeSec}; SameSite=Strict${isHttps ? '; Secure' : ''}`;
   };
 
   // Brute-force tracker khusus untuk /api/auth/login (Maks 5x gagal per IP dalam 15 menit)
@@ -3421,10 +3557,15 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
   const LOGIN_WINDOW_MS = 15 * 60 * 1000;
   const LOGIN_MAX_ATTEMPTS = 5;
 
-  app.post("/api/auth/login", (req, res) => {
+  app.post("/api/auth/login", async (req, res) => {
     const { username, password, deviceFingerprint } = req.body || {};
     const clientIp = securitySuite.extractClientIP(req);
     const now = Date.now();
+
+    // Bersihkan challenge OTP yang sudah kedaluwarsa
+    for (const [cid, ch] of pendingOtpChallenges.entries()) {
+      if (now > ch.expiresAt) pendingOtpChallenges.delete(cid);
+    }
 
     // 1. Cek Whitelist IP Admin jika diaktifkan
     if (!securitySuite.auditCheckAdminIPAllowed(clientIp)) {
@@ -3504,25 +3645,188 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
       });
     }
 
-    // Login sukses: bersihkan catatan gagal & buat token kriptografi 256-bit
+    // Username & Password benar -> Bersihkan catatan gagal
     loginBruteForceMap.delete(clientIp);
+    const userAgent = String(req.headers['user-agent'] || 'Unknown').slice(0, 180);
+
+    // 3. Buat Kode OTP 6 Angka Acak (Berlaku 3 Menit) & Kirim ke Telegram Owner (2FA Login Gate)
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const challengeId = crypto.randomBytes(16).toString('hex');
+    pendingOtpChallenges.set(challengeId, {
+      challengeId,
+      otp: otpCode,
+      ip: clientIp,
+      userAgent,
+      deviceFingerprint,
+      createdAt: now,
+      expiresAt: now + OTP_TTL_MS,
+      attempts: 0
+    });
+
+    const geo = await securitySuite.lookupAttackerGeo(clientIp, req.headers['cf-ipcountry'] as string | undefined).catch(() => null);
+    const locStr = geo ? ([geo.city, geo.region, geo.country].filter(x => x && x !== '-').join(', ') || geo.country) : 'Tidak Diketahui';
+    const ispStr = geo ? `${geo.isp} (${geo.asn})` : '-';
+    const witaNow = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Makassar' });
+
+    const otpMsg =
+      `🔐 *[WARDEN 2FA - KODE OTP LOGIN DASHBOARD]*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `Seseorang baru saja memasukkan Username & Password yang benar di halaman Login E4 Store:\n\n` +
+      `🔢 *KODE OTP 6 ANGKA:* \`${otpCode}\`\n` +
+      `⏳ *Masa Berlaku:* 3 Menit (Maks 3x percobaan)\n\n` +
+      `🌐 *IP Pengakses:* \`${clientIp}\`\n` +
+      `📍 *Lokasi Jaringan:* *${locStr}*\n` +
+      `📡 *ISP / ASN:* \`${ispStr}\`\n` +
+      `💻 *Perangkat:* \`${userAgent.slice(0, 90)}\`\n` +
+      `⏰ *Waktu:* \`${witaNow} WITA\`\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `⚠️ _Jangan pernah berikan kode ini kepada siapa pun! Jika bukan Anda yang login, klik tombol darurat di bawah untuk memblokir IP tersebut:_`;
+
+    const otpSent = await sendTelegramSecurityMessageToOwners(otpMsg, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🛑 Matikan Semua Sesi & Blokir IP', callback_data: `sec_kill_ip_${clientIp}` }]
+        ]
+      }
+    });
+
+    if (otpSent) {
+      return res.json({
+        success: true,
+        requireOtp: true,
+        challengeId,
+        message: 'Kode OTP 6 angka telah dikirim ke Telegram Owner. Silakan masukkan kode OTP untuk membuka Dashboard (berlaku 3 menit).'
+      });
+    }
+
+    // Jika Telegram Bot belum dikonfigurasi sama sekali di database lokal, izinkan masuk sambil mencatat audit
+    pendingOtpChallenges.delete(challengeId);
     const sessionToken = crypto.randomBytes(32).toString('hex');
     const sessionInfo: AdminSessionInfo = {
       token: sessionToken,
       createdAt: now,
       expiresAt: now + SESSION_TTL_MS,
       ip: clientIp,
-      userAgent: String(req.headers['user-agent'] || 'Unknown').slice(0, 180)
+      userAgent
+    };
+    adminSessions.set(sessionToken, sessionInfo);
+    persistAdminSessions();
+    securitySuite.auditRecordAction('admin', 'DASHBOARD_LOGIN', 'Main Login Gate', null, 'SESSION_CREATED_NO_TG', clientIp);
+
+    res.setHeader('Set-Cookie', buildHardenedSessionCookie(req, sessionToken, 86400));
+    return res.json({
+      success: true,
+      token: sessionToken,
+      expiresAt: sessionInfo.expiresAt
+    });
+  });
+
+  // Endpoint Verifikasi Kode OTP 6 Angka dari Telegram Owner (Langkah ke-2 Login)
+  app.post("/api/auth/verify-otp", async (req, res) => {
+    const { challengeId, otp, deviceFingerprint } = req.body || {};
+    const clientIp = securitySuite.extractClientIP(req);
+    const now = Date.now();
+
+    if (!challengeId || typeof challengeId !== 'string') {
+      return res.status(400).json({
+        success: false,
+        expired: true,
+        error: 'Sesi verifikasi OTP tidak ditemukan. Silakan login ulang.'
+      });
+    }
+
+    const challenge = pendingOtpChallenges.get(challengeId);
+    if (!challenge || now > challenge.expiresAt) {
+      pendingOtpChallenges.delete(challengeId);
+      return res.status(401).json({
+        success: false,
+        expired: true,
+        error: 'Kode OTP sudah kedaluwarsa (lebih dari 3 menit). Silakan login ulang untuk meminta OTP baru.'
+      });
+    }
+
+    const inputOtp = String(otp || '').trim();
+    const isOtpMatch = securitySuite.wardenTimingSafeEqual(inputOtp, challenge.otp);
+
+    if (!isOtpMatch) {
+      challenge.attempts += 1;
+      if (challenge.attempts >= OTP_MAX_ATTEMPTS) {
+        pendingOtpChallenges.delete(challengeId);
+        securitySuite.logThreat(
+          'Warden',
+          'critical',
+          clientIp,
+          '2FA Telegram OTP Brute-Force (3x Salah - Hangus)',
+          `IP ${clientIp} gagal memverifikasi Kode OTP Telegram Owner sebanyak 3x berturut-turut. Kode OTP langsung dihanguskan!`,
+          triggerHeliosOwnerAlert,
+          { req, deviceFingerprint: deviceFingerprint || challenge.deviceFingerprint }
+        );
+        return res.status(401).json({
+          success: false,
+          expired: true,
+          error: 'Kode OTP salah 3x berturut-turut! Demi keamanan, kode OTP telah dihanguskan. Silakan login ulang.'
+        });
+      }
+
+      pendingOtpChallenges.set(challengeId, challenge);
+      const remaining = OTP_MAX_ATTEMPTS - challenge.attempts;
+      securitySuite.logThreat(
+        'Warden',
+        'high',
+        clientIp,
+        `Failed 2FA Telegram OTP (${challenge.attempts}/${OTP_MAX_ATTEMPTS})`,
+        `Percobaan input OTP Telegram salah dari IP ${clientIp} (Sisa kesempatan: ${remaining}x).`,
+        triggerHeliosOwnerAlert,
+        { req, deviceFingerprint: deviceFingerprint || challenge.deviceFingerprint }
+      );
+      return res.status(401).json({
+        success: false,
+        error: `Kode OTP Telegram salah! (Sisa percobaan: ${remaining}x sebelum OTP hangus)`
+      });
+    }
+
+    // OTP Terverifikasi Benar -> Hapus challenge & terbitkan sesi terikat perangkat (Device-Bound Session)
+    pendingOtpChallenges.delete(challengeId);
+    const userAgent = String(req.headers['user-agent'] || 'Unknown').slice(0, 180);
+    const sessionToken = crypto.randomBytes(32).toString('hex');
+    const sessionInfo: AdminSessionInfo = {
+      token: sessionToken,
+      createdAt: now,
+      expiresAt: now + SESSION_TTL_MS,
+      ip: clientIp,
+      userAgent
     };
     adminSessions.set(sessionToken, sessionInfo);
     persistAdminSessions();
 
-    securitySuite.auditRecordAction('admin', 'DASHBOARD_LOGIN', 'Main Login Gate', null, 'SESSION_CREATED', clientIp);
+    securitySuite.auditRecordAction('admin', 'DASHBOARD_LOGIN_2FA_VERIFIED', 'Main Login Gate (OTP)', null, 'SESSION_CREATED', clientIp);
 
-    res.setHeader(
-      'Set-Cookie',
-      `chuna_admin_session=${sessionToken}; HttpOnly; Path=/; Max-Age=86400; SameSite=Lax`
-    );
+    // Kirim notifikasi login berhasil ke Telegram Owner lengkap dengan tombol inline [🛑 Matikan Semua Sesi & Blokir IP]
+    const geo = await securitySuite.lookupAttackerGeo(clientIp, req.headers['cf-ipcountry'] as string | undefined).catch(() => null);
+    const locStr = geo ? ([geo.city, geo.region, geo.country].filter(x => x && x !== '-').join(', ') || geo.country) : 'Tidak Diketahui';
+    const witaNow = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Makassar' });
+
+    const loginSuccessAlert =
+      `✅ *[WARDEN 2FA - LOGIN DASHBOARD BERHASIL]*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `Sesi Admin Dashboard E4 Store telah aktif setelah verifikasi OTP:\n\n` +
+      `🌐 *IP Pengakses:* \`${clientIp}\`\n` +
+      `📍 *Lokasi:* *${locStr}*\n` +
+      `📡 *ISP:* \`${geo?.isp || '-'}\`\n` +
+      `💻 *Perangkat ( Terkunci ):* \`${userAgent.slice(0, 90)}\`\n` +
+      `⏰ *Waktu Masuk:* \`${witaNow} WITA\`\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🛡️ _Sesi ini dikunci ke perangkat di atas. Anda dapat mematikan paksa seluruh sesi & memblokir IP ini kapan saja melalui tombol di bawah:_`;
+
+    sendTelegramSecurityMessageToOwners(loginSuccessAlert, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🛑 Matikan Semua Sesi & Blokir IP', callback_data: `sec_kill_ip_${clientIp}` }]
+        ]
+      }
+    }).catch(() => {});
+
+    res.setHeader('Set-Cookie', buildHardenedSessionCookie(req, sessionToken, 86400));
     return res.json({
       success: true,
       token: sessionToken,
@@ -3536,16 +3840,13 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
       adminSessions.delete(token);
       persistAdminSessions();
     }
-    res.setHeader(
-      'Set-Cookie',
-      'chuna_admin_session=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax'
-    );
+    res.setHeader('Set-Cookie', buildHardenedSessionCookie(req, '', 0));
     return res.json({ success: true });
   });
 
   app.get("/api/auth/session", (req, res) => {
     const token = extractSessionToken(req);
-    if (isSessionTokenValid(token)) {
+    if (isSessionTokenValid(token, req)) {
       return res.json({
         success: true,
         authenticated: true,
@@ -3563,16 +3864,17 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
     const subPath = req.path || '';
     const fullPath = req.originalUrl || '';
 
-    // 1. Kecualikan endpoint autentikasi login/session/logout
+    // 1. Kecualikan endpoint autentikasi login/verify-otp/session/logout
     if (
       subPath.startsWith('/auth/login') ||
+      subPath.startsWith('/auth/verify-otp') ||
       subPath.startsWith('/auth/logout') ||
       subPath.startsWith('/auth/session')
     ) {
       return next();
     }
 
-    // 2. Kecualikan webhook resmi Digiflazz
+    // 2. Kecualikan webhook resmi Digiflazz (akan diverifikasi ketat dengan HMAC & Server-to-Server API Check)
     if (
       subPath.startsWith('/digiflazz/webhook') ||
       subPath.startsWith('/digiflazz-webhook') ||
@@ -3583,17 +3885,19 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
     }
 
     const token = extractSessionToken(req);
-    if (isSessionTokenValid(token)) {
+    if (isSessionTokenValid(token, req)) {
       return next();
     }
 
-    const clientIp = req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.socket.remoteAddress || '127.0.0.1';
+    const clientIp = securitySuite.extractClientIP(req);
     securitySuite.logThreat(
       'Warden',
       'medium',
       clientIp,
       'Unauthorized API Access Blocked',
-      `Percobaan akses langsung tanpa sesi login ke ${req.method} ${fullPath} ditolak.`
+      `Percobaan akses langsung tanpa sesi login valid ke ${req.method} ${fullPath.slice(0, 100)} ditolak.`,
+      triggerHeliosOwnerAlert,
+      { req }
     );
 
     return res.status(401).json({
@@ -3604,10 +3908,6 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
   };
 
   app.use("/api", requireAdminAuth);
-
-  app.get("/api/dump", (req, res) => {
-    res.json({ registeredUsers, dbRegistered: db.registeredUsers });
-  });
 
   // Layer 5: HELIOS Telemetry & Security Management Endpoints (Unrestricted for Admin Dashboard)
   app.get("/api/security/stats", (req, res) => {
@@ -3971,7 +4271,10 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
 
   const webhookProcessingLocks = new Set<string>();
 
-  async function processDigiflazzWebhookData(data: any) {
+  async function processDigiflazzWebhookData(
+    data: any,
+    securityContext?: { signatureVerified?: boolean; clientIp?: string; req?: express.Request }
+  ) {
     const ref_id = data?.ref_id;
     if (data?.testing) return { success: true };
     if (!ref_id) return { success: false };
@@ -3993,6 +4296,87 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
             const tx = transactions[txIndex];
             
             if (tx.status === 'Pending' && (status === 'Sukses' || status === 'Gagal')) {
+                const isSigVerified = Boolean(securityContext?.signatureVerified);
+                const callerIp = securityContext?.clientIp || 'unknown';
+
+                // 2. SERVER-TO-SERVER DOUBLE VERIFICATION KE API RESMI DIGIFLAZZ (ANTI SALDO HANTU)
+                // Jika webhook datang tanpa X-Hub-Signature terverifikasi (atau sebelum melakukan refund saldo),
+                // wajib konfirmasi langsung ke https://api.digiflazz.com/v1/transaction menggunakan sign MD5 resmi server!
+                if (!isSigVerified) {
+                    if (!digiflazzUsername || !digiflazzApiKey || !tx.sku || !tx.target) {
+                        securitySuite.recordWebhookVerification(false);
+                        securitySuite.logThreat(
+                            'Anchor',
+                            'critical',
+                            callerIp,
+                            'Blocked Unverified Webhook (Missing Digiflazz Credentials/SKU)',
+                            `Percobaan manipulasi status transaksi '${tx.id}' menjadi '${status}' tanpa X-Hub-Signature valid ditolak karena verifikasi pusat tidak dapat dilakukan.`,
+                            triggerHeliosOwnerAlert,
+                            { req: securityContext?.req }
+                        );
+                        return { success: false, error: 'Unverified webhook rejected' };
+                    }
+
+                    try {
+                        const verifySign = crypto
+                            .createHash('md5')
+                            .update(String(digiflazzUsername) + String(digiflazzApiKey) + String(tx.id))
+                            .digest('hex');
+
+                        const verifyBody: Record<string, any> = {
+                            username: digiflazzUsername,
+                            buyer_sku_code: tx.sku,
+                            customer_no: tx.target,
+                            ref_id: tx.id,
+                            sign: verifySign
+                        };
+                        if (tx.type === 'pasca') {
+                            verifyBody.commands = 'status-pasca';
+                        }
+
+                        const verifyRes = await fetch('https://api.digiflazz.com/v1/transaction', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(verifyBody)
+                        });
+                        const verifyJson: any = await verifyRes.json().catch(() => null);
+                        const officialStatus = verifyJson?.data?.status;
+
+                        if (!officialStatus || officialStatus !== status) {
+                            securitySuite.recordWebhookVerification(false);
+                            securitySuite.logThreat(
+                                'Anchor',
+                                'critical',
+                                callerIp,
+                                'Ghost Balance / Forged Webhook Neutralized',
+                                `Percobaan tembak webhook palsu untuk ref_id '${tx.id}' (Klaim Webhook: '${status}', Status Resmi Pusat Digiflazz: '${officialStatus || 'Tidak Valid'}'). Refund/perubahan status dibatalkan!`,
+                                triggerHeliosOwnerAlert,
+                                { req: securityContext?.req }
+                            );
+                            return { success: false, error: 'Forged webhook status mismatch with official Digiflazz server' };
+                        }
+
+                        // Sinkronkan SN dan pesan asli dari server pusat Digiflazz
+                        if (verifyJson?.data?.sn) data.sn = verifyJson.data.sn;
+                        if (verifyJson?.data?.message) data.message = verifyJson.data.message;
+                        securitySuite.recordWebhookVerification(true);
+                    } catch (verifyErr: any) {
+                        securitySuite.recordWebhookVerification(false);
+                        securitySuite.logThreat(
+                            'Hook',
+                            'high',
+                            callerIp,
+                            'Webhook Double-Verification Network Error',
+                            `Gagal memverifikasi status transaksi '${tx.id}' ke pusat Digiflazz (${verifyErr?.message || 'Error'}). Webhook tanpa signature ditahan demi keamanan saldo.`,
+                            triggerHeliosOwnerAlert,
+                            { req: securityContext?.req }
+                        );
+                        return { success: false, error: 'Failed to verify webhook with Digiflazz API' };
+                    }
+                } else {
+                    securitySuite.recordWebhookVerification(true);
+                }
+
                 tx.status = status;
                 if (data.sn) tx.sn = data.sn;
 
@@ -4314,26 +4698,41 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
 
   app.post(["/api/digiflazz/webhook", "/api/digiflazz-webhook", "/webhook"], express.json(), async (req: any, res) => {
     try {
-        const clientIp = req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.socket.remoteAddress || '127.0.0.1';
+        const clientIp = securitySuite.extractClientIP(req);
         const webhookSecret = String(process.env.DIGIFLAZZ_WEBHOOK_SECRET || (db.digiflazz && (db.digiflazz as any).webhookSecret) || '').trim();
+        let signatureVerified = false;
+
         if (webhookSecret) {
             const sigHeader = String(req.headers['x-hub-signature'] || '').trim();
             const rawBody = typeof req.rawBody === 'string' ? req.rawBody : JSON.stringify(req.body || {});
             const expectedSig = 'sha1=' + crypto.createHmac('sha1', webhookSecret).update(rawBody).digest('hex');
             if (!sigHeader || !securitySuite.wardenTimingSafeEqual(sigHeader, expectedSig)) {
+                securitySuite.recordWebhookVerification(false);
+                securitySuite.recordStrike(clientIp, 'Hook: Forged Digiflazz Webhook Signature', triggerHeliosOwnerAlert, req);
                 securitySuite.logThreat(
                   'Hook',
                   'critical',
                   clientIp,
                   'Forged Digiflazz Webhook Blocked',
-                  `Signature X-Hub-Signature pada webhook Digiflazz tidak valid atau palsu dari IP ${clientIp}.`
+                  `Signature X-Hub-Signature pada webhook Digiflazz tidak valid atau palsu dari IP ${clientIp}.`,
+                  triggerHeliosOwnerAlert,
+                  { req }
                 );
                 return res.status(403).json({ success: false, error: "Invalid X-Hub-Signature" });
             }
+            signatureVerified = true;
         }
+
         const payload = req.body;
         if (!payload || !payload.data) return res.json({ success: false, msg: "No payload" });
-        await processDigiflazzWebhookData(payload.data);
+        const result = await processDigiflazzWebhookData(payload.data, {
+            signatureVerified,
+            clientIp,
+            req
+        });
+        if (result && result.success === false && result.error) {
+            return res.status(403).json(result);
+        }
         res.json({ success: true });
     } catch(e) {
         console.error("Webhook route error", e);
@@ -6772,8 +7171,6 @@ app.get("/api/summary", (req, res) => {
       modalTerjual
     });
   });
-
-  app.get("/api/test-wa", async (req, res) => { if (waSocket) { try { await waSocket.sendMessage("6285169949218@s.whatsapp.net", { text: "Testing WA!" }); res.send("Sent"); } catch(e: any) { res.status(500).send(e.toString()); } } else { res.send("No wa"); } });
 
   // --- End Physical Sales API ---
 
@@ -9529,6 +9926,40 @@ Chuna menunggu kabar baik dari Kakak! 😊`;
           } catch(e) {}
         }
         return next();
+      });
+
+      // Tombol Darurat Inline Telegram Owner: [🛑 Matikan Semua Sesi & Blokir IP]
+      bot.action(/^sec_kill_ip_(.+)$/, async (ctx) => {
+        const callerId = ctx.from?.id;
+        if (!callerId || !Array.isArray(db.owners) || !db.owners.includes(callerId)) {
+          try {
+            await ctx.answerCbQuery('⛔ Akses Ditolak: Hanya Owner resmi yang dapat menekan tombol ini.', { show_alert: true });
+          } catch (e) {}
+          return;
+        }
+
+        const targetIp = String(ctx.match?.[1] || '').trim();
+        let killedCount = 0;
+        if (typeof (global as any).__killAllAdminSessionsAndBanIP === 'function') {
+          killedCount = (global as any).__killAllAdminSessionsAndBanIP(targetIp);
+        } else if (targetIp) {
+          securitySuite.banIPManual(targetIp, 24 * 60 * 60 * 1000, 'Emergency Remote Session Kill by Owner via Telegram');
+        }
+
+        try {
+          await ctx.answerCbQuery(`🛑 Seluruh sesi dimatikan (${killedCount} sesi) & IP ${targetIp} diblokir 24 jam!`, { show_alert: true });
+        } catch (e) {}
+
+        try {
+          await ctx.reply(
+            `🛑 *[WARDEN EMERGENCY KILL-SWITCH EXECUTED]*\n` +
+            `━━━━━━━━━━━━━━━━━━━━━\n` +
+            `✅ Seluruh sesi login Dashboard (*${killedCount} sesi aktif*) telah dicabut paksa!\n` +
+            `🔒 IP Target \`${targetIp}\` telah dikarantina selama *24 Jam* di Nyxguard Firewall.\n` +
+            `⏰ Waktu Eksekusi: \`${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Makassar' })} WITA\``,
+            { parse_mode: 'Markdown' }
+          );
+        } catch (e) {}
       });
 
       bot.start(async (ctx) => {
@@ -13427,15 +13858,18 @@ if (process.env.APPLET_ID || process.env.K_REVISION) {
         let statusText = 'Tagihan Ditemukan!';
         
         const linesHtml = [
-            ['Nama', data.nama || '-'],
-            ['Nomor', data.no || data.target || '-'],
-            ['Layanan', data.layanan || '-']
+            ['Nama', securitySuite.escapeHtml(data.nama || '-')],
+            ['Nomor', securitySuite.escapeHtml(data.no || data.target || '-')],
+            ['Layanan', securitySuite.escapeHtml(data.layanan || '-')]
         ].map(([label, val]) => `
             <div class="line">
-                <span class="label">${label}</span>
+                <span class="label">${securitySuite.escapeHtml(label)}</span>
                 <span class="val">${val}</span>
             </div>
         `).join('');
+
+        const safeTotal = Number(data.total || 0);
+        const formattedTotal = Number.isFinite(safeTotal) ? safeTotal.toLocaleString('id-ID') : '0';
 
         let html = `<!DOCTYPE html>
 <html lang="id">
@@ -13476,7 +13910,7 @@ if (process.env.APPLET_ID || process.env.K_REVISION) {
         </div>
         <div class="box-container" style="flex-direction: row; justify-content: space-between; align-items: center;">
             <div class="box-title" style="margin: 0;">TOTAL TAGIHAN</div>
-            <div class="box-val">Rp ${(data.total || 0).toLocaleString('id-ID')}</div>
+            <div class="box-val">Rp ${formattedTotal}</div>
         </div>
     </div>
 </body>
@@ -14340,6 +14774,7 @@ E4 Store`,
     if (!tx) {
         return res.status(404).send("Nota tidak ditemukan.");
     }
+    const safeId = securitySuite.escapeHtml(id);
 
     const html = `<!DOCTYPE html>
 <html lang="id">
@@ -14421,10 +14856,10 @@ E4 Store`,
 <body>
     <div class="actions">
         <button class="btn" onclick="window.print()">🖨️ Cetak / Print Struk</button>
-        <a class="btn btn-download" href="/api/nota/${id}/image" download="nota-${id}.png">⬇️ Unduh Gambar (PNG)</a>
+        <a class="btn btn-download" href="/api/nota/${encodeURIComponent(id)}/image" download="nota-${safeId}.png">⬇️ Unduh Gambar (PNG)</a>
     </div>
     <div class="receipt-card">
-        <img class="receipt-img" src="/api/nota/${id}/image" alt="Struk Transaksi ${id}" />
+        <img class="receipt-img" src="/api/nota/${encodeURIComponent(id)}/image" alt="Struk Transaksi ${safeId}" />
     </div>
 </body>
 </html>`;

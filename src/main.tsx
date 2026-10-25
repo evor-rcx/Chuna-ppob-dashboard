@@ -27,6 +27,7 @@ if (typeof window !== 'undefined' && !(window as any).__chunaFetchPatched) {
       if (
         res.status === 401 &&
         !urlStr.includes('/api/auth/login') &&
+        !urlStr.includes('/api/auth/verify-otp') &&
         !urlStr.includes('/api/auth/session') &&
         !urlStr.includes('/api/security/warden/')
       ) {

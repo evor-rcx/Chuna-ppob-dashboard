@@ -50,6 +50,9 @@ const SakuraRain = () => {
 export function Login({ onLogin }: { onLogin: (token?: string) => void }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [otpChallengeId, setOtpChallengeId] = useState<string | null>(null);
+  const [otpNotice, setOtpNotice] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUnlocking, setIsUnlocking] = useState(false);
@@ -141,9 +144,65 @@ export function Login({ onLogin }: { onLogin: (token?: string) => void }) {
     };
   };
 
+  const completeLoginSuccess = (token: string) => {
+    sessionStorage.setItem('chuna_auth_token', token);
+    sessionStorage.setItem('chuna_auth', 'true');
+    localStorage.setItem('chuna_auth_token', token);
+    localStorage.setItem('chuna_auth', 'true');
+    setIsUnlocking(true);
+    playAccessGranted();
+    setTimeout(() => {
+      onLogin(token);
+    }, 1000);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting || isUnlocking) return;
+
+    // Step 2: Verifikasi OTP 6 Angka dari Telegram Owner
+    if (otpChallengeId) {
+      const cleanOtp = otpCode.trim();
+      if (!cleanOtp || cleanOtp.length < 6) {
+        setError('Masukkan 6 angka Kode OTP dari Telegram Owner terlebih dahulu!');
+        return;
+      }
+
+      setIsSubmitting(true);
+      setError('');
+
+      try {
+        const deviceFingerprint = await collectDeviceFingerprint();
+        const res = await fetch('/api/auth/verify-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            challengeId: otpChallengeId,
+            otp: cleanOtp,
+            deviceFingerprint
+          })
+        });
+        const data = await res.json();
+
+        if (res.ok && data.success && data.token) {
+          completeLoginSuccess(data.token);
+        } else {
+          if (data.expired) {
+            setOtpChallengeId(null);
+            setOtpCode('');
+            setOtpNotice('');
+          }
+          setError(data.error || 'Kode OTP tidak valid atau sudah hangus!');
+        }
+      } catch (err) {
+        setError('Gagal menghubungi server verifikasi OTP. Coba lagi.');
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
+    // Step 1: Verifikasi Username & Password
     if (!username.trim() || !password) {
       setError('Masukkan username dan password terlebih dahulu!');
       return;
@@ -165,16 +224,13 @@ export function Login({ onLogin }: { onLogin: (token?: string) => void }) {
       });
       const data = await res.json();
 
-      if (res.ok && data.success && data.token) {
-        sessionStorage.setItem('chuna_auth_token', data.token);
-        sessionStorage.setItem('chuna_auth', 'true');
-        localStorage.setItem('chuna_auth_token', data.token);
-        localStorage.setItem('chuna_auth', 'true');
-        setIsUnlocking(true);
-        playAccessGranted();
-        setTimeout(() => {
-          onLogin(data.token);
-        }, 1000);
+      if (res.ok && data.success && data.requireOtp && data.challengeId) {
+        setOtpChallengeId(data.challengeId);
+        setOtpCode('');
+        setOtpNotice(data.message || 'Kode OTP 6 angka telah dikirim ke Telegram Owner (berlaku 3 menit).');
+        setError('');
+      } else if (res.ok && data.success && data.token) {
+        completeLoginSuccess(data.token);
       } else {
         setError(data.error || 'Ara ara~ Username atau password salah ya!');
       }
@@ -233,39 +289,73 @@ export function Login({ onLogin }: { onLogin: (token?: string) => void }) {
                 />
               </motion.div>
               <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-300 to-purple-400 tracking-wide">E4 STORE</h1>
-              <p className="text-pink-200/70 text-sm mt-2 font-medium italic">"Okaeri, silahkan login."</p>
+              <p className="text-pink-200/70 text-sm mt-2 font-medium italic">
+                {otpChallengeId ? '"Verifikasi Keamanan 2-Langkah (2FA Owner)"' : '"Okaeri, silahkan login."'}
+              </p>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6">
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-widest text-purple-300/80 mb-2 ml-1">
-                  Username
-                </label>
-                <div className="relative group">
-                  <input
-                    type="text"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    className="w-full bg-black/20 border border-purple-500/30 p-4 rounded-2xl text-white outline-none focus:border-pink-500/80 focus:ring-2 focus:ring-pink-500/20 transition-all placeholder:text-white/20"
-                    placeholder="Masukkan username..."
-                  />
+              {!otpChallengeId ? (
+                <>
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-widest text-purple-300/80 mb-2 ml-1">
+                      Username
+                    </label>
+                    <div className="relative group">
+                      <input
+                        type="text"
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                        className="w-full bg-black/20 border border-purple-500/30 p-4 rounded-2xl text-white outline-none focus:border-pink-500/80 focus:ring-2 focus:ring-pink-500/20 transition-all placeholder:text-white/20"
+                        placeholder="Masukkan username..."
+                      />
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-widest text-purple-300/80 mb-2 ml-1">
+                      Password
+                    </label>
+                    <div className="relative group">
+                      <input
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="w-full bg-black/20 border border-purple-500/30 p-4 rounded-2xl text-white outline-none focus:border-pink-500/80 focus:ring-2 focus:ring-pink-500/20 transition-all placeholder:text-white/20"
+                        placeholder="Masukkan password..."
+                      />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-4">
+                  {otpNotice && (
+                    <div className="bg-emerald-500/10 border border-emerald-500/30 p-3.5 rounded-2xl text-emerald-300 text-xs leading-relaxed">
+                      🔐 {otpNotice}
+                    </div>
+                  )}
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-widest text-pink-300 mb-2 ml-1">
+                      Masukkan Kode OTP dari Telegram Owner
+                    </label>
+                    <div className="relative group">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={8}
+                        autoFocus
+                        value={otpCode}
+                        onChange={(e) => setOtpCode(e.target.value.replace(/\s+/g, ''))}
+                        className="w-full bg-black/30 border border-pink-500/50 p-4 rounded-2xl text-white text-center font-mono text-2xl tracking-[0.4em] outline-none focus:border-pink-400 focus:ring-2 focus:ring-pink-500/30 transition-all placeholder:text-white/20 placeholder:text-sm placeholder:tracking-normal"
+                        placeholder="6 Angka OTP Telegram..."
+                      />
+                    </div>
+                    <p className="text-[11px] text-purple-300/60 mt-2 text-center">
+                      Berlaku 3 menit • Maksimal 3x percobaan salah langsung hangus
+                    </p>
+                  </div>
                 </div>
-              </div>
-              
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-widest text-purple-300/80 mb-2 ml-1">
-                  Password
-                </label>
-                <div className="relative group">
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-black/20 border border-purple-500/30 p-4 rounded-2xl text-white outline-none focus:border-pink-500/80 focus:ring-2 focus:ring-pink-500/20 transition-all placeholder:text-white/20"
-                    placeholder="Masukkan password..."
-                  />
-                </div>
-              </div>
+              )}
 
               {error && (
                 <motion.p 
@@ -284,12 +374,33 @@ export function Login({ onLogin }: { onLogin: (token?: string) => void }) {
                 disabled={isSubmitting}
                 className="w-full bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-400 hover:to-purple-500 disabled:opacity-60 text-white font-bold py-4 rounded-2xl transition-all shadow-[0_0_20px_rgba(236,72,153,0.4)] hover:shadow-[0_0_30px_rgba(236,72,153,0.6)] cursor-pointer tracking-widest uppercase text-sm mt-4"
               >
-                {isSubmitting ? 'Memverifikasi...' : 'Masuk'}
+                {isSubmitting
+                  ? 'Memverifikasi...'
+                  : otpChallengeId
+                  ? 'Verifikasi Kode OTP'
+                  : 'Masuk'}
               </motion.button>
               
-              <div className="text-center mt-6">
-                <a href="#" className="text-xs text-purple-300/60 hover:text-pink-300 transition-colors">Lupa password?</a>
-              </div>
+              {otpChallengeId ? (
+                <div className="text-center mt-4">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOtpChallengeId(null);
+                      setOtpCode('');
+                      setOtpNotice('');
+                      setError('');
+                    }}
+                    className="text-xs text-purple-300/70 hover:text-pink-300 transition-colors cursor-pointer"
+                  >
+                    ← Kembali ke Login / Kirim Ulang OTP
+                  </button>
+                </div>
+              ) : (
+                <div className="text-center mt-6">
+                  <a href="#" className="text-xs text-purple-300/60 hover:text-pink-300 transition-colors">Lupa password?</a>
+                </div>
+              )}
             </form>
           </motion.div>
         ) : (

@@ -1759,6 +1759,35 @@ echo "[✓] Hardening OS STB Armbian SELESAI! Sistem kini dalam status Enterpris
     this.bannedIPs.delete(ip);
     this.logThreat('Nyxguard', 'low', ip, 'Manual Unban', 'IP unbanned by Administrator');
   }
+
+  public banIPManual(ip: string, durationMs: number = 24 * 60 * 60 * 1000, reason: string = 'Blocked by Owner via Telegram Emergency Kill-Switch') {
+    const cleanIp = (ip || '').trim().replace(/^::ffff:/, '');
+    if (!cleanIp) return;
+    const existing = this.bannedIPs.get(cleanIp) || { until: 0, reason, strikes: 3 };
+    existing.strikes = Math.max(3, existing.strikes + 1);
+    existing.reason = reason;
+    existing.until = Date.now() + durationMs;
+    this.bannedIPs.set(cleanIp, existing);
+    this.logThreat('Nyxguard', 'critical', cleanIp, 'Emergency Owner IP Block (24h)', reason);
+  }
+
+  public recordWebhookVerification(isValid: boolean) {
+    if (isValid) {
+      this.stats.verifiedWebhooks++;
+    } else {
+      this.stats.rejectedWebhooks++;
+    }
+  }
+
+  public escapeHtml(input: any): string {
+    return String(input ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
 }
 
 export const securitySuite = new SecurityShieldSuite();
+
