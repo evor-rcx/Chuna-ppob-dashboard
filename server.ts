@@ -6415,12 +6415,14 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
       }
     });
 
-    // Helper untuk generate Voice Note Sambutan Grup dengan Backsound intonasi suara.mp3 (Fast Parallel Chunks)
+    // Helper untuk generate Voice Note Sambutan Grup dengan Backsound intonasi suara.opus (Fast Parallel Chunks)
 async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | null> {
   try {
-    const bgPath = path.resolve(process.cwd(), "intonasi suara.mp3");
+    const opusBgPath = path.resolve(process.cwd(), "intonasi suara.opus");
+    const mp3BgPath = path.resolve(process.cwd(), "intonasi suara.mp3");
+    const bgPath = fs.existsSync(opusBgPath) ? opusBgPath : mp3BgPath;
     if (!fs.existsSync(bgPath)) {
-      console.warn("[Welcome VN] File intonasi suara.mp3 tidak ditemukan di root");
+      console.warn("[Welcome VN] File intonasi suara.opus / intonasi suara.mp3 tidak ditemukan di root");
       return null;
     }
 
@@ -6502,7 +6504,7 @@ async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | nul
     const totalDuration = (4 + narrationDuration + 3).toFixed(2);
     const fadeOutStart = (4 + narrationDuration).toFixed(2);
 
-    const ffmpegCmd = "ffmpeg -y -i \"" + bgPath + "\" -i \"" + combinedNarrationFile + "\" -filter_complex \"[0:a]volume=0.65,afade=t=out:st=" + fadeOutStart + ":d=3[bg];[1:a]adelay=4000|4000,volume=1.1[voice];[bg][voice]amix=inputs=2:duration=first:dropout_transition=2[mixed]\" -map \"[mixed]\" -map_metadata -1 -t " + totalDuration + " -ar 48000 -ac 1 -c:a libopus -b:a 48k -vbr on -compression_level 10 -frame_duration 20 -application voip \"" + outputOggVn + "\"";
+    const ffmpegCmd = "ffmpeg -y -stream_loop -1 -i \"" + bgPath + "\" -i \"" + combinedNarrationFile + "\" -filter_complex \"[0:a]volume=0.65,afade=t=out:st=" + fadeOutStart + ":d=3[bg];[1:a]adelay=4000|4000,volume=1.1[voice];[bg][voice]amix=inputs=2:duration=first:dropout_transition=2[mixed]\" -map \"[mixed]\" -map_metadata -1 -t " + totalDuration + " -ar 48000 -ac 1 -c:a libopus -b:a 48k -vbr on -compression_level 10 -frame_duration 20 -application voip \"" + outputOggVn + "\"";
     execSync(ffmpegCmd);
 
     let vnBuffer: Buffer | null = null;
@@ -14868,7 +14870,7 @@ E4 Store`,
 
 if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: "spa",
     });
     app.use(vite.middlewares);

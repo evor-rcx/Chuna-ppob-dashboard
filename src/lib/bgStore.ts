@@ -1,3 +1,4 @@
+import { safeLocalStorage } from './safeStorage';
 
 export const DB_NAME = 'chuna_bg_db';
 export const STORE_NAME = 'bg_store';
@@ -41,12 +42,12 @@ export async function saveBgFile(file: File): Promise<void> {
       request.onerror = () => reject(request.error);
     });
   } catch (err) {
-    console.warn("IndexedDB failed, falling back to localStorage", err);
+    console.warn("IndexedDB failed, falling back to safeLocalStorage", err);
     try {
       const b64 = await fileToBase64(file);
-      localStorage.setItem('chuna_bg_fallback', b64);
-    } catch (fallbackErr) {
-      console.error("Fallback to localStorage failed", fallbackErr);
+      safeLocalStorage.setItem('chuna_bg_fallback', b64);
+    } catch (fallbackErr: any) {
+      console.error("Fallback to safeLocalStorage failed", fallbackErr);
       throw new Error("Gagal menyimpan file: " + (fallbackErr.message || fallbackErr.name || "Unknown error"));
     }
   }
@@ -79,7 +80,7 @@ export async function getBgFile(): Promise<File | null> {
       request.onerror = () => reject(request.error);
     });
   } catch (err) {
-    const b64 = localStorage.getItem('chuna_bg_fallback');
+    const b64 = safeLocalStorage.getItem('chuna_bg_fallback');
     if (b64) {
       return dataURLtoFile(b64, 'fallback_bg');
     }
@@ -89,7 +90,7 @@ export async function getBgFile(): Promise<File | null> {
 
 export async function clearBgFile(): Promise<void> {
   try {
-    localStorage.removeItem('chuna_bg_fallback');
+    safeLocalStorage.removeItem('chuna_bg_fallback');
     await new Promise<void>((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, 1);
       request.onupgradeneeded = (e: any) => {

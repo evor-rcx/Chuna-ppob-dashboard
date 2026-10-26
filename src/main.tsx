@@ -1,7 +1,52 @@
-import {StrictMode} from 'react';
-import {createRoot} from 'react-dom/client';
+import React, { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
+import { safeLocalStorage, safeSessionStorage } from './lib/safeStorage';
+
+class RootErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; errorMsg: string }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, errorMsg: '' };
+  }
+
+  static getDerivedStateFromError(error: any) {
+    return {
+      hasError: true,
+      errorMsg: error?.message || 'Terjadi kendala saat memuat tampilan.'
+    };
+  }
+
+  componentDidCatch(error: any, info: any) {
+    console.error('RootErrorBoundary caught error:', error, info);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-[#0b0f19] text-white flex flex-col items-center justify-center p-6 text-center">
+          <div className="max-w-md w-full bg-white/5 border border-white/10 rounded-3xl p-8 backdrop-blur-xl shadow-2xl">
+            <h2 className="text-xl font-bold text-pink-400 mb-2">E4 STORE SHIELD</h2>
+            <p className="text-sm text-slate-300 mb-6">
+              Tampilan sedang dimuat ulang untuk menyesuaikan proteksi browser Anda.
+            </p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="w-full py-3 px-6 rounded-2xl bg-gradient-to-r from-pink-500 to-purple-600 text-white font-bold text-sm uppercase tracking-wider cursor-pointer"
+            >
+              Muat Ulang Halaman
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // Pasang interceptor global pada window.fetch untuk menyertakan Cookie & Header Token Sesi pada seluruh request /api/*
 if (typeof window !== 'undefined' && !(window as any).__chunaFetchPatched) {
@@ -12,7 +57,7 @@ if (typeof window !== 'undefined' && !(window as any).__chunaFetchPatched) {
     const isApiCall = urlStr.startsWith('/api/') || urlStr.includes('/api/');
 
     if (isApiCall) {
-      const token = sessionStorage.getItem('chuna_auth_token') || localStorage.getItem('chuna_auth_token') || '';
+      const token = safeSessionStorage.getItem('chuna_auth_token') || safeLocalStorage.getItem('chuna_auth_token') || '';
       const headers = new Headers(init?.headers || (input instanceof Request ? input.headers : undefined));
       if (token) {
         if (!headers.has('X-Admin-Session')) headers.set('X-Admin-Session', token);
@@ -35,10 +80,10 @@ if (typeof window !== 'undefined' && !(window as any).__chunaFetchPatched) {
           const clone = res.clone();
           const data = await clone.json();
           if (data && data.code === 'SESSION_REQUIRED') {
-            sessionStorage.removeItem('chuna_auth');
-            sessionStorage.removeItem('chuna_auth_token');
-            localStorage.removeItem('chuna_auth');
-            localStorage.removeItem('chuna_auth_token');
+            safeSessionStorage.removeItem('chuna_auth');
+            safeSessionStorage.removeItem('chuna_auth_token');
+            safeLocalStorage.removeItem('chuna_auth');
+            safeLocalStorage.removeItem('chuna_auth_token');
             window.dispatchEvent(new Event('logout'));
           }
         } catch (e) {}
@@ -52,7 +97,10 @@ if (typeof window !== 'undefined' && !(window as any).__chunaFetchPatched) {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <RootErrorBoundary>
+      <App />
+    </RootErrorBoundary>
   </StrictMode>,
 );
+
 

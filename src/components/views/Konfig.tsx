@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { PageContainer } from '../PageContainer';
 import { clearBgFile, saveBgFile } from '../../lib/bgStore';
+import { safeLocalStorage } from '../../lib/safeStorage';
 
 export function Konfig({ onBack }: { onBack: () => void }) {
   const [username, setUsername] = useState('');
@@ -8,8 +9,8 @@ export function Konfig({ onBack }: { onBack: () => void }) {
   const [status, setStatus] = useState('Checking...');
   const [balance, setBalance] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [bgType, setBgType] = useState(localStorage.getItem('chuna_bg_type') || '');
-  const [bgUrl, setBgUrl] = useState(localStorage.getItem('chuna_bg_url') || '');
+  const [bgType, setBgType] = useState(() => safeLocalStorage.getItem('chuna_bg_type') || '');
+  const [bgUrl, setBgUrl] = useState(() => safeLocalStorage.getItem('chuna_bg_url') || '');
 
   useEffect(() => {
     fetch('/api/digiflazz/status')
@@ -86,7 +87,7 @@ export function Konfig({ onBack }: { onBack: () => void }) {
               value={bgType}
               onChange={async (e) => {
                 setBgType(e.target.value);
-                localStorage.setItem('chuna_bg_type', e.target.value);
+                safeLocalStorage.setItem('chuna_bg_type', e.target.value);
                 await clearBgFile();
                 setBgUrl('');
                 window.dispatchEvent(new Event('chuna_bg_update'));

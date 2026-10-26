@@ -15,10 +15,7 @@ export default defineConfig(() => {
     server: {
       host: '0.0.0.0',
       allowedHosts: true as any,
-      hmr: {
-        protocol: 'wss',
-        clientPort: 443
-      },
+      hmr: process.env.DISABLE_HMR !== 'true' ? false : false,
     },
   };
 });

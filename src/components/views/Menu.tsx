@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { getHolidayInfo } from '../../utils/holidays';
 import { playPowerDown, playTerminalBlip, playNotificationChime, speakWaNotification } from '../../utils/audio';
 import { ServerHardwareWidget } from '../ServerHardwareWidget';
+import { safeLocalStorage, safeSessionStorage } from '../../lib/safeStorage';
 
 interface MenuProps {
   onNavigate: (page: Page) => void;
@@ -78,7 +79,7 @@ export function Menu({ onNavigate }: MenuProps) {
   // Suara Notifikasi Otomatis WhatsApp (TTS)
   const [isWaTtsEnabled, setIsWaTtsEnabled] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('e4_wa_tts_enabled');
+      const saved = safeLocalStorage.getItem('e4_wa_tts_enabled');
       return saved !== null ? saved === 'true' : true;
     }
     return true;
@@ -91,7 +92,7 @@ export function Menu({ onNavigate }: MenuProps) {
     setIsWaTtsEnabled(prev => {
       const next = !prev;
       if (typeof window !== 'undefined') {
-        localStorage.setItem('e4_wa_tts_enabled', String(next));
+        safeLocalStorage.setItem('e4_wa_tts_enabled', String(next));
       }
       return next;
     });
@@ -476,7 +477,7 @@ export function Menu({ onNavigate }: MenuProps) {
       } else {
         clearInterval(interval);
         setTimeout(() => {
-          sessionStorage.removeItem('chuna_auth');
+          safeSessionStorage.removeItem('chuna_auth');
           window.dispatchEvent(new Event('logout'));
         }, 1500);
       }

@@ -19,17 +19,18 @@ import { Login } from './components/views/Login';
 import { CustomAlert } from './components/CustomAlert';
 import { Page } from './types';
 import { getBgFile } from './lib/bgStore';
+import { safeLocalStorage, safeSessionStorage } from './lib/safeStorage';
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>('menu');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [bgType, setBgType] = useState(localStorage.getItem('chuna_bg_type') || '');
+  const [bgType, setBgType] = useState(() => safeLocalStorage.getItem('chuna_bg_type') || '');
   const [bgUrl, setBgUrl] = useState('');
 
   useEffect(() => {
     let currentObjectUrl = '';
     const loadBg = async () => {
-      const type = localStorage.getItem('chuna_bg_type') || '';
+      const type = safeLocalStorage.getItem('chuna_bg_type') || '';
       setBgType(type);
       if (type) {
         try {
@@ -62,7 +63,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem('chuna_theme');
+    const savedTheme = safeLocalStorage.getItem('chuna_theme');
     if (savedTheme === 'light') {
       document.documentElement.classList.add('theme-light');
     } else {
@@ -73,10 +74,10 @@ export default function App() {
   useEffect(() => {
     const handleLogout = () => {
       fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
-      sessionStorage.removeItem('chuna_auth');
-      sessionStorage.removeItem('chuna_auth_token');
-      localStorage.removeItem('chuna_auth');
-      localStorage.removeItem('chuna_auth_token');
+      safeSessionStorage.removeItem('chuna_auth');
+      safeSessionStorage.removeItem('chuna_auth_token');
+      safeLocalStorage.removeItem('chuna_auth');
+      safeLocalStorage.removeItem('chuna_auth_token');
       setIsAuthenticated(false);
     };
     window.addEventListener('logout', handleLogout as EventListener);
@@ -90,22 +91,22 @@ export default function App() {
         const data = await res.json();
         if (data && data.authenticated) {
           if (data.token) {
-            sessionStorage.setItem('chuna_auth_token', data.token);
-            localStorage.setItem('chuna_auth_token', data.token);
+            safeSessionStorage.setItem('chuna_auth_token', data.token);
+            safeLocalStorage.setItem('chuna_auth_token', data.token);
           }
-          sessionStorage.setItem('chuna_auth', 'true');
-          localStorage.setItem('chuna_auth', 'true');
+          safeSessionStorage.setItem('chuna_auth', 'true');
+          safeLocalStorage.setItem('chuna_auth', 'true');
           setIsAuthenticated(true);
         } else {
-          sessionStorage.removeItem('chuna_auth');
-          sessionStorage.removeItem('chuna_auth_token');
-          localStorage.removeItem('chuna_auth');
-          localStorage.removeItem('chuna_auth_token');
+          safeSessionStorage.removeItem('chuna_auth');
+          safeSessionStorage.removeItem('chuna_auth_token');
+          safeLocalStorage.removeItem('chuna_auth');
+          safeLocalStorage.removeItem('chuna_auth_token');
           setIsAuthenticated(false);
         }
       } catch (e) {
-        const auth = sessionStorage.getItem('chuna_auth') || localStorage.getItem('chuna_auth');
-        const token = sessionStorage.getItem('chuna_auth_token') || localStorage.getItem('chuna_auth_token');
+        const auth = safeSessionStorage.getItem('chuna_auth') || safeLocalStorage.getItem('chuna_auth');
+        const token = safeSessionStorage.getItem('chuna_auth_token') || safeLocalStorage.getItem('chuna_auth_token');
         if (auth === 'true' && token) {
           setIsAuthenticated(true);
         }
@@ -116,11 +117,11 @@ export default function App() {
 
   const handleLogin = (token?: string) => {
     if (token) {
-      sessionStorage.setItem('chuna_auth_token', token);
-      localStorage.setItem('chuna_auth_token', token);
+      safeSessionStorage.setItem('chuna_auth_token', token);
+      safeLocalStorage.setItem('chuna_auth_token', token);
     }
-    sessionStorage.setItem('chuna_auth', 'true');
-    localStorage.setItem('chuna_auth', 'true');
+    safeSessionStorage.setItem('chuna_auth', 'true');
+    safeLocalStorage.setItem('chuna_auth', 'true');
     setIsAuthenticated(true);
   };
 

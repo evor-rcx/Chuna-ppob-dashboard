@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { playAccessGranted } from '../../utils/audio';
+import { safeLocalStorage, safeSessionStorage } from '../../lib/safeStorage';
 
 const SakuraRain = () => {
   const [petals, setPetals] = useState<{ id: number, x: number, delay: number, duration: number, size: number, rotation: number, xMovement: number }[]>([]);
@@ -145,10 +146,10 @@ export function Login({ onLogin }: { onLogin: (token?: string) => void }) {
   };
 
   const completeLoginSuccess = (token: string) => {
-    sessionStorage.setItem('chuna_auth_token', token);
-    sessionStorage.setItem('chuna_auth', 'true');
-    localStorage.setItem('chuna_auth_token', token);
-    localStorage.setItem('chuna_auth', 'true');
+    safeSessionStorage.setItem('chuna_auth_token', token);
+    safeSessionStorage.setItem('chuna_auth', 'true');
+    safeLocalStorage.setItem('chuna_auth_token', token);
+    safeLocalStorage.setItem('chuna_auth', 'true');
     setIsUnlocking(true);
     playAccessGranted();
     setTimeout(() => {

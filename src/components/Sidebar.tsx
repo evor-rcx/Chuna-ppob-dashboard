@@ -4,6 +4,7 @@ import { getHolidayInfo } from '../utils/holidays';
 import { Store } from "lucide-react";
 import { playPowerDown, playTerminalBlip } from '../utils/audio';
 import { ServerHardwareWidget } from './ServerHardwareWidget';
+import { safeSessionStorage } from '../lib/safeStorage';
 
 
 const Clock = () => {
@@ -112,7 +113,7 @@ export function Sidebar() {
       } else {
         clearInterval(interval);
         setTimeout(() => {
-          sessionStorage.removeItem('chuna_auth');
+          safeSessionStorage.removeItem('chuna_auth');
           window.dispatchEvent(new Event('logout'));
         }, 1500);
       }
