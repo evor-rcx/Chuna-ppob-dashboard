@@ -6451,9 +6451,9 @@ async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | nul
     const cleanPronounceName = spokenName;
 
     const chunks = [
-      greetingTime + " kepada seluruh penghuni grup yang terhormat, dan selamat datang, " + cleanPronounceName + "! Terima kasih sudah bergabung di grup ini.",
-      "Diharapkan untuk membaca panduan yang ada di Informasi Grup terlebih dahulu.",
-      "Informasi Grup: Satu, Pantau perubahan harga naik dan turun secara real-time. Dua, Update notifikasi gangguan dan produk close sementara. Tiga, Dapatkan event promo, flash sale, dan diskon harian.",
+      greetingTime + " kepada seluruh penghuni grup yang terhormat, dan selamat bergabung, " + cleanPronounceName + "! Terima kasih sudah bergabung di grup ini.",
+      "Diharapkan untuk mendengarkan panduan yang ada di Informasi Grup terlebih dahulu.",
+      "Informasi Grup: Satu, Pantau perubahan harga naik dan turun secara real-time. Dua, Update notifikasi gangguan dan produk close sementara.",
       "Grup ini tidak menerima spam, jadi chat hanya untuk notifikasi saja. Gunakan bot dengan sewajarnya. Terima kasih.",
       "Selamat berbelanja dan semoga harimu menyenangkan!"
     ];
@@ -6718,7 +6718,7 @@ async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | nul
                   customerName = spokenCallName ? " " + spokenCallName : "";
               }
               
-              const replyMsg = `Maaf banget, Kak${customerName}! Chuna nggak bisa angkat telepon sekarang (lagi sibuk ngurus pelanggan lain, hihi). Tapi jangan khawatir, mending langsung chat Bot Telegram resmi E4Store aja! Di sana Chuna 24 jam siap bantu jawab semua pertanyaan kamu dengan cepat dan ramah~Chuna asisten E4Store, transaksi langsung otomatis kok, tetap aman dan terpercaya! Yuk, mampir~ Chuna tunggu, ya! 😘🐾`;
+              const replyMsg = `Mohon maaf, Kak${customerName}. Nomor ini tidak menerima telepon dan hanya digunakan untuk mengirim notifikasi, seperti OTP Telegram serta notifikasi orderan berhasil atau gagal. Untuk pemesanan, Kak bisa order online melalui Bot Telegram resmi E4Store atau offline melalui Owner. Chuna siap membantu 24 jam dengan cepat dan ramah. Terima kasih, Kak. Chuna tunggu, ya! 😘🐾`;
               
               const baseVnName = path.join(process.cwd(), `tmp_call_vn_${Date.now()}_${Math.floor(Math.random()*1000)}`);
               const vnPathMp3 = `${baseVnName}.mp3`;
@@ -6732,12 +6732,61 @@ async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | nul
               await new Promise(r => setTimeout(r, 3000));
               await waSocket.sendPresenceUpdate("paused", call.from);
               
-              const { exec } = await import('child_process');
+              const { exec, execSync } = await import('child_process');
+              let callBgPath = path.join(process.cwd(), "tolak panggilan.mp3");
+              let isValidCallBg = false;
+              try {
+                  if (fs.existsSync(callBgPath) && fs.statSync(callBgPath).size > 100) {
+                      isValidCallBg = true;
+                  }
+              } catch (e) {}
+              if (!isValidCallBg) {
+                  const fallbackBgs = [
+                      path.join(process.cwd(), "intonasi suara.opus"),
+                      path.join(process.cwd(), "sistem.mp3"),
+                      path.join(process.cwd(), "welcome.opus")
+                  ];
+                  for (const fb of fallbackBgs) {
+                      try {
+                          if (fs.existsSync(fb) && fs.statSync(fb).size > 100) {
+                              callBgPath = fb;
+                              isValidCallBg = true;
+                              break;
+                          }
+                      } catch (e) {}
+                  }
+              }
+
+              let narrationDuration = 16;
+              try {
+                  const durOutput = execSync(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${vnPathMp3}"`).toString().trim();
+                  const parsedDur = parseFloat(durOutput);
+                  if (!isNaN(parsedDur) && parsedDur > 0) {
+                      narrationDuration = parsedDur;
+                  }
+              } catch (e) {
+                  console.error("FFprobe call VN error:", e);
+              }
+
+              const fadeOutStart = (2 + narrationDuration).toFixed(2);
+              const totalDuration = (2 + narrationDuration + 3).toFixed(2);
+
+              const buildMixCmd = (bgFile: string) =>
+                  `ffmpeg -y -stream_loop -1 -i "${bgFile}" -i "${vnPathMp3}" -filter_complex "[0:a]volume=0.65,afade=t=out:st=${fadeOutStart}:d=3[bg];[1:a]adelay=2000|2000,volume=1.1[voice];[bg][voice]amix=inputs=2:duration=first:dropout_transition=2[mixed]" -map "[mixed]" -map_metadata -1 -t ${totalDuration} -ar 48000 -ac 1 -c:a libopus -b:a 48k -vbr on -compression_level 10 -frame_duration 20 -application voip "${vnPathOgg}"`;
+
               await new Promise((resolve, reject) => {
-                  exec(`ffmpeg -y -i ${vnPathMp3} -c:a libopus -b:a 48k -vbr on -compression_level 10 -frame_duration 20 -application voip ${vnPathOgg}`, (error) => {
+                  exec(buildMixCmd(callBgPath), (error) => {
                       if (error) {
-                          console.error("FFmpeg error:", error);
-                          reject(error);
+                          console.error("FFmpeg mix error with primary backsound, retrying with fallback:", error);
+                          const backupBg = path.join(process.cwd(), "intonasi suara.opus");
+                          exec(buildMixCmd(backupBg), (err2) => {
+                              if (err2) {
+                                  console.error("FFmpeg fallback mix error:", err2);
+                                  reject(err2);
+                              } else {
+                                  resolve(true);
+                              }
+                          });
                       } else {
                           resolve(true);
                       }
