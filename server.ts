@@ -6313,6 +6313,7 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
 
                         await waSocket.readMessages([msg.key]).catch(() => {});
 
+                        const axios = require("axios");
                         const partResults = await Promise.all(textChunks.map(async (textPart, idx) => {
                             const partPath = `${baseVnName}_part_${idx}.mp3`;
                             try {
@@ -6323,7 +6324,7 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
                                     headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
                                     timeout: 8000
                                 });
-                                if (resp.data && resp.data.byteLength > 0) {
+                                if (resp.data && resp.data.length > 0) {
                                     fs.writeFileSync(partPath, Buffer.from(resp.data));
                                     return { idx, path: partPath };
                                 }
@@ -6451,6 +6452,7 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
 
                         await waSocket.readMessages([msg.key]).catch(() => {});
 
+                        const axios = require("axios");
                         const partResults = await Promise.all(textChunks.map(async (textPart, idx) => {
                             const partPath = `${baseVnName}_part_${idx}.mp3`;
                             try {
@@ -6461,7 +6463,7 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
                                     headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
                                     timeout: 8000
                                 });
-                                if (resp.data && resp.data.byteLength > 0) {
+                                if (resp.data && resp.data.length > 0) {
                                     fs.writeFileSync(partPath, Buffer.from(resp.data));
                                     return { idx, path: partPath };
                                 }
@@ -6880,6 +6882,7 @@ async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | nul
               }
               if (curChunk) textChunks.push(curChunk);
 
+              const axios = require("axios");
               const partResults = await Promise.all(textChunks.map(async (textPart, idx) => {
                 const partPath = `${baseVnName}_part_${idx}.mp3`;
                 try {
@@ -6890,7 +6893,7 @@ async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | nul
                     headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
                     timeout: 8000
                   });
-                  if (resp.data && resp.data.byteLength > 0) {
+                  if (resp.data && resp.data.length > 0) {
                     fs.writeFileSync(partPath, Buffer.from(resp.data));
                     return { idx, path: partPath };
                   }
