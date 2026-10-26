@@ -6275,8 +6275,6 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
                 console.log('Found tx:', tx?.id, 'status:', tx?.status, 'Already replied:', repliedThanks.has(replyKey));
                 
                 if (!isGroup && !repliedThanks.has(replyKey)) {
-                    repliedThanks.add(replyKey);
-                    
                     let customerName = "Kakak";
                     if (msg.pushName && !isPhoneNumberOrEmpty(msg.pushName)) {
                         customerName = msg.pushName.trim();
@@ -6294,19 +6292,73 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
                     try {
                         const spokenCustomerName = transliterateForTts(customerName) || "Kakak";
                         const vnText = `Sama-sama Kak ${spokenCustomerName}! Makasih banyak ya udah belanja di E4 Store. Semoga rezekinya makin lancar. Chuna tunggu pesanan selanjutnya ya kak!`;
-                        const baseVnName = path.join(process.cwd(), `tmp_vn_${Date.now()}_${Math.floor(Math.random()*1000)}`);
+                        const timestamp = Date.now() + "_" + Math.floor(Math.random() * 1000);
+                        const baseVnName = path.join("/tmp", `tmp_vn_${timestamp}`);
+                        const concatListFile = `${baseVnName}_concat.txt`;
                         const vnPathMp3 = `${baseVnName}.mp3`;
                         const vnPathOgg = `${baseVnName}.ogg`;
-                        const tts = new EdgeTTS({ voice: 'id-ID-GadisNeural', lang: 'id-ID', outputFormat: 'audio-24khz-48kbitrate-mono-mp3', pitch: '+20Hz', rate: '+15%' });
+
+                        const rawSentences = vnText.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F000}-\u{1F2FF}\u{1FA70}-\u{1FAFF}\u{FE00}-\u{FE0F}]/gu, "").trim().split(/(?<=[.!?])\s+/);
+                        const textChunks: string[] = [];
+                        let curChunk = "";
+                        for (const s of rawSentences) {
+                            if ((curChunk + " " + s).trim().length <= 160) {
+                                curChunk = (curChunk + " " + s).trim();
+                            } else {
+                                if (curChunk) textChunks.push(curChunk);
+                                curChunk = s;
+                            }
+                        }
+                        if (curChunk) textChunks.push(curChunk);
+
                         await waSocket.readMessages([msg.key]).catch(() => {});
-                        await tts.ttsPromise(vnText, vnPathMp3);
-                        await waSocket.sendPresenceUpdate("recording", jid);
-                        await new Promise(r => setTimeout(r, 4500));
-                        await waSocket.sendPresenceUpdate("paused", jid);
+
+                        const partResults = await Promise.all(textChunks.map(async (textPart, idx) => {
+                            const partPath = `${baseVnName}_part_${idx}.mp3`;
+                            try {
+                                const q = encodeURIComponent(textPart);
+                                const url = `https://translate.google.com/translate_tts?ie=UTF-8&tl=id&client=tw-ob&q=${q}`;
+                                const resp = await axios.get(url, {
+                                    responseType: "arraybuffer",
+                                    headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+                                    timeout: 8000
+                                });
+                                if (resp.data && resp.data.byteLength > 0) {
+                                    fs.writeFileSync(partPath, Buffer.from(resp.data));
+                                    return { idx, path: partPath };
+                                }
+                            } catch (gErr) {
+                                try {
+                                    const tts = new EdgeTTS({ voice: 'id-ID-GadisNeural', lang: 'id-ID', outputFormat: 'audio-24khz-48kbitrate-mono-mp3', pitch: '+20Hz', rate: '+15%' });
+                                    await tts.ttsPromise(textPart, partPath);
+                                    if (fs.existsSync(partPath) && fs.statSync(partPath).size > 100) {
+                                        return { idx, path: partPath };
+                                    }
+                                } catch (e2) {}
+                            }
+                            return null;
+                        }));
+
+                        const validParts = partResults.filter((r): r is { idx: number; path: string } => r !== null).sort((a, b) => a.idx - b.idx);
+                        if (validParts.length === 0) throw new Error("Gagal membuat audio TTS untuk VN Terima Kasih");
+
+                        const { exec, execSync } = await import('child_process');
+                        fs.writeFileSync(concatListFile, validParts.map(p => `file '${p.path}'`).join("\n"));
+                        execSync(`ffmpeg -y -f concat -safe 0 -i "${concatListFile}" -c copy "${vnPathMp3}"`);
+
+                        let vnDuration = 8;
+                        try {
+                            const durOut = execSync(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${vnPathMp3}"`).toString().trim();
+                            const parsed = parseFloat(durOut);
+                            if (!isNaN(parsed) && parsed > 0) vnDuration = parsed;
+                        } catch (e) {}
+
+                        await waSocket.sendPresenceUpdate("recording", jid).catch(() => {});
+                        await new Promise(r => setTimeout(r, 2000));
+                        await waSocket.sendPresenceUpdate("paused", jid).catch(() => {});
                         
-                        const { exec } = await import('child_process');
                         await new Promise((resolve, reject) => {
-                            exec(`ffmpeg -y -i ${vnPathMp3} -c:a libopus -b:a 48k -vbr on -compression_level 10 -frame_duration 20 -application voip ${vnPathOgg}`, (error) => {
+                            exec(`ffmpeg -y -i "${vnPathMp3}" -ar 48000 -ac 1 -c:a libopus -b:a 48k -vbr on -compression_level 10 -frame_duration 20 -application voip "${vnPathOgg}"`, (error) => {
                                 if (error) {
                                     console.error("FFmpeg error:", error);
                                     reject(error);
@@ -6316,11 +6368,18 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
                             });
                         });
 
+                        const fakeWaveform = new Uint8Array(Array.from({ length: 64 }, (_, i) => Math.floor(Math.sin(i / 4) * 35 + 45)));
                         let sent = false;
-                        for(let i=0; i<3; i++) {
+                        for (let i = 0; i < 3; i++) {
                             try {
                                 const audioBuffer = fs.readFileSync(vnPathOgg);
-                                await waSocket.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/mp4', ptt: true }, { quoted: msg });
+                                await waSocket.sendMessage(jid, {
+                                    audio: audioBuffer,
+                                    mimetype: "audio/ogg; codecs=opus",
+                                    ptt: true,
+                                    seconds: Math.ceil(vnDuration),
+                                    waveform: fakeWaveform
+                                } as any, { quoted: msg });
                                 sent = true;
                                 break;
                             } catch (err: any) {
@@ -6328,11 +6387,19 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
                                 await new Promise(r => setTimeout(r, 2000));
                             }
                         }
-                        if(!sent) throw new Error("Gagal kirim VN setelah 3 kali percobaan");
+                        if (sent) {
+                            repliedThanks.add(replyKey);
+                        } else {
+                            throw new Error("Gagal kirim VN setelah 3 kali percobaan");
+                        }
 
                         setTimeout(() => { 
+                            try { fs.unlinkSync(concatListFile); } catch(e){}
                             try { fs.unlinkSync(vnPathMp3); } catch(e){} 
                             try { fs.unlinkSync(vnPathOgg); } catch(e){} 
+                            for (const p of validParts) {
+                                try { fs.unlinkSync(p.path); } catch(e){}
+                            }
                         }, 5000);
                     } catch (e) {
                         console.error("Gagal kirim balasan makasih VN:", e);
@@ -6344,8 +6411,6 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
             if (jid && !jid.endsWith('@g.us') && !jid.endsWith('@newsletter') && !jid.includes('status@broadcast')) {
                 const replyKey = jid + '_' + new Date().toDateString();
                 if (!repliedGeneral.has(replyKey)) {
-                    repliedGeneral.add(replyKey);
-                    
                     const cleanJid = jid.split('@')[0];
                     let resolvedName = "";
                     if (msg.pushName && !isPhoneNumberOrEmpty(msg.pushName)) {
@@ -6365,19 +6430,73 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
                     try {
                         const vnText = `Halo Kak${customerName}, mohon maaf mengganggu waktunya. Saya Chuna, asisten otomatis E4 Store. Nomor ini dioperasikan oleh sistem bot, jadi tidak bisa membalas pesan atau menerima telepon. Apabila Kakak mau memesan produk atau ada yang ingin ditanyakan, silakan kontak langsung ke Owner kami lewat link berikut. Sekian dari Chuna, mohon maaf sebesar-besarnya dan terima kasih!`;
                         
-                        const baseVnName = path.join(process.cwd(), `tmp_gen_vn_${Date.now()}_${Math.floor(Math.random()*1000)}`);
+                        const timestamp = Date.now() + "_" + Math.floor(Math.random() * 1000);
+                        const baseVnName = path.join("/tmp", `tmp_gen_vn_${timestamp}`);
+                        const concatListFile = `${baseVnName}_concat.txt`;
                         const vnPathMp3 = `${baseVnName}.mp3`;
                         const vnPathOgg = `${baseVnName}.ogg`;
-                        const tts = new EdgeTTS({ voice: 'id-ID-GadisNeural', lang: 'id-ID', outputFormat: 'audio-24khz-48kbitrate-mono-mp3', pitch: '+20Hz', rate: '+15%' });
+
+                        const rawSentences = vnText.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F000}-\u{1F2FF}\u{1FA70}-\u{1FAFF}\u{FE00}-\u{FE0F}]/gu, "").trim().split(/(?<=[.!?])\s+/);
+                        const textChunks: string[] = [];
+                        let curChunk = "";
+                        for (const s of rawSentences) {
+                            if ((curChunk + " " + s).trim().length <= 160) {
+                                curChunk = (curChunk + " " + s).trim();
+                            } else {
+                                if (curChunk) textChunks.push(curChunk);
+                                curChunk = s;
+                            }
+                        }
+                        if (curChunk) textChunks.push(curChunk);
+
                         await waSocket.readMessages([msg.key]).catch(() => {});
-                        await tts.ttsPromise(vnText, vnPathMp3);
-                        await waSocket.sendPresenceUpdate("recording", jid);
-                        await new Promise(r => setTimeout(r, 4500));
-                        await waSocket.sendPresenceUpdate("paused", jid);
+
+                        const partResults = await Promise.all(textChunks.map(async (textPart, idx) => {
+                            const partPath = `${baseVnName}_part_${idx}.mp3`;
+                            try {
+                                const q = encodeURIComponent(textPart);
+                                const url = `https://translate.google.com/translate_tts?ie=UTF-8&tl=id&client=tw-ob&q=${q}`;
+                                const resp = await axios.get(url, {
+                                    responseType: "arraybuffer",
+                                    headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+                                    timeout: 8000
+                                });
+                                if (resp.data && resp.data.byteLength > 0) {
+                                    fs.writeFileSync(partPath, Buffer.from(resp.data));
+                                    return { idx, path: partPath };
+                                }
+                            } catch (gErr) {
+                                try {
+                                    const tts = new EdgeTTS({ voice: 'id-ID-GadisNeural', lang: 'id-ID', outputFormat: 'audio-24khz-48kbitrate-mono-mp3', pitch: '+20Hz', rate: '+15%' });
+                                    await tts.ttsPromise(textPart, partPath);
+                                    if (fs.existsSync(partPath) && fs.statSync(partPath).size > 100) {
+                                        return { idx, path: partPath };
+                                    }
+                                } catch (e2) {}
+                            }
+                            return null;
+                        }));
+
+                        const validParts = partResults.filter((r): r is { idx: number; path: string } => r !== null).sort((a, b) => a.idx - b.idx);
+                        if (validParts.length === 0) throw new Error("Gagal membuat audio TTS untuk VN General");
+
+                        const { exec, execSync } = await import('child_process');
+                        fs.writeFileSync(concatListFile, validParts.map(p => `file '${p.path}'`).join("\n"));
+                        execSync(`ffmpeg -y -f concat -safe 0 -i "${concatListFile}" -c copy "${vnPathMp3}"`);
+
+                        let vnDuration = 16;
+                        try {
+                            const durOut = execSync(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${vnPathMp3}"`).toString().trim();
+                            const parsed = parseFloat(durOut);
+                            if (!isNaN(parsed) && parsed > 0) vnDuration = parsed;
+                        } catch (e) {}
+
+                        await waSocket.sendPresenceUpdate("recording", jid).catch(() => {});
+                        await new Promise(r => setTimeout(r, 2000));
+                        await waSocket.sendPresenceUpdate("paused", jid).catch(() => {});
                         
-                        const { exec } = await import('child_process');
                         await new Promise((resolve, reject) => {
-                            exec(`ffmpeg -y -i ${vnPathMp3} -c:a libopus -b:a 48k -vbr on -compression_level 10 -frame_duration 20 -application voip ${vnPathOgg}`, (error) => {
+                            exec(`ffmpeg -y -i "${vnPathMp3}" -ar 48000 -ac 1 -c:a libopus -b:a 48k -vbr on -compression_level 10 -frame_duration 20 -application voip "${vnPathOgg}"`, (error) => {
                                 if (error) {
                                     console.error("FFmpeg error:", error);
                                     reject(error);
@@ -6386,11 +6505,19 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
                                 }
                             });
                         });
+
+                        const fakeWaveform = new Uint8Array(Array.from({ length: 64 }, (_, i) => Math.floor(Math.sin(i / 4) * 35 + 45)));
                         let sent = false;
-                        for(let i=0; i<3; i++) {
+                        for (let i = 0; i < 3; i++) {
                             try {
                                 const audioBuffer = fs.readFileSync(vnPathOgg);
-                                await waSocket.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/mp4', ptt: true }, { quoted: msg });
+                                await waSocket.sendMessage(jid, {
+                                    audio: audioBuffer,
+                                    mimetype: "audio/ogg; codecs=opus",
+                                    ptt: true,
+                                    seconds: Math.ceil(vnDuration),
+                                    waveform: fakeWaveform
+                                } as any, { quoted: msg });
                                 sent = true;
                                 break;
                             } catch (err: any) {
@@ -6398,13 +6525,18 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
                                 await new Promise(r => setTimeout(r, 2000));
                             }
                         }
-                        if(sent) {
+                        if (sent) {
+                            repliedGeneral.add(replyKey);
                             await waSocket.sendMessage(jid, { text: "📞 Link WA Owner: https://wa.me/6285169949218" });
                         }
                         
                         setTimeout(() => { 
+                             try { fs.unlinkSync(concatListFile); } catch(e){}
                              try { fs.unlinkSync(vnPathMp3); } catch(e){} 
                              try { fs.unlinkSync(vnPathOgg); } catch(e){} 
+                             for (const p of validParts) {
+                                 try { fs.unlinkSync(p.path); } catch(e){}
+                             }
                          }, 5000);
                     } catch (e) {
                         console.error("Gagal kirim VN general:", e);
@@ -6685,11 +6817,19 @@ async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | nul
           try {
             if (waSocket) {
               await waSocket.rejectCall(call.id, call.from);
-              
-              if (isOwnerWhatsapp(call.from)) {
-                const cleanOwnerNum = normalizeWaNumber(call.from);
+
+              let targetJid = (call as any).chatId && String((call as any).chatId).endsWith('@s.whatsapp.net') ? String((call as any).chatId) : call.from;
+              if (targetJid && targetJid.endsWith('@lid')) {
+                const resolvedPhone = resolveSenderWaPhone(targetJid, targetJid.replace(/\D/g, ''));
+                if (resolvedPhone && resolvedPhone.length >= 8 && resolvedPhone.length <= 15) {
+                  targetJid = `${resolvedPhone}@s.whatsapp.net`;
+                }
+              }
+
+              if (isOwnerWhatsapp(call.from) || isOwnerWhatsapp(targetJid)) {
+                const cleanOwnerNum = normalizeWaNumber(targetJid || call.from);
                 console.log(`[WA Bot] 👑 Panggilan WhatsApp dari Owner terdeteksi: +${cleanOwnerNum}`);
-                await waSocket.sendMessage(call.from, {
+                await waSocket.sendMessage(targetJid, {
                   text: `👑 *PANGGILAN DARI OWNER TERDETEKSI*\n\nHalo Bos/Owner! Sistem bot E4 Store aktif & siap beroperasi.\nKarena keterbatasan protokol WhatsApp bot Baileys tidak mendukung panggilan suara VoIP langsung, silakan gunakan chat teks untuk berkomunikasi atau mengelola server.\n\nKetik *!menu* untuk mengakses Panel Kendali Owner.`
                 });
                 try {
@@ -6697,14 +6837,14 @@ async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | nul
                     await bot.telegram.sendMessage(oId, `👑 *PANGGILAN WHATSAPP DARI OWNER*\nNomor: +${cleanOwnerNum}\nWaktu: ${new Date().toLocaleString('id-ID')}\nStatus: Panggilan diidentifikasi sebagai Owner resmi.`, { parse_mode: 'Markdown' });
                   }
                 } catch (e) {}
-                continue;
+                // Lanjutkan ke pembuatan dan pengiriman Voice Note penolakan panggilan agar Owner tetap menerima VN saat mengetes panggilan
               }
-              
+
               let customerName = "";
-              const cleanJid = cleanWaPhone(call.from);
+              const cleanJid = cleanWaPhone(targetJid || call.from);
               const callPushName = (call as any).pushName || (call as any).notify;
               if (callPushName) {
-                  saveWaProfile(call.from, callPushName);
+                  saveWaProfile(targetJid || call.from, callPushName);
               }
               let resolvedCallName = "";
               if (cleanJid && db.waProfiles && db.waProfiles[cleanJid] && !isPhoneNumberOrEmpty(db.waProfiles[cleanJid])) {
@@ -6717,22 +6857,69 @@ async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | nul
                   const spokenCallName = transliterateForTts(resolvedCallName);
                   customerName = spokenCallName ? " " + spokenCallName : "";
               }
-              
+
               const replyMsg = `Mohon maaf, Kak${customerName}. Nomor ini tidak menerima telepon dan hanya digunakan untuk mengirim notifikasi, seperti OTP Telegram serta notifikasi orderan berhasil atau gagal. Untuk pemesanan, Kak bisa order online melalui Bot Telegram resmi E4Store atau offline melalui Owner. Chuna siap membantu 24 jam dengan cepat dan ramah. Terima kasih, Kak. Chuna tunggu, ya! 😘🐾`;
-              
-              const baseVnName = path.join(process.cwd(), `tmp_call_vn_${Date.now()}_${Math.floor(Math.random()*1000)}`);
+              const ttsText = replyMsg.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F000}-\u{1F2FF}\u{1FA70}-\u{1FAFF}\u{FE00}-\u{FE0F}]/gu, "").trim();
+
+              const timestamp = Date.now() + "_" + Math.floor(Math.random() * 1000);
+              const baseVnName = path.join("/tmp", `tmp_call_vn_${timestamp}`);
+              const concatListFile = `${baseVnName}_concat.txt`;
               const vnPathMp3 = `${baseVnName}.mp3`;
               const vnPathOgg = `${baseVnName}.ogg`;
-              const tts = new EdgeTTS({ voice: 'id-ID-GadisNeural', lang: 'id-ID', outputFormat: 'audio-24khz-48kbitrate-mono-mp3', pitch: '+20Hz', rate: '+15%' });
-              
-              await tts.ttsPromise(replyMsg, vnPathMp3);
-              
-              await waSocket.presenceSubscribe(call.from);
-              await waSocket.sendPresenceUpdate("recording", call.from);
-              await new Promise(r => setTimeout(r, 3000));
-              await waSocket.sendPresenceUpdate("paused", call.from);
-              
+
+              const rawSentences = ttsText.split(/(?<=[.!?])\s+/);
+              const textChunks: string[] = [];
+              let curChunk = "";
+              for (const s of rawSentences) {
+                if ((curChunk + " " + s).trim().length <= 160) {
+                  curChunk = (curChunk + " " + s).trim();
+                } else {
+                  if (curChunk) textChunks.push(curChunk);
+                  curChunk = s;
+                }
+              }
+              if (curChunk) textChunks.push(curChunk);
+
+              const partResults = await Promise.all(textChunks.map(async (textPart, idx) => {
+                const partPath = `${baseVnName}_part_${idx}.mp3`;
+                try {
+                  const q = encodeURIComponent(textPart);
+                  const url = `https://translate.google.com/translate_tts?ie=UTF-8&tl=id&client=tw-ob&q=${q}`;
+                  const resp = await axios.get(url, {
+                    responseType: "arraybuffer",
+                    headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+                    timeout: 8000
+                  });
+                  if (resp.data && resp.data.byteLength > 0) {
+                    fs.writeFileSync(partPath, Buffer.from(resp.data));
+                    return { idx, path: partPath };
+                  }
+                } catch (gErr) {
+                  try {
+                    const tts = new EdgeTTS({ voice: 'id-ID-GadisNeural', lang: 'id-ID', outputFormat: 'audio-24khz-48kbitrate-mono-mp3', pitch: '+20Hz', rate: '+15%' });
+                    await tts.ttsPromise(textPart, partPath);
+                    if (fs.existsSync(partPath) && fs.statSync(partPath).size > 100) {
+                      return { idx, path: partPath };
+                    }
+                  } catch (e2) {}
+                }
+                return null;
+              }));
+
+              const validParts = partResults.filter((r): r is { idx: number; path: string } => r !== null).sort((a, b) => a.idx - b.idx);
+              if (validParts.length === 0) throw new Error("Gagal membuat audio TTS untuk VN Tolak Panggilan");
+
               const { exec, execSync } = await import('child_process');
+              fs.writeFileSync(concatListFile, validParts.map(p => `file '${p.path}'`).join("\n"));
+              execSync(`ffmpeg -y -f concat -safe 0 -i "${concatListFile}" -c copy "${vnPathMp3}"`);
+
+              try {
+                await waSocket.presenceSubscribe(targetJid);
+                await waSocket.sendPresenceUpdate("recording", targetJid);
+                await new Promise(r => setTimeout(r, 2000));
+                await waSocket.sendPresenceUpdate("paused", targetJid);
+              } catch (presErr) {}
+
               let callBgPath = path.join(process.cwd(), "tolak panggilan.mp3");
               let isValidCallBg = false;
               try {
@@ -6792,13 +6979,25 @@ async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | nul
                       }
                   });
               });
-              
+
               const audioBuffer = fs.readFileSync(vnPathOgg);
-              await waSocket.sendMessage(call.from, { audio: audioBuffer, mimetype: 'audio/mp4', ptt: true });
-              
+              const fakeWaveform = new Uint8Array(Array.from({ length: 64 }, (_, i) => Math.floor(Math.sin(i / 4) * 35 + 45)));
+              await waSocket.sendMessage(targetJid, {
+                audio: audioBuffer,
+                mimetype: "audio/ogg; codecs=opus",
+                ptt: true,
+                seconds: Math.ceil(parseFloat(totalDuration)),
+                waveform: fakeWaveform
+              } as any);
+              console.log(`[Call VN] ✅ Voice Note penolakan panggilan BERHASIL dikirim ke ${targetJid}`);
+
               setTimeout(() => { 
+                   try { fs.unlinkSync(concatListFile); } catch(e){}
                    try { fs.unlinkSync(vnPathMp3); } catch(e){} 
                    try { fs.unlinkSync(vnPathOgg); } catch(e){} 
+                   for (const p of validParts) {
+                     try { fs.unlinkSync(p.path); } catch(e){}
+                   }
               }, 5000);
             }
           } catch (e) {
