@@ -4450,7 +4450,8 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                     }
                 }
                 
-                if (bot && tx.tgChatId && tx.tgMsgId) {
+                const isTgChatOwner = Boolean(tx.tgChatId && (db.owners || []).map((id: any) => Number(id)).includes(Number(tx.tgChatId)));
+                if (bot && tx.tgChatId && tx.tgMsgId && isTgChatOwner) {
                     (async () => {
                     try {
                         await bot.telegram.sendChatAction(tx.tgChatId, "typing");
@@ -4469,6 +4470,7 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                             if (!tgEdited) {
                                 await bot.telegram.sendMessage(tx.tgChatId, msg);
                             }
+                            await bot.telegram.sendChatAction(tx.tgChatId, "typing");
                             const buffer = await generateCanvasReceipt("nota", tx);
                             if (buffer) {
                                 const receiptCaption = getTransactionReceiptCaption(tx);
@@ -4495,23 +4497,26 @@ Coba lihat angka: *${tx.product}* saat ini mungkin sudah naik, melebihi batas ma
                     }
                     })();
                 } else if (bot && member && member.telegram && member.telegram.length > 0) {
-                    (async () => {
-                    try {
-                        const tgId = Array.isArray(member.telegram) ? member.telegram[0] : member.telegram.replace(/\D/g, '');
-                        if (status === 'Sukses') {
-                            await bot.telegram.sendMessage(tgId, msg);
-                            const buffer = await generateCanvasReceipt("nota", tx);
-                            if (buffer) {
-                                const receiptCaption = getTransactionReceiptCaption(tx);
-                                await bot.telegram.sendPhoto(tgId, { source: buffer }, { 
-                                    caption: receiptCaption 
-                                });
+                    const tgId = Array.isArray(member.telegram) ? member.telegram[0] : member.telegram.replace(/\D/g, '');
+                    const isMemberTgOwner = Boolean(tgId && (db.owners || []).map((id: any) => Number(id)).includes(Number(tgId)));
+                    if (isMemberTgOwner) {
+                        (async () => {
+                        try {
+                            if (status === 'Sukses') {
+                                await bot.telegram.sendMessage(tgId, msg);
+                                const buffer = await generateCanvasReceipt("nota", tx);
+                                if (buffer) {
+                                    const receiptCaption = getTransactionReceiptCaption(tx);
+                                    await bot.telegram.sendPhoto(tgId, { source: buffer }, { 
+                                        caption: receiptCaption 
+                                    });
+                                }
+                            } else {
+                                await bot.telegram.sendMessage(tgId, msg);
                             }
-                        } else {
-                            await bot.telegram.sendMessage(tgId, msg);
-                        }
-                    } catch (e: any) { console.error("Error in prepaidBrands check:", e.message); }
-                    })();
+                        } catch (e: any) { console.error("Error in prepaidBrands check:", e.message); }
+                        })();
+                    }
                 }
                 if (waSocket) {
                     (async () => {
@@ -9829,6 +9834,8 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca", forceRefresh: boo
                     : "";
                 const pendingHeader = isOwner ? "⏳ Selamat datang Owner!" : `⏳ Hai Kak${greetingWaName}!`;
 
+                const isTgChatOwner = Boolean(ctx.from?.id && (db.owners || []).map((id: any) => Number(id)).includes(Number(ctx.from.id)));
+
                 if (status === 'Pending') {
                     const cleanCustName = (customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak')
                         ? customerDisplayName.replace(/^kak\s+/i, '').trim()
@@ -9843,33 +9850,35 @@ Akan update otomatis ya, Kak. Mohon ditunggu.
 
 Chuna siap bantu! 😊`;
 
-                    let emeraldBuffer: Buffer | null = null;
-                    try {
-                        emeraldBuffer = await generateKonfirmasiReceipt({
+                    if (isTgChatOwner) {
+                        let emeraldBuffer: Buffer | null = null;
+                        try {
+                            emeraldBuffer = await generateKonfirmasiReceipt({
+                                nama: customerDisplayName || 'E4STORE',
+                                layanan: product.product_name,
+                                nomor: targetDisplay,
+                                totalBayar: total,
+                                waPhotoUrl: waDetails?.waPhotoUrl || null
+                            });
+                        } catch (e) {
+                            console.error("Gagal generate konfirmasi untuk TG:", e);
+                        }
+
+                        const konfirmasiCaption = formatKonfirmasiMessage({
                             nama: customerDisplayName || 'E4STORE',
                             layanan: product.product_name,
                             nomor: targetDisplay,
-                            totalBayar: total,
-                            waPhotoUrl: waDetails?.waPhotoUrl || null
+                            totalBayar: total
                         });
-                    } catch (e) {
-                        console.error("Gagal generate konfirmasi untuk TG:", e);
-                    }
 
-                    const konfirmasiCaption = formatKonfirmasiMessage({
-                        nama: customerDisplayName || 'E4STORE',
-                        layanan: product.product_name,
-                        nomor: targetDisplay,
-                        totalBayar: total
-                    });
-
-                    let tgMsg;
-                    if (emeraldBuffer) {
-                        tgMsg = await ctx.replyWithPhoto({ source: emeraldBuffer }, { caption: konfirmasiCaption });
-                    } else {
-                        tgMsg = await ctx.reply(konfirmasiCaption);
+                        let tgMsg;
+                        if (emeraldBuffer) {
+                            tgMsg = await ctx.replyWithPhoto({ source: emeraldBuffer }, { caption: konfirmasiCaption });
+                        } else {
+                            tgMsg = await ctx.reply(konfirmasiCaption);
+                        }
+                        tgMsgId = tgMsg.message_id;
                     }
-                    tgMsgId = tgMsg.message_id;
                 } else if (status === 'Sukses') {
                     
                     const sn = payJson.data.sn || "-";
@@ -9899,14 +9908,15 @@ Daya         : ${parts.slice(1).join(' / ')}`;
                     const appUrl = "http://localhost:3000";
                     
                     if (pay_ref_id) { var notaBuffer: any = await generateCanvasReceipt("nota", { id: pay_ref_id, memberId: member.id, customerDisplayName: customerDisplayName, customerName: customerDisplayName, nama: customerDisplayName, type: "prepaid", product: product.product_name, sku: product.buyer_sku_code, target: targetDisplay, price: total, modal: digiflazzPrice, cuan: cuan > 0 ? cuan : 0, status: status, method: method, sn: payJson.data?.sn || "-", date: new Date().toISOString() }); }
-                    let tgMsg;
-
-                    if (notaBuffer) {
-                        tgMsg = await ctx.replyWithPhoto({ source: notaBuffer }, { caption: msg, parse_mode: 'Markdown' });
-                    } else {
-                        tgMsg = await ctx.reply(msg, { parse_mode: 'Markdown' });
+                    if (isTgChatOwner) {
+                        let tgMsg;
+                        if (notaBuffer) {
+                            tgMsg = await ctx.replyWithPhoto({ source: notaBuffer }, { caption: msg, parse_mode: 'Markdown' });
+                        } else {
+                            tgMsg = await ctx.reply(msg, { parse_mode: 'Markdown' });
+                        }
+                        tgMsgId = tgMsg.message_id;
                     }
-                    tgMsgId = tgMsg.message_id;
                 } else {
                     finalTxStatus = 'Gagal';
                     refundPrepaidOnce();
@@ -10252,6 +10262,8 @@ async function processPascaPayment(ctx: any, ref_id: string, method: string, sta
                     : "";
                 const pendingHeader = isOwner ? "⏳ Selamat datang Owner!" : `⏳ Hai Kak${greetingWaName}!`;
 
+                const isTgChatOwner = Boolean(ctx.from?.id && (db.owners || []).map((id: any) => Number(id)).includes(Number(ctx.from.id)));
+
                 if (status === 'Pending') {
                     const cleanCustName = (customerDisplayName && customerDisplayName !== 'Pelanggan Setia' && customerDisplayName !== 'Kakak')
                         ? customerDisplayName.replace(/^kak\s+/i, '').trim()
@@ -10266,33 +10278,35 @@ Akan update otomatis ya, Kak. Mohon ditunggu.
 
 Chuna siap bantu! 😊`;
 
-                    let emeraldBuffer: Buffer | null = null;
-                    try {
-                        emeraldBuffer = await generateKonfirmasiReceipt({
+                    if (isTgChatOwner) {
+                        let emeraldBuffer: Buffer | null = null;
+                        try {
+                            emeraldBuffer = await generateKonfirmasiReceipt({
+                                nama: customerDisplayName || 'E4STORE',
+                                layanan: stateData.product.product_name,
+                                nomor: displayCustomerNo,
+                                totalBayar: total,
+                                waPhotoUrl: waDetails?.waPhotoUrl || null
+                            });
+                        } catch (e) {
+                            console.error("Gagal generate konfirmasi pascabayar untuk TG:", e);
+                        }
+
+                        const konfirmasiCaption = formatKonfirmasiMessage({
                             nama: customerDisplayName || 'E4STORE',
                             layanan: stateData.product.product_name,
                             nomor: displayCustomerNo,
-                            totalBayar: total,
-                            waPhotoUrl: waDetails?.waPhotoUrl || null
+                            totalBayar: total
                         });
-                    } catch (e) {
-                        console.error("Gagal generate konfirmasi pascabayar untuk TG:", e);
-                    }
 
-                    const konfirmasiCaption = formatKonfirmasiMessage({
-                        nama: customerDisplayName || 'E4STORE',
-                        layanan: stateData.product.product_name,
-                        nomor: displayCustomerNo,
-                        totalBayar: total
-                    });
-
-                    let tgMsg;
-                    if (emeraldBuffer) {
-                        tgMsg = await ctx.replyWithPhoto({ source: emeraldBuffer }, { caption: konfirmasiCaption });
-                    } else {
-                        tgMsg = await ctx.reply(konfirmasiCaption);
+                        let tgMsg;
+                        if (emeraldBuffer) {
+                            tgMsg = await ctx.replyWithPhoto({ source: emeraldBuffer }, { caption: konfirmasiCaption });
+                        } else {
+                            tgMsg = await ctx.reply(konfirmasiCaption);
+                        }
+                        tgMsgId = tgMsg.message_id;
                     }
-                    tgMsgId = tgMsg.message_id;
                 } else if (status === 'Sukses') {
                     
                     const sn = payJson.data.sn || "-";
@@ -10323,13 +10337,15 @@ Daya         : ${parts.slice(1).join(' / ')}`;
                     const appUrl = "http://localhost:3000";
                     
                     if (pay_ref_id) { var notaBuffer: any = await generateCanvasReceipt("nota", { id: pay_ref_id, memberId: member.id, customerDisplayName: customerDisplayName, customerName: customerDisplayName, nama: customerDisplayName, type: "pasca", product: stateData.product.product_name, sku: stateData.product.buyer_sku_code, target: displayCustomerNo, price: total, modal: digiflazzPrice, cuan: cuan > 0 ? cuan : 0, tagihan: stateData.checkResult?.selling_price || 0, admin_pel: stateData.adminFee || 0, status: status, method: method, sn: payJson.data?.sn || "-", date: new Date().toISOString() }); }
-                    let tgMsg;
-                    if (notaBuffer) {
-                        tgMsg = await ctx.replyWithPhoto({ source: notaBuffer }, { caption: msg, parse_mode: 'Markdown' });
-                    } else {
-                        tgMsg = await ctx.reply(msg, { parse_mode: 'Markdown' });
+                    if (isTgChatOwner) {
+                        let tgMsg;
+                        if (notaBuffer) {
+                            tgMsg = await ctx.replyWithPhoto({ source: notaBuffer }, { caption: msg, parse_mode: 'Markdown' });
+                        } else {
+                            tgMsg = await ctx.reply(msg, { parse_mode: 'Markdown' });
+                        }
+                        tgMsgId = tgMsg.message_id;
                     }
-                    tgMsgId = tgMsg.message_id;
                 } else {
                     finalTxStatus = 'Gagal';
                     refundPascaOnce();
