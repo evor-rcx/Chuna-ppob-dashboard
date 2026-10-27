@@ -6077,115 +6077,40 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
             }
 
             if (imgBuffer && imgBuffer.length > 0) {
-              let ocrResult: any = null;
-              try {
-                ocrResult = await scanImageWithGeminiOCR(imgBuffer);
-              } catch (e) {
-                console.error("Gagal scan image with Gemini OCR:", e);
-              }
-
               const now = new Date();
               const waktuStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} WIB`;
               const customerName = msg.pushName || 'Pelanggan';
 
-              // JIKA TERDETEKSI METERAN LISTRIK PLN
-              if (ocrResult && ocrResult.isDetected && (ocrResult.jenisFoto === 'METERAN_PLN' || ocrResult.noMeterPln)) {
-                const meterNum = ocrResult.noMeterPln || '45055441815';
+              if (msg.key.remoteJid) {
+                const replyCust = `Foto Kakak sudah kami teruskan ke Owner untuk dibantu proses langsung ya Kak. Mohon ditunggu! 🙏😊`;
+                await waSocket.sendMessage(msg.key.remoteJid, { text: replyCust }, { quoted: msg }).catch(() => {});
+              }
 
-                // Simpan sesi percakapan
-                waCustomerSessions[cleanSenderNum] = {
-                  state: 'WAITING_PLN_NOMINAL',
-                  meterNumber: meterNum,
-                  meterPhotoBuffer: imgBuffer,
-                  timestamp: Date.now()
-                };
+              let captionOwner = `📸 *FOTO DARI PELANGGAN DITERIMA!* 📸\n` +
+                `━━━━━━━━━━━━━━━━━━━━━\n` +
+                `👤 *Dari:* ${customerName} (+${cleanSenderNum})\n` +
+                `🕒 *Waktu:* ${waktuStr}\n\n` +
+                `━━━━━━━━━━━━━━━━━━━━━\n` +
+                `💡 _Silakan cek foto terlampir & bantu proses pelanggan._`;
 
-                if (msg.key.remoteJid) {
-                  const priceMenu = getPlnPriceListMenu(db, getProductFee);
-                  let replyCust = '';
-                  if (priceMenu && priceMenu.trim().length > 0) {
-                    replyCust = `Baik Kak, foto yang Kakak kirim adalah *Meteran Listrik PLN*.\n\n` +
-                      `Ini Kakak mau isi berapa?\n` +
-                      `(Pilihan nominal & harga jual:\n${priceMenu})\n\n` +
-                      `_(Silakan balas dengan mengetik nominal yang diinginkan, misal: 20.000)_ 😊`;
-                  } else {
-                    replyCust = `Baik Kak, foto yang Kakak kirim adalah *Meteran Listrik PLN* (No. Meter: *${meterNum}*).\n\n` +
-                      `Ini Kakak mau isi berapa? Silakan balas dengan nominal yang diinginkan ya Kak. 😊`;
-                  }
-
-                  await waSocket.sendMessage(msg.key.remoteJid, { text: replyCust }, { quoted: msg }).catch(() => {});
+              if (waSocket) {
+                const targetOwners = (db.ownerWhatsapps && db.ownerWhatsapps.length > 0) ? db.ownerWhatsapps : ["6285169949218"];
+                for (const owPhone of targetOwners) {
+                  const owJid = `${owPhone}@s.whatsapp.net`;
+                  try {
+                    await waSocket.sendMessage(owJid, { image: imgBuffer, caption: captionOwner });
+                  } catch (owErr) {}
                 }
-              } 
-              // JIKA TERDETEKSI BUKTI TRANSFER (TF)
-              else if (ocrResult && ocrResult.isDetected && (ocrResult.jenisFoto === 'STRUK_PEMBAYARAN' || /transfer|bukti|lunas|qris|gopay|dana|bca|bri|mandiri|berhasil/i.test(ocrResult.fullText))) {
-                if (msg.key.remoteJid) {
-                  const replyCust = `Baik Kak, bukti transfer sudah kami terima dan langsung diteruskan ke Owner untuk dicek ya Kak. Mohon ditunggu sebentar ya! 🙏😊`;
-                  await waSocket.sendMessage(msg.key.remoteJid, { text: replyCust }, { quoted: msg }).catch(() => {});
-                }
+              }
 
-                let captionOwner = `💳 *BUKTI TRANSFER (TF) DITERIMA!* 💳\n` +
-                  `━━━━━━━━━━━━━━━━━━━━━\n` +
-                  `👤 *Dari:* ${customerName} (+${cleanSenderNum})\n` +
-                  `🕒 *Waktu:* ${waktuStr}\n\n`;
-
-                if (ocrResult.fullText) {
-                  captionOwner += `📝 *Rincian Terbaca:*\n${ocrResult.fullText.substring(0, 300)}\n\n`;
-                }
-                captionOwner += `━━━━━━━━━━━━━━━━━━━━━\n` +
-                  `💡 _Mohon segera dicek mutasi rekening / saldo masuk oleh Owner._`;
-
-                if (waSocket) {
-                  const targetOwners = (db.ownerWhatsapps && db.ownerWhatsapps.length > 0) ? db.ownerWhatsapps : ["6285169949218"];
-                  for (const owPhone of targetOwners) {
-                    const owJid = `${owPhone}@s.whatsapp.net`;
-                    try {
-                      await waSocket.sendMessage(owJid, { image: imgBuffer, caption: captionOwner });
-                    } catch (owErr) {
-                      console.error(`Gagal mengirim bukti TF ke owner ${owPhone}:`, owErr);
-                    }
-                  }
-                }
-
-                if (bot && db.owners && db.owners.length > 0) {
-                  for (const ownerId of db.owners) {
-                    bot.telegram.sendPhoto(ownerId, { source: imgBuffer }, { caption: captionOwner, parse_mode: 'Markdown' }).catch(() => {});
-                  }
-                }
-              } 
-              // JIKA PEMINDAIAN GAGAL / TIDAK TERBACA / BUKAN KEDUANYA: JANGAN DIAM!
-              else {
-                if (msg.key.remoteJid) {
-                  const replyCust = `Foto Kakak sudah kami teruskan ke Owner untuk dibantu proses langsung ya Kak. Mohon ditunggu! 🙏😊`;
-                  await waSocket.sendMessage(msg.key.remoteJid, { text: replyCust }, { quoted: msg }).catch(() => {});
-                }
-
-                let captionOwner = `📸 *FOTO DARI PELANGGAN DITERIMA!* 📸\n` +
-                  `━━━━━━━━━━━━━━━━━━━━━\n` +
-                  `👤 *Dari:* ${customerName} (+${cleanSenderNum})\n` +
-                  `🕒 *Waktu:* ${waktuStr}\n\n` +
-                  (ocrResult?.fullText ? `📝 *Teks Terbaca:* ${ocrResult.fullText.substring(0, 200)}\n\n` : `_(Foto belum terbaca otomatis oleh OCR, mohon cek foto terlampir)_\n\n`) +
-                  `━━━━━━━━━━━━━━━━━━━━━\n` +
-                  `💡 _Silakan cek foto terlampir & bantu proses pelanggan._`;
-
-                if (waSocket) {
-                  const targetOwners = (db.ownerWhatsapps && db.ownerWhatsapps.length > 0) ? db.ownerWhatsapps : ["6285169949218"];
-                  for (const owPhone of targetOwners) {
-                    const owJid = `${owPhone}@s.whatsapp.net`;
-                    try {
-                      await waSocket.sendMessage(owJid, { image: imgBuffer, caption: captionOwner });
-                    } catch (owErr) {}
-                  }
-                }
-
-                if (bot && db.owners && db.owners.length > 0) {
-                  for (const ownerId of db.owners) {
-                    bot.telegram.sendPhoto(ownerId, { source: imgBuffer }, { caption: captionOwner, parse_mode: 'Markdown' }).catch(() => {});
-                  }
+              if (bot && db.owners && db.owners.length > 0) {
+                for (const ownerId of db.owners) {
+                  bot.telegram.sendPhoto(ownerId, { source: imgBuffer }, { caption: captionOwner, parse_mode: 'Markdown' }).catch(() => {});
                 }
               }
             }
           } catch (ocrErr) {
-            console.error("Error memproses OCR foto WhatsApp:", ocrErr);
+            console.error("Error memproses foto WhatsApp:", ocrErr);
           }
         }
 

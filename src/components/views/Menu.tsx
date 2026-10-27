@@ -40,12 +40,10 @@ export function Menu({ onNavigate }: MenuProps) {
     digiflazz: { connected: boolean; balance: number; status: string; description: string };
     wa: { connected: boolean; status: string; description: string };
     telegram: { connected: boolean; status: string; description: string };
-    gemini: { connected: boolean; description: string };
   }>({
     digiflazz: { connected: false, balance: 0, status: 'Checking...', description: 'Memeriksa koneksi Digiflazz...' },
     wa: { connected: false, status: 'Checking...', description: 'Memeriksa bot WhatsApp...' },
-    telegram: { connected: false, status: 'Checking...', description: 'Memeriksa bot Telegram...' },
-    gemini: { connected: false, description: 'Memeriksa AI Gemini...' }
+    telegram: { connected: false, status: 'Checking...', description: 'Memeriksa bot Telegram...' }
   });
 
   // Incoming WhatsApp Messages
@@ -114,11 +112,10 @@ export function Menu({ onNavigate }: MenuProps) {
   const fetchSystemNotifications = async () => {
     setIsFetchingNotif(true);
     try {
-      const [digiRes, waRes, botRes, geminiRes, msgRes] = await Promise.allSettled([
+      const [digiRes, waRes, botRes, msgRes] = await Promise.allSettled([
         fetch('/api/digiflazz/status').then(r => r.json()),
         fetch('/api/wa/status').then(r => r.json()),
         fetch('/api/bot/status').then(r => r.json()),
-        fetch('/api/config/gemini').then(r => r.json()),
         fetch('/api/wa/messages').then(r => r.json())
       ]);
 
@@ -198,30 +195,7 @@ export function Menu({ onNavigate }: MenuProps) {
         }));
       }
 
-      // 4. AI Gemini OCR Status
-      if (geminiRes.status === 'fulfilled') {
-        const g = geminiRes.value;
-        const isConn = Boolean(g && g.connected);
-        setServicesStatus(prev => ({
-          ...prev,
-          gemini: {
-            connected: isConn,
-            description: isConn
-              ? 'Kunci API terpasang, OCR PLN & bukti transfer siap'
-              : 'API Key Gemini belum disetel'
-          }
-        }));
-      } else {
-        setServicesStatus(prev => ({
-          ...prev,
-          gemini: {
-            connected: false,
-            description: 'API Key Gemini belum disetel'
-          }
-        }));
-      }
-
-      // 5. WhatsApp Incoming Messages
+      // 4. WhatsApp Incoming Messages
       if (msgRes.status === 'fulfilled' && msgRes.value && Array.isArray(msgRes.value.messages)) {
         const currentMessages = msgRes.value.messages;
         setWaMessages(currentMessages);
@@ -405,8 +379,7 @@ export function Menu({ onNavigate }: MenuProps) {
   const offlineServicesCount =
     (servicesStatus.digiflazz.connected ? 0 : 1) +
     (servicesStatus.wa.connected ? 0 : 1) +
-    (servicesStatus.telegram.connected ? 0 : 1) +
-    (servicesStatus.gemini.connected ? 0 : 1);
+    (servicesStatus.telegram.connected ? 0 : 1);
 
   const totalAttentionCount = offlineServicesCount + unreadWaCount;
 
@@ -485,7 +458,7 @@ export function Menu({ onNavigate }: MenuProps) {
   };
 
   const handleItemClick = (id: Page) => {
-    if (id === 'produk' || id === 'konfig' || id === 'saldo' || id === 'bot' || id === 'security' || id === 'gemini') {
+    if (id === 'produk' || id === 'konfig' || id === 'saldo' || id === 'bot' || id === 'security') {
       setShowPasswordModal(id);
       setPasswordInput('');
       setTotpInput('');
@@ -538,7 +511,6 @@ export function Menu({ onNavigate }: MenuProps) {
     { id: 'produk', icon: <ShoppingCart size={24} />, label: 'PRODUK', subtitle: 'Prabayar • Pascabayar...', iconBg: 'bg-blue-50 text-blue-600 border border-blue-200/60' },
     { id: 'transaksi', icon: <FileText size={24} />, label: 'TRANSAKSI', subtitle: 'Sukses • Pending • Gagal...', iconBg: 'bg-emerald-50 text-emerald-600 border border-emerald-200/60' },
     { id: 'konfig', icon: <Settings size={24} />, label: 'KONFIG API', subtitle: 'Digiflazz • WA Owner', iconBg: 'bg-orange-50 text-orange-500 border border-orange-200/60' },
-    { id: 'gemini', icon: <Sparkles size={24} />, label: 'KONFIG AI GEMINI', subtitle: 'Model • API Key • Prompts', iconBg: 'bg-purple-50 text-purple-600 border border-purple-200/60' },
     { id: 'bot', icon: <Bot size={24} />, label: 'BOT WA / TELE', subtitle: 'Status • WA • Telegram', iconBg: 'bg-cyan-50 text-cyan-600 border border-cyan-200/60' },
     { id: 'saldo', icon: <Send size={24} />, label: 'MEMBER TELEGRAM', subtitle: 'Cek & Topup Saldo Tele', iconBg: 'bg-sky-50 text-sky-600 border border-sky-200/60' },
     { id: 'member-offline', icon: <Users size={24} />, label: 'MEMBER OFFLINE', subtitle: 'Data Pelanggan & Utang', iconBg: 'bg-teal-50 text-teal-600 border border-teal-200/60' },
@@ -985,7 +957,7 @@ export function Menu({ onNavigate }: MenuProps) {
             className="bg-white border border-slate-200/80 shadow-xs hover:shadow-md hover:border-blue-200/80 p-3.5 sm:p-4 rounded-2xl flex items-center gap-3 transition-all cursor-pointer group relative overflow-hidden text-left"
           >
             {/* Ikon Gembok untuk Menu Sensitif */}
-            {(item.id === 'produk' || item.id === 'konfig' || item.id === 'saldo' || item.id === 'bot' || item.id === 'gemini' || item.id === 'security') && (
+            {(item.id === 'produk' || item.id === 'konfig' || item.id === 'saldo' || item.id === 'bot' || item.id === 'security') && (
               <div className="absolute top-2.5 right-2.5 text-slate-300 group-hover:text-amber-500 transition-colors">
                 <Lock size={12} />
               </div>

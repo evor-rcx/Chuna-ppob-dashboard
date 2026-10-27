@@ -8,7 +8,7 @@ export type Page =
   | 'saldo' 
   | 'member-offline'
   | 'kasir-fisik'
-  | 'security'
-  | 'gemini';
+  | 'security';
+
 
 
