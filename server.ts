@@ -9275,10 +9275,17 @@ async function getDigiflazzProducts(type: "prepaid" | "pasca", forceRefresh: boo
   });
 
 
+  let isStartingTelegramBot = false;
+  let lastTelegramHealthCheck = 0;
+
   async function startTelegramBot(token: string) {
+    if (!token || !token.trim()) return;
+    if (isStartingTelegramBot) return;
+    isStartingTelegramBot = true;
     try {
       if (bot) {
-        await bot.stop("Config updated");
+        try { await bot.stop("Config updated"); } catch (e) {}
+        bot = null;
       }
       
       const activePaymentLocks = new Set<string>();
@@ -14014,19 +14021,26 @@ _Data member telah berhasil tersimpan dan akun otomatis aktif._`;
       });
       
 try { await bot.telegram.deleteWebhook({ drop_pending_updates: true }); } catch (e) {}
-if (process.env.APPLET_ID || process.env.K_REVISION) {
-    console.log("Skipping bot.launch() in AI Studio environment to prevent 409 Conflict with your local server.");
-} else {
-    await bot.launch();
-}
-
       botStatus = "Connected as @" + botInfo.username;
+      lastTelegramHealthCheck = Date.now();
       console.log("Bot started successfully:", botInfo.username);
+
+      if (process.env.APPLET_ID || process.env.K_REVISION) {
+        console.log("Skipping bot.launch() in AI Studio environment to prevent 409 Conflict with your local server.");
+      } else {
+        bot.launch({ dropPendingUpdates: false }).catch((launchErr: any) => {
+          console.error("[Telegram Bot] Polling terputus, Watchdog akan menyambungkan ulang otomatis:", launchErr?.message || launchErr);
+          bot = null;
+          botStatus = "Reconnecting... (" + (launchErr?.message || "Connection lost") + ")";
+        });
+      }
     } catch (error: any) {
       botStatus = "Error: " + error.message;
       bot = null;
-      console.error("Bot start failed:", error);
-      // Do not throw to prevent server crash
+      console.error("Bot start failed:", error?.message || error);
+      // Do not throw to prevent server crash; Watchdog will retry automatically
+    } finally {
+      isStartingTelegramBot = false;
     }
   }
 
@@ -14068,35 +14082,50 @@ if (process.env.APPLET_ID || process.env.K_REVISION) {
     const { token } = req.body;
     if (!token) return res.status(400).json({ error: "Token is required" });
     try {
-      db.telegramToken = token;
+      db.telegramToken = token.trim();
       writeDB(db);
-      await startTelegramBot(token);
-      res.json({ success: true, message: "Bot connected and running" });
+      isStartingTelegramBot = false;
+      await startTelegramBot(db.telegramToken);
+      if (bot && botStatus.startsWith("Connected")) {
+        res.json({ success: true, message: "Bot connected and running" });
+      } else {
+        res.json({ success: true, message: "Token berhasil disimpan. Sistem sedang menghubungkan otomatis di latar belakang." });
+      }
     } catch (error: any) {
       res.status(500).json({ success: false, error: error.message });
     }
   });
 
+  if (!db.telegramToken && process.env.TELEGRAM_BOT_TOKEN) {
+    db.telegramToken = process.env.TELEGRAM_BOT_TOKEN.trim();
+    writeDB(db);
+  }
+
   if (db.telegramToken) {
     console.log("Auto-starting Telegram bot...");
-    const autoStart = async () => {
-      let retries = 5;
-      while (retries > 0) {
-        try {
-          await startTelegramBot(db.telegramToken);
-          console.log("Telegram bot auto-started successfully.");
-          break;
-        } catch (e: any) {
-          console.error(`Auto-start Telegram bot failed (${retries} retries left):`, e.message);
-          retries--;
-          if (retries > 0) {
-            await new Promise(res => setTimeout(res, 3000));
-          }
-        }
-      }
-    };
-    autoStart();
+    startTelegramBot(db.telegramToken).catch(() => {});
   }
+
+  // Watchdog Auto-Reconnect 24 Jam untuk Bot Telegram (Anti Mati Lampu & Putus Jaringan)
+  setInterval(async () => {
+    const savedToken = (db.telegramToken || process.env.TELEGRAM_BOT_TOKEN || "").trim();
+    if (!savedToken || isStartingTelegramBot) return;
+
+    if (!bot || !botStatus.startsWith("Connected")) {
+      console.log("[Telegram Watchdog] 🔄 Mencoba menyambungkan ulang Bot Telegram secara otomatis...");
+      await startTelegramBot(savedToken);
+    } else if (Date.now() - lastTelegramHealthCheck > 60000) {
+      lastTelegramHealthCheck = Date.now();
+      try {
+        await bot.telegram.getMe();
+      } catch (pingErr: any) {
+        console.warn("[Telegram Watchdog] ⚠️ Koneksi Telegram terputus, menjadwalkan reconnect otomatis:", pingErr?.message || pingErr);
+        try { await bot.stop("Network reconnect"); } catch (e) {}
+        bot = null;
+        botStatus = "Reconnecting... (" + (pingErr?.message || "Network timeout") + ")";
+      }
+    }
+  }, 15000);
 
 
   // Vite middleware for development
