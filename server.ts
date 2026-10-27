@@ -4353,10 +4353,11 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
                             .update(String(digiflazzUsername) + String(digiflazzApiKey) + String(tx.id))
                             .digest('hex');
 
+                        const cleanTargetForVerify = String(tx.target || '').split(' (')[0].trim();
                         const verifyBody: Record<string, any> = {
                             username: digiflazzUsername,
                             buyer_sku_code: tx.sku,
-                            customer_no: tx.target,
+                            customer_no: cleanTargetForVerify,
                             ref_id: tx.id,
                             sign: verifySign
                         };
@@ -9083,20 +9084,24 @@ Chuna – E4 Store`;
     db.transactions = transactions;
     writeDB(db);
 
-    try {
-      if (bot && topup.memberTelegram) {
-        await bot.telegram.sendMessage(
-          topup.memberTelegram,
-          `🎉 *HOREEE! ISI SALDO BERHASIL!* 🥳\n` +
-          `━━━━━━━━━━━━━━━━━━━━━\n` +
-          `Halo Kak *${topup.memberName}*, pengisian saldo sebesar *Rp ${nominalAdd.toLocaleString('id-ID')}* telah diverifikasi dan disetujui oleh Owner E4 Store!\n\n` +
-          `💳 *Saldo Akun Kakak Saat Ini:* *Rp ${member.balance.toLocaleString('id-ID')}*\n\n` +
-          `Terima kasih telah berbelanja di E4 Store! Selamat bertransaksi kembali ya Kak! 🥰💖`,
-          { parse_mode: 'Markdown' }
-        );
+    const topupSuccessText =
+      `🎉 *HOREEE! ISI SALDO BERHASIL!* 🥳\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `Halo Kak *${topup.memberName || member.name}*, pengisian saldo sebesar *Rp ${nominalAdd.toLocaleString('id-ID')}* telah diverifikasi dan disetujui oleh Owner E4 Store!\n\n` +
+      `💳 *Saldo Akun Kakak Saat Ini:* *Rp ${member.balance.toLocaleString('id-ID')}*\n\n` +
+      `Terima kasih telah berbelanja di E4 Store! Selamat bertransaksi kembali ya Kak! 🥰💖`;
+
+    const regUserTopup = registeredUsers[topup.memberTelegram] || (registeredUsers as any)[String(topup.memberTelegram)];
+    const rawWaTopup = member.whatsapp || regUserTopup?.wa || '';
+    if (waSocket && waStatus.includes('Connected') && rawWaTopup) {
+      let cleanWa = rawWaTopup.replace(/\D/g, "");
+      if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
+      const jid = `${cleanWa}@s.whatsapp.net`;
+      try {
+        await waSocket.sendMessage(jid, { text: topupSuccessText });
+      } catch (e: any) {
+        console.log('Failed to notify whatsapp user on topup approve:', e.message);
       }
-    } catch (e: any) {
-      console.log('Failed to notify telegram user:', e.message);
     }
 
     res.json({ success: true, topup, member });
@@ -9165,16 +9170,10 @@ Halo kak ${member.name}! Chuna mau kasih kabar baik nih~ 💚
 
 Yuk langsung belanja kak, banyak promo nunggu! 🛍️✨`;
 
-      try {
-        if (bot) {
-          await bot.telegram.sendMessage(userId, msgText);
-        }
-      } catch(e) {
-         console.log('Failed to send topup notification to telegram:', e);
-      }
-      
-      if (waSocket && waStatus.includes('Connected') && member.whatsapp) {
-         let cleanWa = member.whatsapp.replace(/\D/g, "");
+      const regUserManualTopup = registeredUsers[userId] || (registeredUsers as any)[String(userId)];
+      const rawWaManualTopup = member.whatsapp || regUserManualTopup?.wa || '';
+      if (waSocket && waStatus.includes('Connected') && rawWaManualTopup) {
+         let cleanWa = rawWaManualTopup.replace(/\D/g, "");
          if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
          const jid = `${cleanWa}@s.whatsapp.net`;
          try {
@@ -11205,7 +11204,7 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
              const nameOriginal = member.name || "Kisah";
              const typeCap = member.type || "Biasa";
              const wa = member.whatsapp || "-";
-             const balance = member.balance.toLocaleString('id-ID');
+             const balance = (Number(member.balance) || 0).toLocaleString('id-ID');
              
              await ctx.reply(`✦ ──── E4 STORE · VAULT ──── ✦
 │
@@ -11361,19 +11360,25 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
           );
         } catch (e) {}
 
-        // Notify customer
-        try {
-          await bot.telegram.sendMessage(
-            topup.memberTelegram,
-            `🎉 *HOREEE! ISI SALDO BERHASIL!* 🥳\n` +
-            `━━━━━━━━━━━━━━━━━━━━━\n` +
-            `Halo Kak *${topup.memberName}*, pengisian saldo sebesar *Rp ${nominalAdd.toLocaleString('id-ID')}* telah diverifikasi dan disetujui oleh Owner E4 Store!\n\n` +
-            `💳 *Saldo Akun Kakak Saat Ini:* *Rp ${member.balance.toLocaleString('id-ID')}*\n\n` +
-            `Terima kasih telah berbelanja di E4 Store! Selamat bertransaksi kembali ya Kak! 🥰💖`,
-            { parse_mode: 'Markdown' }
-          );
-        } catch (e: any) {
-          console.error("Failed to notify customer:", e.message);
+        // Notify customer via WhatsApp only
+        const topupApproveWaText =
+          `🎉 *HOREEE! ISI SALDO BERHASIL!* 🥳\n` +
+          `━━━━━━━━━━━━━━━━━━━━━\n` +
+          `Halo Kak *${topup.memberName || member.name}*, pengisian saldo sebesar *Rp ${nominalAdd.toLocaleString('id-ID')}* telah diverifikasi dan disetujui oleh Owner E4 Store!\n\n` +
+          `💳 *Saldo Akun Kakak Saat Ini:* *Rp ${member.balance.toLocaleString('id-ID')}*\n\n` +
+          `Terima kasih telah berbelanja di E4 Store! Selamat bertransaksi kembali ya Kak! 🥰💖`;
+
+        const regUserApprove = registeredUsers[topup.memberTelegram] || (registeredUsers as any)[String(topup.memberTelegram)];
+        const rawWaApprove = member.whatsapp || regUserApprove?.wa || '';
+        if (waSocket && waStatus.includes('Connected') && rawWaApprove) {
+          let cleanWa = rawWaApprove.replace(/\D/g, "");
+          if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
+          const jid = `${cleanWa}@s.whatsapp.net`;
+          try {
+            await waSocket.sendMessage(jid, { text: topupApproveWaText });
+          } catch (e: any) {
+            console.error("Failed to notify customer via WhatsApp:", e.message);
+          }
         }
       });
 
@@ -12264,23 +12269,53 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
         const userId = Number(ctx.from?.id || 0);
         delete userStates[userId];
 
-        // Langsung kembalikan ruang chat Telegram Customer ke Menu Utama (seperti Gambar 2)
-        await ctx.reply("Silakan pilih menu selanjutnya:", {
-          reply_markup: {
-            keyboard: [
-              [{ text: "💵 Cek Saldo" }],
-              [{ text: "🧾 Cek Tagihan" }],
-              [{ text: "📋 Menu Produk" }],
-              [{ text: "📥 Fitur Download" }]
-            ],
-            resize_keyboard: true
-          }
-        });
+        const customerMainMenuKeyboard = [
+          [{ text: "💵 Cek Saldo" }],
+          [{ text: "🧾 Cek Tagihan" }],
+          [{ text: "📋 Menu Produk" }],
+          [{ text: "📥 Fitur Download" }]
+        ];
 
         const memberId = stateData?.memberId || `MBR-${userId}`;
         const member = members.find(
           (m: any) => m.id === memberId || isTelegramMatch(m.telegram, userId, ctx.from?.username)
         );
+
+        if (!member) {
+          await ctx.reply("❌ Member tidak ditemukan.", {
+            reply_markup: {
+              keyboard: customerMainMenuKeyboard,
+              resize_keyboard: true
+            }
+          });
+          return;
+        }
+
+        const totalBayarCheck = Number(stateData?.totalBayar) || 0;
+        if (method === 'saldo') {
+          const currentBalance = Number(member.balance) || 0;
+          if (currentBalance < totalBayarCheck) {
+            await ctx.reply(
+              `❌ TRANSAKSI DITOLAK!\n\nMaaf kak, saldo kakak tidak mencukupi untuk melakukan transaksi ini.\n💳 Saldo Saat Ini: Rp ${currentBalance.toLocaleString('id-ID')}\n💰 Total Bayar: Rp ${totalBayarCheck.toLocaleString('id-ID')}\n\nSilakan isi ulang saldo kakak terlebih dahulu. 🙏`,
+              {
+                reply_markup: {
+                  keyboard: customerMainMenuKeyboard,
+                  resize_keyboard: true
+                }
+              }
+            );
+            return;
+          }
+        }
+
+        // Langsung kembalikan ruang chat Telegram Customer ke Menu Utama (seperti Gambar 2)
+        await ctx.reply("Silakan pilih menu selanjutnya:", {
+          reply_markup: {
+            keyboard: customerMainMenuKeyboard,
+            resize_keyboard: true
+          }
+        });
+
         const regUser = registeredUsers[userId] || (registeredUsers as any)[String(userId)];
         if (member && !member.whatsapp && regUser?.wa) {
           member.whatsapp = regUser.wa;
@@ -13321,7 +13356,26 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                     return;
                 }
                 const product = state.data.product;
-                const isGame = Boolean(product.category && product.category.toLowerCase().includes('game')) || (product.brand && (product.brand.toUpperCase() === "FREE FIRE" || product.brand.toUpperCase() === "MOBILE LEGENDS"));
+                const brandUpper = String(product.brand || product.product_name || "").toUpperCase();
+                const catUpper = String(product.category || "").toUpperCase();
+
+                let gopayGameCode = "";
+                if (brandUpper.includes("FREE FIRE") || brandUpper === "FF") gopayGameCode = "FREEFIRE";
+                else if (brandUpper.includes("MOBILE LEGENDS") || brandUpper.includes("MOBILE LEGEND") || brandUpper === "MLBB" || brandUpper === "ML") gopayGameCode = "MOBILE_LEGENDS";
+                else if (brandUpper.includes("PUBG")) gopayGameCode = "PUBGM";
+                else if (brandUpper.includes("HONOR OF KINGS") || brandUpper === "HOK") gopayGameCode = "HOK";
+                else if (brandUpper.includes("VALORANT")) gopayGameCode = "VALORANT";
+                else if (brandUpper.includes("CALL OF DUTY") || brandUpper.includes("CODM") || brandUpper === "COD MOBILE") gopayGameCode = "CALL_OF_DUTY";
+                else if (brandUpper.includes("ARENA OF VALOR") || brandUpper === "AOV") gopayGameCode = "AOV";
+                else if (brandUpper.includes("POINT BLANK") || brandUpper === "PB") gopayGameCode = "POINT_BLANK";
+                else if (brandUpper.includes("FC MOBILE") || brandUpper.includes("EA SPORTS FC") || brandUpper.includes("FIFA")) gopayGameCode = "FC_MOBILE";
+                else if (brandUpper.includes("CLASH OF CLANS") || brandUpper === "COC") gopayGameCode = "COC";
+                else if (brandUpper.includes("BRAWL STARS")) gopayGameCode = "BRAWL_STARS";
+                else if (brandUpper.includes("MAGIC CHESS") || brandUpper.includes("MCGG")) gopayGameCode = "MCGG";
+
+                const isGame = Boolean(catUpper.includes("GAME")) || Boolean(gopayGameCode);
+                const isPlnPrepaid = !isGame && (brandUpper.includes("PLN") || catUpper.includes("PLN") || String(product.product_name || "").toUpperCase().includes("PLN"));
+
                 const targetNo = cleanTargetNumber(rawInput, isGame);
                 if (!targetNo || targetNo.length < 2) {
                     await ctx.reply("❌ Nomor tujuan tidak valid. Silakan masukkan nomor yang benar, atau ketik 'Batal'.");
@@ -13334,61 +13388,97 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                 let skuToPay = product.buyer_sku_code;
                 
                 state.data.targetNo = targetNo; // Save target number in state
+                delete state.data.nickname;
 
-                
-                // --- Cek Nickname Game Automatis ---
-                if (product.brand && (product.brand.toUpperCase() === "FREE FIRE" || product.brand.toUpperCase() === "MOBILE LEGENDS")) {
+                // --- 1. Cek Nickname Game Otomatis (Via GoPay Games) ---
+                if (gopayGameCode) {
                     try {
-                        const game = product.brand.toUpperCase() === "FREE FIRE" ? "freefire" : "mobilelegends";
                         let id = targetNo;
                         let zone = "";
-                        
-                        if (game === "mobilelegends") {
-                            const match = targetNo.replace(/[^0-9]/g, ' ').trim().split(/\s+/);
+
+                        if (gopayGameCode === "MOBILE_LEGENDS" || gopayGameCode === "MCGG") {
+                            const match = targetNo.replace(/[^0-9]/g, " ").trim().split(/\s+/);
                             if (match.length >= 1) id = match[0];
                             if (match.length >= 2) zone = match[1];
-                        }
-                        
-                        let nickname = "";
-                        
-                        // Failover APIs
-                        const apis = [
-                            game === 'freefire' 
-                                ? `https://api.vipayment.co.id/api/game/nickname?game=freefire&id=${id}`
-                                : `https://api.vipayment.co.id/api/game/nickname?game=mobilelegends&id=${id}&zone=${zone}`,
-                            game === 'freefire'
-                                ? `https://api.isan.my.id/api/ff?id=${id}`
-                                : `https://api.isan.my.id/api/ml?id=${id}&zone=${zone}`,
-                            game === 'freefire'
-                                ? `https://v2.ouzen.xyz/api/game/ff?id=${id}`
-                                : `https://v2.ouzen.xyz/api/game/ml?id=${id}&zone=${zone}`
-                        ];
-                        
-                        for (const url of apis) {
-                            if (nickname) break;
-                            try {
-                                const res = await fetch(url, { signal: AbortSignal.timeout(3000) }).catch(() => null);
-                                if (res && res.ok) {
-                                    const data = await res.json();
-                                    if (data.status && data.data && data.data.name) nickname = data.data.name;
-                                    else if (data.name) nickname = data.name;
-                                    else if (data.nickname) nickname = data.nickname;
-                                }
-                            } catch(e) {}
+                        } else if (gopayGameCode === "VALORANT" || gopayGameCode === "COC" || gopayGameCode === "BRAWL_STARS") {
+                            id = rawInput.trim();
                         }
 
-                        if (nickname) {
-                            nameInfo = `👤 Nickname    : ${nickname}`;
-                            state.data.nickname = nickname;
-                        } else {
-                            nameInfo = `👤 Nickname    : Gagal terdeteksi (gangguan API)`;
+                        const gopayPayload = (gopayGameCode === "MOBILE_LEGENDS" || gopayGameCode === "MCGG")
+                            ? { code: gopayGameCode, data: { userId: id, zoneId: zone } }
+                            : (gopayGameCode === "PUBGM" || gopayGameCode === "HOK")
+                            ? { code: gopayGameCode, data: { userId: id, zoneId: "" } }
+                            : { code: gopayGameCode, data: { userId: id } };
+
+                        const res = await fetch("https://gopay.co.id/games/v1/order/user-account", {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json",
+                                "Accept": "application/json",
+                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                            },
+                            body: JSON.stringify(gopayPayload),
+                            signal: AbortSignal.timeout(5000)
+                        }).catch(() => null);
+
+                        if (res) {
+                            const data = await res.json().catch(() => null);
+                            if (res.ok && data) {
+                                const rawNick = data?.data?.username || data?.data?.name || (typeof data?.data === "string" ? data.data : "");
+                                let nickname = String(rawNick || "").trim();
+                                try {
+                                    if (nickname.includes("%")) nickname = decodeURIComponent(nickname);
+                                } catch (e) {}
+                                if (nickname) {
+                                    nameInfo = `👤 Nickname : ${nickname}`;
+                                    state.data.nickname = nickname;
+                                }
+                            } else if (
+                                res.status === 404 ||
+                                data?.code === "4040100" ||
+                                String(data?.message || "").toLowerCase().includes("unknown user") ||
+                                String(data?.message || "").toLowerCase().includes("invalid user account")
+                            ) {
+                                nameInfo = `👤 Nickname : ID Akun Tidak Ditemukan (Cek kembali ID Anda)`;
+                            }
                         }
                     } catch (e) {
-                        nameInfo = `👤 Nickname    : Gagal terdeteksi (gangguan API)`;
+                        // Lewati baris Nickname saat server sibuk / gangguan
+                    }
+                }
+                // --- 2. Cek Nama & Daya Pelanggan PLN Token Otomatis (Via Digiflazz Resmi dengan Pengaman) ---
+                else if (isPlnPrepaid && digiflazzUsername && digiflazzApiKey) {
+                    try {
+                        const sign = crypto.createHash("md5").update(digiflazzUsername + digiflazzApiKey + targetNo).digest("hex");
+                        const plnRes = await fetch("https://api.digiflazz.com/v1/inquiry-pln", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                commands: "inquiry-pln",
+                                username: digiflazzUsername,
+                                customer_no: targetNo,
+                                sign: sign
+                            }),
+                            signal: AbortSignal.timeout(5000)
+                        }).catch(() => null);
+
+                        if (plnRes && plnRes.ok) {
+                            const plnJson = await plnRes.json().catch(() => null);
+                            const plnData = plnJson?.data;
+                            const plnName = String(plnData?.name || "").trim();
+                            const plnPower = String(plnData?.segment_power || "").trim();
+                            if (plnName && (plnData?.rc === "00" || plnData?.status === "Sukses")) {
+                                nameInfo = `👤 Nama Pelanggan : ${plnName}` + (plnPower ? `\n⚡ Tarif / Daya : ${plnPower}` : "");
+                                state.data.nickname = plnName;
+                            }
+                        }
+                    } catch (e) {
+                        // Otomatis lewati baris Nama Pelanggan jika gagal / belum disetting
                     }
                 }
                 
-                const replyText = `✅ *Konfirmasi Pembelian*\n\nLayanan       : ${product.product_name}\nNomor Tujuan  : ${targetNo}\n${nameInfo}\n💎 Total Bayar : Rp ${total.toLocaleString('id-ID')}`;
+                const nameLine = nameInfo ? `${nameInfo}\n` : "";
+                const replyText = `✅ *Konfirmasi Pembelian*\n\nLayanan       : ${product.product_name}\nNomor Tujuan  : ${targetNo}\n${nameLine}💎 Total Bayar : Rp ${total.toLocaleString('id-ID')}`;
                 const isOwner = db.owners.includes(ctx.from?.id);
                 const keyboard = [];
                 if (isOwner) {
