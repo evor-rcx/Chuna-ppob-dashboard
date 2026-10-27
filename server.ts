@@ -13390,6 +13390,9 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                 state.data.targetNo = targetNo; // Save target number in state
                 delete state.data.nickname;
 
+                const escapeTgMarkdown = (val: string) => String(val || "").replace(/([_*`\[])/g, "\\$1");
+                let plainNameInfo = "";
+
                 // --- 1. Cek Nickname Game Otomatis (Via GoPay Games) ---
                 if (gopayGameCode) {
                     try {
@@ -13430,7 +13433,8 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                                     if (nickname.includes("%")) nickname = decodeURIComponent(nickname);
                                 } catch (e) {}
                                 if (nickname) {
-                                    nameInfo = `👤 Nickname : ${nickname}`;
+                                    nameInfo = `👤 Nickname : ${escapeTgMarkdown(nickname)}`;
+                                    plainNameInfo = `👤 Nickname : ${nickname}`;
                                     state.data.nickname = nickname;
                                 }
                             } else if (
@@ -13440,6 +13444,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                                 String(data?.message || "").toLowerCase().includes("invalid user account")
                             ) {
                                 nameInfo = `👤 Nickname : ID Akun Tidak Ditemukan (Cek kembali ID Anda)`;
+                                plainNameInfo = nameInfo;
                             }
                         }
                     } catch (e) {
@@ -13468,7 +13473,8 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                             const plnName = String(plnData?.name || "").trim();
                             const plnPower = String(plnData?.segment_power || "").trim();
                             if (plnName && (plnData?.rc === "00" || plnData?.status === "Sukses")) {
-                                nameInfo = `👤 Nama Pelanggan : ${plnName}` + (plnPower ? `\n⚡ Tarif / Daya : ${plnPower}` : "");
+                                nameInfo = `👤 Nama Pelanggan : ${escapeTgMarkdown(plnName)}` + (plnPower ? `\n⚡ Tarif / Daya : ${escapeTgMarkdown(plnPower)}` : "");
+                                plainNameInfo = `👤 Nama Pelanggan : ${plnName}` + (plnPower ? `\n⚡ Tarif / Daya : ${plnPower}` : "");
                                 state.data.nickname = plnName;
                             }
                         }
@@ -13478,7 +13484,11 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                 }
                 
                 const nameLine = nameInfo ? `${nameInfo}\n` : "";
-                const replyText = `✅ *Konfirmasi Pembelian*\n\nLayanan       : ${product.product_name}\nNomor Tujuan  : ${targetNo}\n${nameLine}💎 Total Bayar : Rp ${total.toLocaleString('id-ID')}`;
+                const plainNameLine = plainNameInfo ? `${plainNameInfo}\n` : "";
+                const safeProductName = escapeTgMarkdown(product.product_name);
+                const safeTargetNo = escapeTgMarkdown(targetNo);
+                const replyText = `✅ *Konfirmasi Pembelian*\n\nLayanan       : ${safeProductName}\nNomor Tujuan  : ${safeTargetNo}\n${nameLine}💎 Total Bayar : Rp ${total.toLocaleString('id-ID')}`;
+                const plainReplyText = `✅ Konfirmasi Pembelian\n\nLayanan       : ${product.product_name}\nNomor Tujuan  : ${targetNo}\n${plainNameLine}💎 Total Bayar : Rp ${total.toLocaleString('id-ID')}`;
                 const isOwner = db.owners.includes(ctx.from?.id);
                 const keyboard = [];
                 if (isOwner) {
@@ -13491,10 +13501,16 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
 
                 userStates[userId] = { step: 'WAIT_PAYMENT_PREPAID', data: { ...state.data, skuToPay } };
 
-                await ctx.reply(replyText, {
-                    parse_mode: "Markdown",
-                    reply_markup: { keyboard, resize_keyboard: true }
-                });
+                try {
+                    await ctx.reply(replyText, {
+                        parse_mode: "Markdown",
+                        reply_markup: { keyboard, resize_keyboard: true }
+                    });
+                } catch (tgErr) {
+                    await ctx.reply(plainReplyText, {
+                        reply_markup: { keyboard, resize_keyboard: true }
+                    });
+                }
                 // Automatically send sticker to WhatsApp
                 const memberIdForPrepaid = state.data.memberId || `MBR-${ctx.from?.id}`;
                 const memberForPrepaid = members.find(m => m.id === memberIdForPrepaid || isTelegramMatch(m.telegram, ctx.from?.id, ctx.from?.username));
