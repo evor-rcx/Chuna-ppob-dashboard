@@ -1342,6 +1342,28 @@ let bot: Telegraf | null = null;
 let botStatus = "Disconnected";
 const userStates: Record<number, { step: string, data: any, updatedAt?: number }> = {};
 
+interface PendingWaTxPinState {
+  step: 'AWAITING_WA_TX_PIN' | 'AWAITING_WA_TX_PIN_DELETE';
+  txType: 'prepaid' | 'pasca';
+  sku?: string;
+  ref_id?: string;
+  method: string;
+  stateData: any;
+  memberId: string;
+  tgUserId: number;
+  tgChatId?: number;
+  tgFrom?: any;
+  cleanWa: string;
+  waLid?: string;
+  waSenderJid?: string;
+  waRemoteJid?: string;
+  pinMessageId?: string;
+  processing?: boolean;
+  updatedAt: number;
+  executePayment: (targetWaJid?: string) => Promise<void>;
+}
+const pendingWaTxPinStates: Record<number, PendingWaTxPinState> = {};
+
 // Register memory cleanup hook for abandoned user states
 registerMemoryCleanupHook(() => {
   let cleared = 0;
@@ -1352,6 +1374,14 @@ registerMemoryCleanupHook(() => {
     // Clear states idle for more than 2 hours to conserve RAM on STB Armbian
     if (state && state.updatedAt && (now - state.updatedAt > 2 * 60 * 60 * 1000)) {
       delete userStates[id];
+      cleared++;
+    }
+  }
+  for (const idStr of Object.keys(pendingWaTxPinStates)) {
+    const id = Number(idStr);
+    const txState = pendingWaTxPinStates[id];
+    if (txState && txState.updatedAt && (now - txState.updatedAt > 2 * 60 * 60 * 1000)) {
+      delete pendingWaTxPinStates[id];
       cleared++;
     }
   }
@@ -5669,6 +5699,124 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
       }
     };
 
+    // Helper untuk mencocokkan pengirim WA dengan state PIN Transaksi (AWAITING_WA_TX_PIN / AWAITING_WA_TX_PIN_DELETE)
+    const findTxPinStateByWaSender = (
+      senderJidRaw: string,
+      remoteJidRaw: string,
+      participantPnRaw: string = '',
+      allowUnmappedLidFallback: boolean = false
+    ): { tgUserId: number; state: PendingWaTxPinState } | null => {
+      const cleanS = normalizeWaNumber(senderJidRaw);
+      const cleanR = normalizeWaNumber(remoteJidRaw);
+      const cleanP = normalizeWaNumber(participantPnRaw);
+      const resolvedS = resolveSenderWaPhone(senderJidRaw, cleanS);
+      const resolvedR = resolveSenderWaPhone(remoteJidRaw, cleanR);
+
+      const candidatePhones = new Set<string>(
+        [cleanS, cleanR, cleanP, resolvedS, resolvedR]
+          .map(p => cleanWaPhone(p || ''))
+          .filter(p => p && p.length >= 8)
+      );
+
+      const candidateJids = new Set<string>(
+        [senderJidRaw, remoteJidRaw]
+          .map(j => String(j || '').trim())
+          .filter(Boolean)
+      );
+
+      const candidateLidDigits = new Set<string>(
+        Array.from(candidateJids)
+          .filter(j => j.endsWith('@lid'))
+          .map(j => j.replace(/@.*$/, '').replace(/\D/g, ''))
+          .filter(Boolean)
+      );
+
+      // 1. Pencocokan eksak berdasarkan nomor WA, LID, atau JID yang tersimpan di state PIN transaksi
+      for (const [uidStr, st] of Object.entries(pendingWaTxPinStates)) {
+        if (!st || (st.step !== 'AWAITING_WA_TX_PIN' && st.step !== 'AWAITING_WA_TX_PIN_DELETE')) continue;
+        const stCleanWa = cleanWaPhone(st.cleanWa || '');
+        const stLid = String(st.waLid || '').trim();
+        const stLidDigits = stLid ? stLid.replace(/@.*$/, '').replace(/\D/g, '') : '';
+        const stSenderJid = String(st.waSenderJid || '').trim();
+        const stRemoteJid = String(st.waRemoteJid || '').trim();
+
+        if (stCleanWa && candidatePhones.has(stCleanWa)) {
+          return { tgUserId: Number(uidStr), state: st };
+        }
+        if (stLid && (candidateJids.has(stLid) || (stLidDigits && candidateLidDigits.has(stLidDigits)))) {
+          return { tgUserId: Number(uidStr), state: st };
+        }
+        if ((stSenderJid && candidateJids.has(stSenderJid)) || (stRemoteJid && candidateJids.has(stRemoteJid))) {
+          return { tgUserId: Number(uidStr), state: st };
+        }
+      }
+
+      // 2. Fallback khusus jika pesan datang dari @lid baru yang belum terpetakan ke nomor HP
+      const isIncomingLid = senderJidRaw.endsWith('@lid') || remoteJidRaw.endsWith('@lid');
+      if (allowUnmappedLidFallback && isIncomingLid) {
+        const activeTxPinStates = Object.entries(pendingWaTxPinStates).filter(
+          ([, st]) => st && (st.step === 'AWAITING_WA_TX_PIN' || st.step === 'AWAITING_WA_TX_PIN_DELETE')
+        );
+        if (activeTxPinStates.length === 1) {
+          const [uidStr, st] = activeTxPinStates[0];
+          return { tgUserId: Number(uidStr), state: st };
+        }
+      }
+
+      return null;
+    };
+
+    // Helper untuk menangani event "Hapus untuk Semua Orang" (REVOKE) pada pesan PIN Transaksi Customer
+    const handleTransactionPinRevoke = async (
+      revokedMsgId?: string | null,
+      remoteJidRaw?: string | null,
+      senderJidRaw?: string | null
+    ) => {
+      let matchedEntry: { tgUserId: number; state: PendingWaTxPinState } | null = null;
+
+      // 1. Cek berdasarkan ID pesan PIN yang dihapus (paling akurat)
+      if (revokedMsgId) {
+        for (const [uidStr, st] of Object.entries(pendingWaTxPinStates)) {
+          if (st && st.step === 'AWAITING_WA_TX_PIN_DELETE' && st.pinMessageId === revokedMsgId) {
+            matchedEntry = { tgUserId: Number(uidStr), state: st };
+            break;
+          }
+        }
+      }
+
+      // 2. Jika tidak ketemu dari messageId, cek dari pengirim yang sedang berada di step AWAITING_WA_TX_PIN_DELETE
+      if (!matchedEntry && (senderJidRaw || remoteJidRaw)) {
+        const bySender = findTxPinStateByWaSender(
+          String(senderJidRaw || ''),
+          String(remoteJidRaw || ''),
+          '',
+          true
+        );
+        if (bySender && bySender.state.step === 'AWAITING_WA_TX_PIN_DELETE') {
+          matchedEntry = bySender;
+        }
+      }
+
+      if (!matchedEntry) return;
+      const { tgUserId, state } = matchedEntry;
+      if (state.step !== 'AWAITING_WA_TX_PIN_DELETE' || state.processing) return;
+
+      // Kunci & hapus state agar tidak tereksekusi 2x jika event upsert & update terpanggil bersamaan
+      state.processing = true;
+      delete pendingWaTxPinStates[tgUserId];
+
+      const cleanWa = cleanWaPhone(state.cleanWa || '');
+      const targetWaJid = String(
+        state.waRemoteJid || (cleanWa ? `${cleanWa}@s.whatsapp.net` : (remoteJidRaw || senderJidRaw || ''))
+      );
+
+      try {
+        await state.executePayment(targetWaJid);
+      } catch (err) {
+        console.error('[WA Tx PIN] Gagal menjalankan pembayaran setelah revoke PIN:', err);
+      }
+    };
+
     waSocket.ev.on("messages.update", (updates) => {
       for (const update of updates) {
         if (update.key && update.key.id) {
@@ -5701,6 +5849,11 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
               update.key.remoteJid,
               update.key.participant || update.key.remoteJid
             ).catch((e) => console.error("Error handleRegistrationPinRevoke in messages.update:", e));
+            handleTransactionPinRevoke(
+              revokedId,
+              update.key.remoteJid,
+              update.key.participant || update.key.remoteJid
+            ).catch((e) => console.error("Error handleTransactionPinRevoke in messages.update:", e));
           }
         }
       }
@@ -5726,6 +5879,9 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
           const revokedId = protoMsg?.key?.id || msgItem.key?.id;
           await handleRegistrationPinRevoke(revokedId, rJid, senderJid).catch((e) =>
             console.error("Error handleRegistrationPinRevoke in messages.upsert:", e)
+          );
+          await handleTransactionPinRevoke(revokedId, rJid, senderJid).catch((e) =>
+            console.error("Error handleTransactionPinRevoke in messages.upsert:", e)
           );
         }
 
@@ -5784,9 +5940,17 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
             participantPn,
             /^\d{6}$/.test(String(rawText).trim())
           );
+          const txMatchForLog = findTxPinStateByWaSender(
+            senderJid,
+            rJid,
+            participantPn,
+            /^\d{6}$/.test(String(rawText).trim())
+          );
           const maskedTextForLog =
             regMatchForLog && /^\d{6}$/.test(String(rawText).trim())
               ? "🔒 [Input PIN Keamanan Pendaftaran]"
+              : txMatchForLog && /^\d{6}$/.test(String(rawText).trim())
+              ? "🔒 [Input PIN Keamanan Transaksi]"
               : String(rawText).trim().substring(0, 160);
 
           const name = pushName || (db.waProfiles && resolvedPhone && db.waProfiles[resolvedPhone]) || (db.waProfiles && db.waProfiles[cleanSender]) || (resolvedPhone ? `+${resolvedPhone}` : (cleanSender ? `+${cleanSender}` : 'Pelanggan WA'));
@@ -6148,6 +6312,123 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
             ).catch(() => {});
             return;
           }
+        }
+
+        // ==========================================
+        // 🔐 INPUT PIN KEAMANAN TRANSAKSI DI WHATSAPP CUSTOMER (BESERTA HAPUS UNTUK SEMUA ORANG)
+        // ==========================================
+        const txPinMatch = !jid?.endsWith('@g.us')
+          ? findTxPinStateByWaSender(senderJid, jid || '', msgParticipantPn, isSixDigitPin)
+          : null;
+
+        if (txPinMatch && jid) {
+          const { tgUserId: txTgUserId, state: txState } = txPinMatch;
+          const cleanTxWa = cleanWaPhone(txState.cleanWa || cleanSenderNum);
+          const localTxWa = cleanTxWa ? '0' + cleanTxWa.replace(/^62/, '') : '';
+
+          // 1. Tangkap & simpan ID LID (@lid) jika ada
+          const detectedLid =
+            (senderJid.endsWith('@lid') ? senderJid : null) ||
+            (jid.endsWith('@lid') ? jid : null) ||
+            txState.waLid ||
+            null;
+          if (detectedLid && cleanTxWa) {
+            txState.waLid = detectedLid;
+            saveWaLid(cleanTxWa, detectedLid);
+          }
+
+          // 2. Tangkap & simpan Nama Profil WhatsApp asli (msg.pushName)
+          const rawPushName = msg.pushName ? String(msg.pushName).trim() : '';
+          if (rawPushName && !isPhoneNumberOrEmpty(rawPushName)) {
+            if (cleanTxWa) saveWaProfile(cleanTxWa, rawPushName, true);
+            if (senderJid) saveWaProfile(senderJid, rawPushName, true);
+          }
+
+          // 3. Tangkap & simpan Foto Profil WhatsApp
+          if (waSocket) {
+            try {
+              let picUrl: string | null = null;
+              if (cleanTxWa && cleanTxWa.length >= 8) {
+                picUrl = await waSocket.profilePictureUrl(`${cleanTxWa}@s.whatsapp.net`, 'image').catch(() => null);
+              }
+              if (!picUrl && senderJid && senderJid.includes('@')) {
+                picUrl = await waSocket.profilePictureUrl(senderJid, 'image').catch(() => null);
+              }
+              if (!picUrl && jid && jid.includes('@')) {
+                picUrl = await waSocket.profilePictureUrl(jid, 'image').catch(() => null);
+              }
+              if (picUrl) {
+                if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                if (cleanTxWa) db.waProfilePhotos[cleanTxWa] = picUrl;
+                if (localTxWa) db.waProfilePhotos[localTxWa] = picUrl;
+                if (senderJid) db.waProfilePhotos[senderJid] = picUrl;
+                if (detectedLid) db.waProfilePhotos[detectedLid] = picUrl;
+                writeDB(db);
+              }
+            } catch (e) {}
+          }
+
+          // 4. Cek pembatalan transaksi
+          if (lowerText === 'batal' || lowerText === '❌ batal' || lowerText === 'tidak' || lowerText === '❌ tidak') {
+            delete pendingWaTxPinStates[txTgUserId];
+            await waSocket.sendMessage(
+              jid,
+              { text: "❌ Transaksi dibatalkan." },
+              { quoted: msg }
+            ).catch(() => {});
+            return;
+          }
+
+          // 5. Cek apakah PIN yang diketik sesuai dengan PIN member/user
+          const regUser = registeredUsers[txTgUserId] || (registeredUsers as any)[String(txTgUserId)];
+          if (regUser && String(regUser.pin).trim() === trimmedPinCandidate) {
+            txState.pinMessageId = msg.key.id;
+            txState.waSenderJid = senderJid;
+            txState.waRemoteJid = jid;
+            txState.step = 'AWAITING_WA_TX_PIN_DELETE';
+            txState.updatedAt = Date.now();
+
+            await waSocket.sendMessage(
+              jid,
+              {
+                text:
+                  `✅ *PIN Keamanan Transaksi Benar & Berhasil Dicatat!*\n\n` +
+                  `⚠️ *PERINTAH PENTING (WAJIB DILAKUKAN SEKARANG):*\n` +
+                  `Demi keamanan akun kakak, silakan *HAPUS pesan angka PIN* yang baru saja kakak ketik di atas dengan cara:\n` +
+                  `1️⃣ Tekan & tahan pesan angka PIN kakak di atas\n` +
+                  `2️⃣ Pilih ikon Hapus (🗑️)\n` +
+                  `3️⃣ Wajib pilih *"Hapus untuk Semua Orang"* (*Delete for Everyone*)\n\n` +
+                  `🚫 *JANGAN pilih "Hapus untuk Saya"*, karena jika kakak memilih "Hapus untuk Saya" maka *pesanan tidak akan diproses*!\n` +
+                  `_(Jika tidak sengaja memilih "Hapus untuk Saya", silakan ketik ulang angka PIN kakak lalu pilih "Hapus untuk Semua Orang")_.`
+              },
+              { quoted: msg }
+            ).catch(() => {});
+            return;
+          }
+
+          // Jika sudah di tahap menunggu pesan PIN dihapus tetapi customer mengetik teks lain
+          if (txState.step === 'AWAITING_WA_TX_PIN_DELETE') {
+            await waSocket.sendMessage(
+              jid,
+              {
+                text:
+                  `⏳ *Menunggu Pesan PIN Dihapus!*\n\n` +
+                  `Silakan hapus pesan angka PIN kakak di atas menggunakan pilihan *"Hapus untuk Semua Orang"* (*Delete for Everyone*) agar Chuna otomatis memproses transaksi kakak ya.\n\n` +
+                  `💡 _Jika kakak tadi tidak sengaja memilih "Hapus untuk Saya", silakan ketik ulang angka PIN kakak di sini lalu hapus dengan memilih "Hapus untuk Semua Orang"._`
+              },
+              { quoted: msg }
+            ).catch(() => {});
+            return;
+          }
+
+          // Jika masih di tahap AWAITING_WA_TX_PIN dan PIN yang dimasukkan salah
+          const wrongMsg = "😡 HMM?! PIN-NYA SALAH! Hayoo, kamu siapa?! Jangan sembarangan pakai akun orang ya! Chuna gigit nih kalau berani macam-macam! 🔪👿\n\nSilakan ketik ulang PIN Anda yang benar (atau ketik *batal* untuk membatalkan transaksi):";
+          await waSocket.sendMessage(
+            jid,
+            { text: wrongMsg },
+            { quoted: msg }
+          ).catch(() => {});
+          return;
         }
 
         // Sapaan dasar untuk pembeli (Tes, Test, Halo, Hai, P, dll.)
@@ -11973,6 +12254,133 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
         await ctx.editMessageText("❌ Pembelian dibatalkan.");
       });
 
+      const initiateCustomerWaTxPin = async (
+        ctx: any,
+        txType: 'prepaid' | 'pasca',
+        stateData: any,
+        method: string,
+        skuOrRefId: string
+      ) => {
+        const userId = Number(ctx.from?.id || 0);
+        delete userStates[userId];
+
+        // Langsung kembalikan ruang chat Telegram Customer ke Menu Utama (seperti Gambar 2)
+        await ctx.reply("Silakan pilih menu selanjutnya:", {
+          reply_markup: {
+            keyboard: [
+              [{ text: "💵 Cek Saldo" }],
+              [{ text: "🧾 Cek Tagihan" }],
+              [{ text: "📋 Menu Produk" }],
+              [{ text: "📥 Fitur Download" }]
+            ],
+            resize_keyboard: true
+          }
+        });
+
+        const memberId = stateData?.memberId || `MBR-${userId}`;
+        const member = members.find(
+          (m: any) => m.id === memberId || isTelegramMatch(m.telegram, userId, ctx.from?.username)
+        );
+        const regUser = registeredUsers[userId] || (registeredUsers as any)[String(userId)];
+        if (member && !member.whatsapp && regUser?.wa) {
+          member.whatsapp = regUser.wa;
+        }
+        const rawWa = member?.whatsapp || regUser?.wa || '';
+        const cleanWa = cleanWaPhone(rawWa);
+        const localWa = cleanWa ? '0' + cleanWa.replace(/^62/, '') : '';
+        const plainWa = cleanWa ? cleanWa.replace(/^62/, '') : '';
+
+        let waLid: string | undefined =
+          (db.waLids && cleanWa && (db.waLids[cleanWa] || db.waLids[localWa] || db.waLids[plainWa])) ||
+          undefined;
+
+        if (waSocket && cleanWa) {
+          const jid = `${cleanWa}@s.whatsapp.net`;
+          try {
+            if (!waLid && (waSocket as any)?.signalRepository?.lidMapping) {
+              const resolvedLid = await (waSocket as any).signalRepository.lidMapping.getLIDForPN(jid).catch(() => null);
+              if (resolvedLid) {
+                waLid = resolvedLid;
+                saveWaLid(cleanWa, resolvedLid);
+              }
+            }
+            if (!waLid) {
+              const onWa = await waSocket.onWhatsApp(jid).catch(() => null);
+              if (Array.isArray(onWa) && onWa[0]?.lid) {
+                waLid = onWa[0].lid;
+                saveWaLid(cleanWa, onWa[0].lid);
+              }
+            }
+          } catch (e) {}
+        }
+
+        const savedFrom = ctx.from ? { ...ctx.from } : { id: userId };
+        const savedChat = ctx.chat ? { ...ctx.chat } : { id: userId };
+        const resolvedMemberId = member?.id || memberId;
+
+        pendingWaTxPinStates[userId] = {
+          step: 'AWAITING_WA_TX_PIN',
+          txType,
+          sku: txType === 'prepaid' ? skuOrRefId : undefined,
+          ref_id: txType === 'pasca' ? skuOrRefId : undefined,
+          method,
+          stateData,
+          memberId: resolvedMemberId,
+          tgUserId: userId,
+          tgChatId: savedChat.id,
+          tgFrom: savedFrom,
+          cleanWa,
+          waLid,
+          updatedAt: Date.now(),
+          executePayment: async (targetWaJid?: string) => {
+            const waTriggeredCtx = {
+              from: savedFrom,
+              chat: savedChat,
+              isWaPinTriggered: true,
+              reply: async (msgText: string) => {
+                if (
+                  waSocket &&
+                  targetWaJid &&
+                  (msgText.startsWith('❌ TRANSAKSI DITOLAK') ||
+                    msgText.startsWith('❌ Member tidak ditemukan') ||
+                    msgText.startsWith('⏳ Transaksi sebelumnya') ||
+                    msgText.startsWith('❌ Pembelian Gagal:') ||
+                    msgText.startsWith('⏳ Transaksi Sedang Diproses (Network Error)'))
+                ) {
+                  await waSocket.sendMessage(targetWaJid, { text: msgText }).catch(() => {});
+                }
+                return { message_id: 0 };
+              },
+              replyWithPhoto: async () => {
+                return { message_id: 0 };
+              }
+            };
+            if (txType === 'prepaid') {
+              await processPrepaidPayment(waTriggeredCtx, skuOrRefId, method, stateData, resolvedMemberId);
+            } else {
+              await processPascaPayment(waTriggeredCtx, skuOrRefId, method, stateData, resolvedMemberId);
+            }
+          }
+        };
+
+        if (waSocket && cleanWa) {
+          const jid = `${cleanWa}@s.whatsapp.net`;
+          const productName = stateData?.product?.product_name || 'Produk';
+          const targetNo = stateData?.targetNo || stateData?.customerNo || stateData?.checkResult?.customer_no || '-';
+          const totalBayar = Number(stateData?.totalBayar) || 0;
+          const waPinPromptText =
+            `🔐 *Masukan PIN Keamanan Transaksi*\n\n` +
+            `📦 *Layanan:* ${productName}\n` +
+            `🎯 *Nomor Tujuan:* ${targetNo}\n` +
+            `💎 *Total Bayar:* Rp ${totalBayar.toLocaleString('id-ID')}\n\n` +
+            `Silakan ketik PIN Anda untuk melanjutkan transaksi ini.`;
+
+          await waSocket.sendMessage(jid, { text: waPinPromptText }).catch((err: any) => {
+            console.error("[WA Tx PIN] Gagal mengirim prompt PIN ke WhatsApp Customer:", err);
+          });
+        }
+      };
+
       bot.action(/^pay_prepaid_(.+?)(?:_(cash|utang|saldo))?$/, async (ctx) => {
         await ctx.answerCbQuery();
         const sku = ctx.match[1];
@@ -11989,14 +12397,9 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
         }
         
         if (!isOwner) {
-             userStates[ctx.from?.id || 0] = { step: 'ASK_PIN_PREPAID', data: { ...state.data, method, sku } };
-             return ctx.reply("🔐 *Masukan PIN Keamanan Transaksi*\n\nSilakan ketik PIN Anda untuk melanjutkan transaksi ini.", {
-                 parse_mode: 'Markdown',
-                 reply_markup: {
-                     keyboard: getCustomerMenuKeyboard(false),
-                     resize_keyboard: true
-                 }
-             });
+             const sdPrepaidCust = state.data;
+             await initiateCustomerWaTxPin(ctx, 'prepaid', sdPrepaidCust, method, sku);
+             return;
         }
         
         const sdPrepaid = state.data;
@@ -12019,14 +12422,9 @@ bot.hears(/Cek Saldo/i, async (ctx) => {
         }
         
         if (!isOwner) {
-             userStates[ctx.from?.id || 0] = { step: 'ASK_PIN_PASCA', data: { ...state.data, method, ref_id } };
-             return ctx.reply("🔐 *Masukan PIN Keamanan Transaksi*\n\nSilakan ketik PIN Anda untuk melanjutkan transaksi ini.", {
-                 parse_mode: 'Markdown',
-                 reply_markup: {
-                     keyboard: getCustomerMenuKeyboard(false),
-                     resize_keyboard: true
-                 }
-             });
+             const sdPascaCust = state.data;
+             await initiateCustomerWaTxPin(ctx, 'pasca', sdPascaCust, method, ref_id);
+             return;
         }
         
         const sdPasca = state.data;
@@ -13652,14 +14050,9 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                     return ctx.reply("❌ Metode pembayaran tidak valid.");
                 }
                 if (!isOwner) {
-                    userStates[userId] = { step: 'ASK_PIN_PREPAID', data: { ...state.data, method, sku: state.data.skuToPay } };
-                    return ctx.reply("🔐 *Masukan PIN Keamanan Transaksi*\n\nSilakan ketik PIN Anda untuk melanjutkan transaksi ini.", {
-                        parse_mode: 'Markdown',
-                        reply_markup: {
-                            keyboard: getCustomerMenuKeyboard(false),
-                            resize_keyboard: true
-                        }
-                    });
+                    const sdPrepaidCust = state.data;
+                    await initiateCustomerWaTxPin(ctx, 'prepaid', sdPrepaidCust, method, state.data.skuToPay);
+                    return;
                 }
                 const sdPrepaidOwner = state.data;
                 delete userStates[userId];
@@ -13847,14 +14240,9 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                     return ctx.reply("❌ Metode pembayaran tidak valid.");
                 }
                 if (!isOwner) {
-                    userStates[userId] = { step: 'ASK_PIN_PASCA', data: { ...state.data, method, ref_id: state.data.ref_id } };
-                    return ctx.reply("🔐 *Masukan PIN Keamanan Transaksi*\n\nSilakan ketik PIN Anda untuk melanjutkan transaksi ini.", {
-                        parse_mode: 'Markdown',
-                        reply_markup: {
-                            keyboard: getCustomerMenuKeyboard(false),
-                            resize_keyboard: true
-                        }
-                    });
+                    const sdPascaCust = state.data;
+                    await initiateCustomerWaTxPin(ctx, 'pasca', sdPascaCust, method, state.data.ref_id);
+                    return;
                 }
                 const sdPascaOwner = state.data;
                 delete userStates[userId];
