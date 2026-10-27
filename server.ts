@@ -5512,6 +5512,158 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
     const repliedThanks = new Set<string>();
     const repliedGeneral = new Set<string>();
     const waCustomerSessions: Record<string, { state: 'WAITING_PLN_NOMINAL' | 'IDLE'; meterNumber?: string; meterPhotoBuffer?: Buffer; timestamp: number }> = {};
+    // Helper untuk mencocokkan pengirim WA dengan state pendaftaran Telegram (AWAITING_WA_PIN / AWAITING_WA_PIN_DELETE)
+    const findRegistrationUserStateByWaSender = (
+      senderJidRaw: string,
+      remoteJidRaw: string,
+      participantPnRaw: string = '',
+      allowUnmappedLidFallback: boolean = false
+    ): { tgUserId: number; state: { step: string; data: any; updatedAt?: number } } | null => {
+      const cleanS = normalizeWaNumber(senderJidRaw);
+      const cleanR = normalizeWaNumber(remoteJidRaw);
+      const cleanP = normalizeWaNumber(participantPnRaw);
+      const resolvedS = resolveSenderWaPhone(senderJidRaw, cleanS);
+      const resolvedR = resolveSenderWaPhone(remoteJidRaw, cleanR);
+
+      const candidatePhones = new Set<string>(
+        [cleanS, cleanR, cleanP, resolvedS, resolvedR]
+          .map(p => cleanWaPhone(p || ''))
+          .filter(p => p && p.length >= 8)
+      );
+
+      const candidateJids = new Set<string>(
+        [senderJidRaw, remoteJidRaw]
+          .map(j => String(j || '').trim())
+          .filter(Boolean)
+      );
+      const candidateLidDigits = new Set<string>(
+        Array.from(candidateJids)
+          .filter(j => j.endsWith('@lid'))
+          .map(j => j.replace(/@.*$/, '').replace(/\D/g, ''))
+          .filter(Boolean)
+      );
+
+      // 1. Pencocokan eksak berdasarkan nomor WA, LID, atau JID yang tersimpan di state pendaftaran
+      for (const [uidStr, st] of Object.entries(userStates)) {
+        if (!st || (st.step !== 'AWAITING_WA_PIN' && st.step !== 'AWAITING_WA_PIN_DELETE')) continue;
+        const stCleanWa = cleanWaPhone(st.data?.cleanWa || st.data?.wa || '');
+        const stLid = String(st.data?.waLid || '').trim();
+        const stLidDigits = stLid ? stLid.replace(/@.*$/, '').replace(/\D/g, '') : '';
+        const stSenderJid = String(st.data?.waSenderJid || '').trim();
+        const stRemoteJid = String(st.data?.waRemoteJid || '').trim();
+
+        if (stCleanWa && candidatePhones.has(stCleanWa)) {
+          return { tgUserId: Number(uidStr), state: st };
+        }
+        if (stLid && (candidateJids.has(stLid) || (stLidDigits && candidateLidDigits.has(stLidDigits)))) {
+          return { tgUserId: Number(uidStr), state: st };
+        }
+        if ((stSenderJid && candidateJids.has(stSenderJid)) || (stRemoteJid && candidateJids.has(stRemoteJid))) {
+          return { tgUserId: Number(uidStr), state: st };
+        }
+      }
+
+      // 2. Fallback khusus jika pesan datang dari @lid baru yang belum terpetakan ke nomor HP
+      const isIncomingLid = senderJidRaw.endsWith('@lid') || remoteJidRaw.endsWith('@lid');
+      if (allowUnmappedLidFallback && isIncomingLid) {
+        const activePinStates = Object.entries(userStates).filter(
+          ([, st]) => st && (st.step === 'AWAITING_WA_PIN' || st.step === 'AWAITING_WA_PIN_DELETE')
+        );
+        if (activePinStates.length === 1) {
+          const [uidStr, st] = activePinStates[0];
+          return { tgUserId: Number(uidStr), state: st };
+        }
+      }
+
+      return null;
+    };
+
+    // Helper untuk menangani event "Hapus untuk Semua Orang" (REVOKE) pada pesan PIN pendaftaran
+    const handleRegistrationPinRevoke = async (
+      revokedMsgId?: string | null,
+      remoteJidRaw?: string | null,
+      senderJidRaw?: string | null
+    ) => {
+      let matchedEntry: { tgUserId: number; state: { step: string; data: any; updatedAt?: number } } | null = null;
+
+      // 1. Cek berdasarkan ID pesan PIN yang dihapus (paling akurat)
+      if (revokedMsgId) {
+        for (const [uidStr, st] of Object.entries(userStates)) {
+          if (st && st.step === 'AWAITING_WA_PIN_DELETE' && st.data?.pinMessageId === revokedMsgId) {
+            matchedEntry = { tgUserId: Number(uidStr), state: st };
+            break;
+          }
+        }
+      }
+
+      // 2. Jika tidak ketemu dari messageId, cek dari pengirim yang sedang berada di step AWAITING_WA_PIN_DELETE
+      if (!matchedEntry && (senderJidRaw || remoteJidRaw)) {
+        const bySender = findRegistrationUserStateByWaSender(
+          String(senderJidRaw || ''),
+          String(remoteJidRaw || ''),
+          '',
+          true
+        );
+        if (bySender && bySender.state.step === 'AWAITING_WA_PIN_DELETE') {
+          matchedEntry = bySender;
+        }
+      }
+
+      if (!matchedEntry) return;
+      const { tgUserId, state } = matchedEntry;
+      if (state.step !== 'AWAITING_WA_PIN_DELETE' || state.data?.otpSent) return;
+
+      // Kunci state agar tidak terkirim 2x jika event upsert & update terpanggil bersamaan
+      state.step = 'AWAITING_OTP';
+      state.data.otpSent = true;
+      state.updatedAt = Date.now();
+
+      const cleanWa = cleanWaPhone(state.data?.cleanWa || state.data?.wa || '');
+      const targetWaJid = state.data?.waRemoteJid || (cleanWa ? `${cleanWa}@s.whatsapp.net` : (remoteJidRaw || senderJidRaw));
+      const otp = state.data?.generatedOtp || Math.floor(100 + Math.random() * 900).toString();
+      state.data.generatedOtp = otp;
+
+      if (waSocket && targetWaJid) {
+        try {
+          await waSocket.sendMessage(String(targetWaJid), {
+            text:
+              `✅ *Pesan PIN Keamanan berhasil dihapus untuk semua orang!*\n\n` +
+              `Halo kak *${state.data?.username || 'Kakak'}*! 👋\n` +
+              `Ini kode rahasia (*OTP*) buat daftar di E4 Store: *${otp}*\n` +
+              `Jangan kasih tau siapa-siapa ya kak! 🤫\n\n` +
+              `👉 _Silakan kembali ke Bot Telegram E4 Store dan masukkan kode OTP di atas ya kak!_`
+          });
+        } catch (err) {
+          console.error('[WA Registration] Gagal kirim OTP setelah revoke ke target:', err);
+          if (cleanWa) {
+            await waSocket.sendMessage(`${cleanWa}@s.whatsapp.net`, {
+              text:
+                `✅ *Pesan PIN Keamanan berhasil dihapus untuk semua orang!*\n\n` +
+                `Halo kak *${state.data?.username || 'Kakak'}*! 👋\n` +
+                `Ini kode rahasia (*OTP*) buat daftar di E4 Store: *${otp}*\n` +
+                `Jangan kasih tau siapa-siapa ya kak! 🤫\n\n` +
+                `👉 _Silakan kembali ke Bot Telegram E4 Store dan masukkan kode OTP di atas ya kak!_`
+            }).catch(() => {});
+          }
+        }
+      }
+
+      if (bot) {
+        try {
+          await bot.telegram.sendMessage(
+            tgUserId,
+            `✅ *Pesan PIN di WhatsApp berhasil dihapus untuk semua orang!*\n📲 Kode OTP udah Chuna kirim ke WhatsApp kakak. Yuk masukin kode OTP-nya di sini:`,
+            { parse_mode: 'Markdown' }
+          );
+        } catch (e) {
+          await bot.telegram.sendMessage(
+            tgUserId,
+            `✅ Pesan PIN di WhatsApp berhasil dihapus! Kode OTP udah Chuna kirim ke WhatsApp kakak. Yuk masukin kode OTP-nya di sini:`
+          ).catch(() => {});
+        }
+      }
+    };
+
     waSocket.ev.on("messages.update", (updates) => {
       for (const update of updates) {
         if (update.key && update.key.id) {
@@ -5527,6 +5679,24 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
               }
             }
           }
+
+          // Deteksi "Hapus untuk Semua Orang" (REVOKE) melalui messages.update
+          const updObj = (update.update as any) || {};
+          const isRevokedInUpdate =
+            updObj.message === null ||
+            updObj.messageStubType === 68 ||
+            updObj.messageStubType === 1 ||
+            updObj.message?.protocolMessage?.type === 0 ||
+            Boolean(updObj.message?.protocolMessage?.key?.id);
+
+          if (isRevokedInUpdate && !update.key.fromMe) {
+            const revokedId = updObj.message?.protocolMessage?.key?.id || update.key.id;
+            handleRegistrationPinRevoke(
+              revokedId,
+              update.key.remoteJid,
+              update.key.participant || update.key.remoteJid
+            ).catch((e) => console.error("Error handleRegistrationPinRevoke in messages.update:", e));
+          }
         }
       }
     });
@@ -5540,6 +5710,19 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
         const rJid = String(msgItem.key?.remoteJid || '');
         const pJid = String(msgItem.key?.participant || '');
         const participantPn = String((msgItem.key as any)?.participantPn || '');
+
+        // Deteksi "Hapus untuk Semua Orang" (REVOKE) melalui messages.upsert (protocolMessage / messageStubType 68)
+        const protoMsg = msgItem.message?.protocolMessage;
+        const isRevokeUpsert =
+          (protoMsg && (protoMsg.type === 0 || protoMsg.key?.id)) ||
+          (msgItem as any).messageStubType === 68 ||
+          (msgItem as any).messageStubType === 'REVOKE';
+        if (isRevokeUpsert && !msgItem.key?.fromMe) {
+          const revokedId = protoMsg?.key?.id || msgItem.key?.id;
+          await handleRegistrationPinRevoke(revokedId, rJid, senderJid).catch((e) =>
+            console.error("Error handleRegistrationPinRevoke in messages.upsert:", e)
+          );
+        }
 
         // 1. Pairing dari key pesan Baileys
         if (rJid.endsWith('@s.whatsapp.net') && pJid.endsWith('@lid')) {
@@ -5575,7 +5758,7 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
         }
 
         // 4. Catat Pesan Masuk untuk Notifikasi Sistem (Real-time Incoming Chat Reader)
-        if (!msgItem.key?.fromMe && msgItem.message) {
+        if (!msgItem.key?.fromMe && msgItem.message && !isRevokeUpsert) {
           const rawText = msgItem.message.conversation ||
             msgItem.message.extendedTextMessage?.text ||
             msgItem.message.imageMessage?.caption ||
@@ -5590,6 +5773,17 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
 
           const cleanSender = normalizeWaNumber(senderJid);
           const resolvedPhone = resolveSenderWaPhone(senderJid, cleanSender);
+          const regMatchForLog = findRegistrationUserStateByWaSender(
+            senderJid,
+            rJid,
+            participantPn,
+            /^\d{6}$/.test(String(rawText).trim())
+          );
+          const maskedTextForLog =
+            regMatchForLog && /^\d{6}$/.test(String(rawText).trim())
+              ? "🔒 [Input PIN Keamanan Pendaftaran]"
+              : String(rawText).trim().substring(0, 160);
+
           const name = pushName || (db.waProfiles && resolvedPhone && db.waProfiles[resolvedPhone]) || (db.waProfiles && db.waProfiles[cleanSender]) || (resolvedPhone ? `+${resolvedPhone}` : (cleanSender ? `+${cleanSender}` : 'Pelanggan WA'));
           const msgId = String(msgItem.key?.id || `${Date.now()}-${Math.random()}`);
 
@@ -5605,7 +5799,7 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
               senderNumber: resolvedPhone || cleanSender,
               senderName: name,
               photoUrl: cachedPhoto,
-              text: String(rawText).trim().substring(0, 160),
+              text: maskedTextForLog,
               timestamp: msgItem.messageTimestamp ? Number(msgItem.messageTimestamp) * 1000 : Date.now(),
               isRead: false
             });
@@ -5834,6 +6028,122 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
         const cleanSenderNum = normalizeWaNumber(senderJid);
         const isSenderOwner = isOwnerWhatsapp(senderJid) || isOwnerWhatsapp(msg.key?.remoteJid || '') || Boolean(msg.key?.fromMe);
         const jid = msg.key.remoteJid;
+
+        // ==========================================
+        // 🔒 TAHAP 2 PENDAFTARAN MEMBER TELEGRAM: INPUT PIN DI WHATSAPP
+        // ==========================================
+        const trimmedPinCandidate = text.trim();
+        const isSixDigitPin = /^\d{6}$/.test(trimmedPinCandidate);
+        const msgParticipantPn = String((msg.key as any)?.participantPn || '');
+        const regPinMatch = !jid?.endsWith('@g.us')
+          ? findRegistrationUserStateByWaSender(senderJid, jid || '', msgParticipantPn, isSixDigitPin)
+          : null;
+
+        if (regPinMatch && jid) {
+          const { state: regState } = regPinMatch;
+          const cleanRegWa = cleanWaPhone(regState.data?.cleanWa || regState.data?.wa || cleanSenderNum);
+          const localRegWa = cleanRegWa ? '0' + cleanRegWa.replace(/^62/, '') : '';
+
+          // 1. Tangkap & simpan ID LID (@lid) jika ada
+          const detectedLid =
+            (senderJid.endsWith('@lid') ? senderJid : null) ||
+            (jid.endsWith('@lid') ? jid : null) ||
+            regState.data?.waLid ||
+            null;
+          if (detectedLid && cleanRegWa) {
+            regState.data.waLid = detectedLid;
+            saveWaLid(cleanRegWa, detectedLid);
+          }
+
+          // 2. Tangkap & simpan Nama Profil WhatsApp asli (msg.pushName)
+          const rawPushName = msg.pushName ? String(msg.pushName).trim() : '';
+          if (rawPushName && !isPhoneNumberOrEmpty(rawPushName)) {
+            regState.data.waProfileName = rawPushName;
+            if (cleanRegWa) saveWaProfile(cleanRegWa, rawPushName, true);
+            if (senderJid) saveWaProfile(senderJid, rawPushName, true);
+          }
+
+          // 3. Tangkap & simpan Foto Profil WhatsApp (profilePictureUrl)
+          if (waSocket) {
+            try {
+              let picUrl: string | null = null;
+              if (cleanRegWa && cleanRegWa.length >= 8) {
+                picUrl = await waSocket.profilePictureUrl(`${cleanRegWa}@s.whatsapp.net`, 'image').catch(() => null);
+              }
+              if (!picUrl && senderJid && senderJid.includes('@')) {
+                picUrl = await waSocket.profilePictureUrl(senderJid, 'image').catch(() => null);
+              }
+              if (!picUrl && jid && jid.includes('@')) {
+                picUrl = await waSocket.profilePictureUrl(jid, 'image').catch(() => null);
+              }
+              if (picUrl) {
+                regState.data.photoUrl = picUrl;
+                if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                if (cleanRegWa) db.waProfilePhotos[cleanRegWa] = picUrl;
+                if (localRegWa) db.waProfilePhotos[localRegWa] = picUrl;
+                if (senderJid) db.waProfilePhotos[senderJid] = picUrl;
+                if (detectedLid) db.waProfilePhotos[detectedLid] = picUrl;
+                writeDB(db);
+              }
+            } catch (e) {}
+          }
+
+          // 4. Proses jika customer mengirim 6 digit angka PIN
+          if (isSixDigitPin) {
+            regState.data.pin = trimmedPinCandidate;
+            regState.data.pinMessageId = msg.key.id;
+            regState.data.waSenderJid = senderJid;
+            regState.data.waRemoteJid = jid;
+            regState.step = 'AWAITING_WA_PIN_DELETE';
+            regState.updatedAt = Date.now();
+
+            await waSocket.sendMessage(
+              jid,
+              {
+                text:
+                  `✅ *PIN Keamanan (6 Angka) Berhasil Dicatat oleh Sistem!*\n\n` +
+                  `⚠️ *PERINTAH PENTING (WAJIB DILAKUKAN SEKARANG):*\n` +
+                  `Demi keamanan akun kakak, silakan *HAPUS pesan angka PIN* yang baru saja kakak ketik di atas dengan cara:\n` +
+                  `1️⃣ Tekan & tahan pesan angka PIN kakak di atas\n` +
+                  `2️⃣ Pilih ikon Hapus (🗑️)\n` +
+                  `3️⃣ Wajib pilih *"Hapus untuk Semua Orang"* (*Delete for Everyone*)\n\n` +
+                  `🚫 *JANGAN pilih "Hapus untuk Saya"*, karena jika kakak memilih "Hapus untuk Saya" maka *kode OTP tidak akan terkirim*!\n` +
+                  `_(Jika tidak sengaja memilih "Hapus untuk Saya", silakan ketik ulang 6 angka PIN kakak lalu pilih "Hapus untuk Semua Orang")_.`
+              },
+              { quoted: msg }
+            ).catch(() => {});
+            return;
+          }
+
+          // Jika masih di tahap menunggu PIN namun yang diketik bukan 6 angka
+          if (regState.step === 'AWAITING_WA_PIN') {
+            await waSocket.sendMessage(
+              jid,
+              {
+                text:
+                  `⚠️ Format PIN belum sesuai kak.\n` +
+                  `Silakan ketik *PIN Keamanan berupa 6 angka* terlebih dahulu ya kak (Contoh: *123456*) agar Chuna bisa lanjut mengirimkan kode OTP! 🔒`
+              },
+              { quoted: msg }
+            ).catch(() => {});
+            return;
+          }
+
+          // Jika sudah di tahap menunggu pesan PIN dihapus tetapi customer mengetik teks lain
+          if (regState.step === 'AWAITING_WA_PIN_DELETE') {
+            await waSocket.sendMessage(
+              jid,
+              {
+                text:
+                  `⏳ *Menunggu Pesan PIN Dihapus!*\n\n` +
+                  `Silakan hapus pesan 6 angka PIN kakak di atas menggunakan pilihan *"Hapus untuk Semua Orang"* (*Delete for Everyone*) agar Chuna otomatis mengirimkan kode OTP ya kak.\n\n` +
+                  `💡 _Jika kakak tadi tidak sengaja memilih "Hapus untuk Saya", silakan ketik ulang 6 angka PIN kakak di sini lalu hapus dengan memilih "Hapus untuk Semua Orang"._`
+              },
+              { quoted: msg }
+            ).catch(() => {});
+            return;
+          }
+        }
 
         // Sapaan dasar untuk pembeli (Tes, Test, Halo, Hai, P, dll.)
         const greetingWords = ['tes', 'test', 'halo', 'hai', 'p', 'hei', 'assalamualaikum', 'ping', 'chuna'];
@@ -7982,10 +8292,16 @@ Chuna – E4 Store`;
     if (!cleanPhone) return res.status(400).json({ success: false, error: 'Nomor WhatsApp member tidak valid' });
     const localPhone = "0" + cleanPhone.replace(/^62/, '');
     const plainPhone = cleanPhone.replace(/^62/, '');
+    const memberRegNameLower = String(member.name || '').trim().toLowerCase();
 
     let fetchedPhoto: string | null = member.photoUrl || null;
     let fetchedLid: string | null = member.lid || (db.waLids && (db.waLids[cleanPhone] || db.waLids[localPhone] || db.waLids[plainPhone])) || null;
-    let fetchedName: string | null = (member.waProfileName && member.waProfileName !== '-') ? member.waProfileName : null;
+    let fetchedName: string | null = (
+      member.waProfileName &&
+      member.waProfileName !== '-' &&
+      !isPhoneNumberOrEmpty(member.waProfileName) &&
+      member.waProfileName.trim().toLowerCase() !== memberRegNameLower
+    ) ? member.waProfileName.trim() : null;
 
     if (typeof waSocket !== 'undefined' && waSocket) {
       const jid = `${cleanPhone}@s.whatsapp.net`;
@@ -8036,19 +8352,37 @@ Chuna – E4 Store`;
 
     // 4. Ambil nama profil asli dari cache (~PushName) & Riwayat Chat Masuk
     if (!fetchedName && db.waProfiles) {
-      const candidate = db.waProfiles[cleanPhone] || db.waProfiles[localPhone] || db.waProfiles[plainPhone] ||
-                        (fetchedLid && db.waProfiles[fetchedLid]) || (lidDigits && db.waProfiles[lidDigits]) || null;
-      if (candidate && !isPhoneNumberOrEmpty(candidate)) {
-        fetchedName = candidate;
+      const candidates = [
+        cleanPhone ? db.waProfiles[cleanPhone] : null,
+        localPhone ? db.waProfiles[localPhone] : null,
+        plainPhone ? db.waProfiles[plainPhone] : null,
+        fetchedLid ? db.waProfiles[fetchedLid] : null,
+        lidDigits ? db.waProfiles[lidDigits] : null
+      ];
+      for (const candidate of candidates) {
+        if (candidate && !isPhoneNumberOrEmpty(candidate) && candidate.trim().toLowerCase() !== memberRegNameLower) {
+          fetchedName = candidate.trim();
+          break;
+        }
       }
     }
     if (!fetchedName) {
       const fromRecent = findNameFromRecentMessages(cleanPhone);
-      if (fromRecent.name) {
-        fetchedName = fromRecent.name;
-        saveWaProfile(cleanPhone, fromRecent.name, true);
+      if (fromRecent.name && fromRecent.name.trim().toLowerCase() !== memberRegNameLower) {
+        fetchedName = fromRecent.name.trim();
+        saveWaProfile(cleanPhone, fetchedName, true);
         if (!fetchedPhoto && fromRecent.photoUrl) {
           fetchedPhoto = fromRecent.photoUrl;
+        }
+      }
+    }
+    if (!fetchedName && lidDigits) {
+      const fromRecentLid = findNameFromRecentMessages(lidDigits);
+      if (fromRecentLid.name && fromRecentLid.name.trim().toLowerCase() !== memberRegNameLower) {
+        fetchedName = fromRecentLid.name.trim();
+        saveWaProfile(cleanPhone, fetchedName, true);
+        if (!fetchedPhoto && fromRecentLid.photoUrl) {
+          fetchedPhoto = fromRecentLid.photoUrl;
         }
       }
     }
@@ -8069,6 +8403,10 @@ Chuna – E4 Store`;
 
     if (fetchedName && member.waProfileName !== fetchedName) {
       member.waProfileName = fetchedName;
+      member.isProfileLocked = true;
+      updated = true;
+    } else if (!fetchedName && member.waProfileName && member.waProfileName.trim().toLowerCase() === memberRegNameLower) {
+      member.waProfileName = null;
       updated = true;
     }
 
@@ -8081,7 +8419,7 @@ Chuna – E4 Store`;
       success: true, 
       member: member,
       photoUrl: member.photoUrl || fetchedPhoto || null, 
-      waProfileName: member.waProfileName || fetchedName || null,
+      waProfileName: fetchedName || null,
       lid: member.lid || fetchedLid || null
     });
   });
@@ -8281,24 +8619,78 @@ Chuna – E4 Store`;
 
   app.get("/api/members", async (req, res) => {
     const onlineMembers = members.filter(m => m.telegram && m.telegram.startsWith('ID:'));
+    let dbChanged = false;
+
     const enriched = await Promise.all(
       onlineMembers.map(async (m) => {
         const cleanPhone = cleanWaPhone(m.whatsapp || '');
         const localPhone = cleanPhone ? "0" + cleanPhone.replace(/^62/, '') : '';
         const plainPhone = cleanPhone.replace(/^62/, '');
+        const memberRegNameLower = String(m.name || '').trim().toLowerCase();
 
         // 1. Resolusi LID
-        let lid = m.lid || (db.waLids && (db.waLids[cleanPhone] || db.waLids[localPhone] || db.waLids[plainPhone])) || null;
+        let lid = m.lid || (db.waLids && (db.waLids[cleanPhone] || (localPhone && db.waLids[localPhone]) || (plainPhone && db.waLids[plainPhone]))) || null;
+        const lidDigits = lid ? String(lid).replace(/@.*$/, '').replace(/\D/g, '') : '';
 
-        // 2. Resolusi Nama Profil WA
-        let waProfileName = (m.waProfileName && m.waProfileName !== '-') ? m.waProfileName : null;
+        // 2. Resolusi Nama Profil WA (~PushName)
+        let waProfileName = (
+          m.waProfileName &&
+          m.waProfileName !== '-' &&
+          !isPhoneNumberOrEmpty(m.waProfileName) &&
+          m.waProfileName.trim().toLowerCase() !== memberRegNameLower
+        ) ? m.waProfileName.trim() : null;
+
         if (!waProfileName && db.waProfiles) {
-          waProfileName = db.waProfiles[cleanPhone] || db.waProfiles[localPhone] || db.waProfiles[plainPhone] || (lid && db.waProfiles[lid]) || null;
+          const candidates = [
+            cleanPhone ? db.waProfiles[cleanPhone] : null,
+            localPhone ? db.waProfiles[localPhone] : null,
+            plainPhone ? db.waProfiles[plainPhone] : null,
+            lid ? db.waProfiles[lid] : null,
+            lidDigits ? db.waProfiles[lidDigits] : null
+          ];
+          for (const candidate of candidates) {
+            if (candidate && !isPhoneNumberOrEmpty(candidate) && candidate.trim().toLowerCase() !== memberRegNameLower) {
+              waProfileName = candidate.trim();
+              break;
+            }
+          }
         }
 
-        // 3. Resolusi Foto Profil WA
-        let photoUrl = m.photoUrl || (db.waProfilePhotos && (db.waProfilePhotos[cleanPhone] || db.waProfilePhotos[localPhone] || db.waProfilePhotos[plainPhone] || (lid && db.waProfilePhotos[lid]))) || null;
+        let photoUrl = m.photoUrl || (
+          db.waProfilePhotos && (
+            db.waProfilePhotos[cleanPhone] ||
+            (localPhone && db.waProfilePhotos[localPhone]) ||
+            (plainPhone && db.waProfilePhotos[plainPhone]) ||
+            (lid && db.waProfilePhotos[lid]) ||
+            (lidDigits && db.waProfilePhotos[lidDigits])
+          )
+        ) || null;
 
+        if (!waProfileName && cleanPhone) {
+          const fromRecent = findNameFromRecentMessages(cleanPhone);
+          if (fromRecent.name && fromRecent.name.trim().toLowerCase() !== memberRegNameLower) {
+            waProfileName = fromRecent.name.trim();
+            m.isProfileLocked = true;
+            saveWaProfile(cleanPhone, waProfileName, true);
+            if (!photoUrl && fromRecent.photoUrl) {
+              photoUrl = fromRecent.photoUrl;
+            }
+          }
+        }
+
+        if (!waProfileName && lidDigits) {
+          const fromRecentLid = findNameFromRecentMessages(lidDigits);
+          if (fromRecentLid.name && fromRecentLid.name.trim().toLowerCase() !== memberRegNameLower) {
+            waProfileName = fromRecentLid.name.trim();
+            m.isProfileLocked = true;
+            saveWaProfile(cleanPhone, waProfileName, true);
+            if (!photoUrl && fromRecentLid.photoUrl) {
+              photoUrl = fromRecentLid.photoUrl;
+            }
+          }
+        }
+
+        // 3. Resolusi Foto Profil WA secara Live jika belum ada
         if (!photoUrl && waSocket && cleanPhone && cleanPhone.length >= 8) {
           try {
             const jid = `${cleanPhone}@s.whatsapp.net`;
@@ -8307,9 +8699,27 @@ Chuna – E4 Store`;
               photoUrl = fetched;
               if (!db.waProfilePhotos) db.waProfilePhotos = {};
               db.waProfilePhotos[cleanPhone] = fetched;
-              m.photoUrl = fetched;
+              if (localPhone) db.waProfilePhotos[localPhone] = fetched;
+              dbChanged = true;
             }
           } catch (e) {}
+        }
+
+        // Simpan perubahan ke objek member asli di db.json secara permanen
+        if (waProfileName && m.waProfileName !== waProfileName) {
+          m.waProfileName = waProfileName;
+          dbChanged = true;
+        } else if (!waProfileName && m.waProfileName && m.waProfileName.trim().toLowerCase() === memberRegNameLower) {
+          m.waProfileName = null;
+          dbChanged = true;
+        }
+        if (lid && m.lid !== lid) {
+          m.lid = lid;
+          dbChanged = true;
+        }
+        if (photoUrl && m.photoUrl !== photoUrl) {
+          m.photoUrl = photoUrl;
+          dbChanged = true;
         }
 
         // 4. Resolusi Data Telegram (Foto & Nama Display)
@@ -8342,6 +8752,12 @@ Chuna – E4 Store`;
         };
       })
     );
+
+    if (dbChanged) {
+      db.members = members;
+      writeDB(db);
+    }
+
     res.json({ success: true, members: enriched });
   });
 
@@ -13511,30 +13927,94 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                 await ctx.reply(`👍 Oke, username ${text} aman!Sekarang kirim Nomor WhatsApp aktif kakak ya (contoh: 08123456789):`);
                 return;
                   
-              case 'AWAITING_WA':
-                state.data.wa = text;
-                state.step = 'AWAITING_OTP';
+              case 'AWAITING_WA': {
+                let cleanWa = text.replace(/\D/g, "");
+                if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
+                else if (cleanWa.startsWith("8")) cleanWa = "62" + cleanWa;
+
+                if (cleanWa.length < 9) {
+                  await ctx.reply(`❌ Nomor WhatsApp sepertinya belum lengkap kak. Contoh: 08123456789`);
+                  return;
+                }
+
+                state.data.wa = text.trim();
+                state.data.cleanWa = cleanWa;
                 const otp = Math.floor(100 + Math.random() * 900).toString();
                 state.data.generatedOtp = otp;
-                  
+                state.data.otpSent = false;
+                state.updatedAt = Date.now();
+
                 if (waSocket && waStatus.includes('Connected')) {
-                  let cleanWa = text.replace(/\D/g, "");
-                  if (cleanWa.startsWith("0")) cleanWa = "62" + cleanWa.substring(1);
                   const jid = `${cleanWa}@s.whatsapp.net`;
-                    
+
+                  // Pre-resolve LID jika tersedia agar pencocokan balasan WA 100% akurat
                   try {
-                    await waSocket.sendMessage(jid, { text: `Halo kak ${state.data.username}! 👋Ini kode rahasia (OTP) buat daftar di E4 Store: *${otp}*Jangan kasih tau siapa-siapa ya kak! 🤫` });
-                    await ctx.reply(`📲 Kode OTP udah Chuna kirim ke WhatsApp kakak. Yuk masukin kode OTP-nya di sini:`);
+                    if ((waSocket as any)?.signalRepository?.lidMapping) {
+                      const resolvedLid = await (waSocket as any).signalRepository.lidMapping.getLIDForPN(jid).catch(() => null);
+                      if (resolvedLid) {
+                        state.data.waLid = resolvedLid;
+                        saveWaLid(cleanWa, resolvedLid);
+                      }
+                    }
+                    if (!state.data.waLid) {
+                      const onWa = await waSocket.onWhatsApp(jid).catch(() => null);
+                      if (Array.isArray(onWa) && onWa[0]?.lid) {
+                        state.data.waLid = onWa[0].lid;
+                        saveWaLid(cleanWa, onWa[0].lid);
+                      }
+                    }
+                  } catch (e) {}
+
+                  try {
+                    state.step = 'AWAITING_WA_PIN';
+                    await waSocket.sendMessage(jid, {
+                      text:
+                        `Halo kak *${state.data.username}*! 👋\n\n` +
+                        `Sebelum Chuna mengirimkan kode OTP pendaftaran *E4 Store*, demi keamanan akun kakak silakan *buat dan ketik PIN Keamanan (6 angka)* terlebih dahulu di chat WhatsApp ini ya kak! 🔒\n\n` +
+                        `_(Contoh: 123456)_`
+                    });
+                    await ctx.reply(
+                      `📲 Chuna udah kirim pesan ke WhatsApp kakak!\n\n` +
+                      `🔒 *Langkah Keamanan Sebelum Kirim OTP:*\n` +
+                      `1️⃣ Buka chat WhatsApp dari Chuna sekarang\n` +
+                      `2️⃣ Balas/ketik *PIN Keamanan (6 angka)* pilihan kakak di WhatsApp\n` +
+                      `3️⃣ Setelah PIN dicatat, hapus pesan PIN tersebut dengan memilih *"Hapus untuk Semua Orang"* (jangan pilih "Hapus untuk Saya")\n\n` +
+                      `Begitu pesan PIN dihapus untuk semua orang, Chuna akan langsung mengirimkan *Kode OTP* ke WhatsApp kakak! 😊`,
+                      { parse_mode: 'Markdown' }
+                    );
                   } catch (e) {
-                    await ctx.reply(`Waduh, Chuna gagal kirim kode OTP ke WhatsApp kakak nih. Pastikan nomornya aktif ya.Karena lagi ada kendala, Chuna kasih kode OTP-nya di sini aja ya kak: *${otp}*`);
+                    state.step = 'AWAITING_OTP';
+                    state.data.otpSent = true;
+                    await ctx.reply(`Waduh, Chuna gagal menghubungi WhatsApp kakak nih. Pastikan nomornya aktif ya. Karena lagi ada kendala, Chuna kasih kode OTP-nya di sini aja ya kak: *${otp}*`);
                   }
                 } else {
+                  state.step = 'AWAITING_OTP';
+                  state.data.otpSent = true;
                   await ctx.reply(`Hmm, WhatsApp server Chuna lagi offline nih kak. 😔Tapi tenang aja, untuk sekarang Chuna kasih kode OTP-nya langsung di sini ya: *${otp}*Yuk ketik ulang kodenya di bawah!`);
                 }
                 return;
+              }
+
+              case 'AWAITING_WA_PIN':
+                await ctx.reply(
+                  `🔒 Kakak belum membuat PIN di WhatsApp nih.\n` +
+                  `Silakan buka chat WhatsApp dari Chuna, lalu balas dengan *6 angka PIN Keamanan* kakak di WhatsApp terlebih dahulu ya agar Chuna bisa mengirim kode OTP! 😊`,
+                  { parse_mode: 'Markdown' }
+                );
+                return;
+
+              case 'AWAITING_WA_PIN_DELETE':
+                await ctx.reply(
+                  `⚠️ *Satu langkah lagi di WhatsApp kak!*\n\n` +
+                  `PIN kakak sudah dicatat, sekarang silakan *hapus pesan angka PIN* kakak di chat WhatsApp Chuna dengan memilih *"Hapus untuk Semua Orang"* (*Delete for Everyone*).\n\n` +
+                  `🚫 *Jangan pilih "Hapus untuk Saya"* karena kode OTP tidak akan terkirim jika memilih Hapus untuk Saya.\n` +
+                  `_(Jika terlanjur pilih "Hapus untuk Saya", ketik ulang 6 angka PIN kakak di WhatsApp lalu pilih "Hapus untuk Semua Orang")_.`,
+                  { parse_mode: 'Markdown' }
+                );
+                return;
                   
               case 'AWAITING_OTP':
-                if (text !== state.data.generatedOtp) {
+                if (text.trim() !== state.data.generatedOtp) {
                    await ctx.reply(`❌ Yah kode OTP-nya salah kak. Coba cek lagi ya kodenya!`);
                    return;
                 }
@@ -13547,13 +14027,20 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                   await ctx.reply(`❌ Format Gmail sepertinya kurang tepat kak. Coba kirim ulang ya! (contoh: chuna@gmail.com)`);
                   return;
                 }
-                state.data.gmail = text;
-                state.step = 'AWAITING_PIN';
-                await ctx.reply(`Oke Gmail aman! 👌\nSatu langkah lagi nih kak. Yuk buat PIN rahasia kakak (6 angka) biar transaksi kakak aman bareng Chuna! 🔒`);
-                return;
+                state.data.gmail = text.trim();
+                // Jika PIN belum dibuat (misal fallback saat WA server offline), minta di Telegram
+                if (!state.data.pin) {
+                  state.step = 'AWAITING_PIN';
+                  await ctx.reply(`Oke Gmail aman! 👌\nSatu langkah lagi nih kak. Yuk buat PIN rahasia kakak (6 angka) biar transaksi kakak aman bareng Chuna! 🔒`);
+                  return;
+                }
+                // Jika PIN sudah dibuat & diamankan lewat WhatsApp, langsung lanjut selesaikan pendaftaran!
+                /* falls through */
                   
-              case 'AWAITING_PIN':
-                state.data.pin = text;
+              case 'AWAITING_PIN': {
+                if (!state.data.pin) {
+                  state.data.pin = text.trim();
+                }
                 state.step = 'REGISTERED';
                 registeredUsers[userId] = {
                   username: state.data.username,
@@ -13564,26 +14051,105 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                 
                 let cleanUserWa = state.data.wa.replace(/\D/g, "");
                 if (cleanUserWa.startsWith("0")) cleanUserWa = "62" + cleanUserWa.substring(1);
+                else if (cleanUserWa.startsWith("8")) cleanUserWa = "62" + cleanUserWa;
+                const localUserWa = "0" + cleanUserWa.replace(/^62/, '');
+                const plainUserWa = cleanUserWa.replace(/^62/, '');
+                const regUsernameLower = String(state.data.username || '').trim().toLowerCase();
+
+                // Resolusi lengkap LID, Nama Profil WA asli (~PushName), dan Foto Profil WA
+                let finalLid: string | null =
+                  state.data.waLid ||
+                  (db.waLids && (db.waLids[cleanUserWa] || db.waLids[localUserWa] || db.waLids[plainUserWa])) ||
+                  null;
+                const finalLidDigits = finalLid ? String(finalLid).replace(/@.*$/, '').replace(/\D/g, '') : '';
+
+                let finalWaProfileName: string | null = (
+                  state.data.waProfileName &&
+                  !isPhoneNumberOrEmpty(state.data.waProfileName) &&
+                  String(state.data.waProfileName).trim().toLowerCase() !== regUsernameLower
+                ) ? String(state.data.waProfileName).trim() : null;
+
+                if (!finalWaProfileName && db.waProfiles) {
+                  const candidates = [
+                    db.waProfiles[cleanUserWa],
+                    db.waProfiles[localUserWa],
+                    db.waProfiles[plainUserWa],
+                    finalLid ? db.waProfiles[finalLid] : null,
+                    finalLidDigits ? db.waProfiles[finalLidDigits] : null
+                  ];
+                  for (const cand of candidates) {
+                    if (cand && !isPhoneNumberOrEmpty(cand) && String(cand).trim().toLowerCase() !== regUsernameLower) {
+                      finalWaProfileName = String(cand).trim();
+                      break;
+                    }
+                  }
+                }
+                if (!finalWaProfileName) {
+                  const fromRecent = findNameFromRecentMessages(cleanUserWa);
+                  if (fromRecent.name && fromRecent.name.trim().toLowerCase() !== regUsernameLower) {
+                    finalWaProfileName = fromRecent.name.trim();
+                  } else if (finalLidDigits) {
+                    const fromRecentLid = findNameFromRecentMessages(finalLidDigits);
+                    if (fromRecentLid.name && fromRecentLid.name.trim().toLowerCase() !== regUsernameLower) {
+                      finalWaProfileName = fromRecentLid.name.trim();
+                    }
+                  }
+                }
+
+                let finalPhotoUrl: string | null =
+                  state.data.photoUrl ||
+                  (db.waProfilePhotos && (
+                    db.waProfilePhotos[cleanUserWa] ||
+                    db.waProfilePhotos[localUserWa] ||
+                    db.waProfilePhotos[plainUserWa] ||
+                    (finalLid && db.waProfilePhotos[finalLid]) ||
+                    (finalLidDigits && db.waProfilePhotos[finalLidDigits])
+                  )) ||
+                  null;
+
+                if (!finalPhotoUrl && waSocket) {
+                  try {
+                    finalPhotoUrl = await waSocket.profilePictureUrl(`${cleanUserWa}@s.whatsapp.net`, 'image').catch(() => null);
+                    if (!finalPhotoUrl && finalLid) {
+                      finalPhotoUrl = await waSocket.profilePictureUrl(finalLid, 'image').catch(() => null);
+                    }
+                    if (finalPhotoUrl) {
+                      if (!db.waProfilePhotos) db.waProfilePhotos = {};
+                      db.waProfilePhotos[cleanUserWa] = finalPhotoUrl;
+                      db.waProfilePhotos[localUserWa] = finalPhotoUrl;
+                    }
+                  } catch (e) {}
+                }
                 
                 const existingMember = members.find(m => {
                   let mWa = m.whatsapp.replace(/\D/g, "");
                   if (mWa.startsWith("0")) mWa = "62" + mWa.substring(1);
+                  else if (mWa.startsWith("8")) mWa = "62" + mWa;
                   return mWa === cleanUserWa;
                 });
                 
                 if (existingMember) {
                   existingMember.telegram = `ID:${userId}`;
-                  // Optionally update name if desired, but we can keep the owner's set name or user's set name
-                  // existingMember.name = state.data.username;
+                  existingMember.gmail = state.data.gmail;
+                  if (finalWaProfileName) {
+                    existingMember.waProfileName = finalWaProfileName;
+                    existingMember.isProfileLocked = true;
+                  }
+                  if (finalLid) existingMember.lid = finalLid;
+                  if (finalPhotoUrl) existingMember.photoUrl = finalPhotoUrl;
                 } else {
                   members.push({
                     id: `MBR-${userId}`,
                     name: state.data.username,
+                    waProfileName: finalWaProfileName || null,
                     whatsapp: state.data.wa,
                     telegram: `ID:${userId}`,
                     balance: 0,
                     type: 'Biasa',
-                    gmail: state.data.gmail
+                    gmail: state.data.gmail,
+                    lid: finalLid || null,
+                    photoUrl: finalPhotoUrl || null,
+                    isProfileLocked: Boolean(finalWaProfileName)
                   });
                 }
                 
@@ -13608,8 +14174,8 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
                     console.log("Could not get Telegram profile photo for user", userId, photoErr);
                   }
 
-                  let fallbackWaPhoto: string | null = null;
-                  if (!tgProfilePhotoFileId && waSocket) {
+                  let fallbackWaPhoto: string | null = finalPhotoUrl;
+                  if (!tgProfilePhotoFileId && !fallbackWaPhoto && waSocket) {
                     try {
                       const waJid = `${cleanUserWa}@s.whatsapp.net`;
                       fallbackWaPhoto = await waSocket.profilePictureUrl(waJid, 'image').catch(() => null);
@@ -13622,6 +14188,7 @@ Kirim sebagai Document/File di Telegram jika ingin kualitas asli (HD/tanpa pecah
 Halo Bos, ada customer baru yang baru saja mendaftar di Telegram E4 Store:
 
 👤 *Nama User*: ${state.data.username}
+🏷️ *Nama Profil WA*: ${finalWaProfileName ? `~${finalWaProfileName}` : 'Belum terdeteksi'}
 📱 *Nomor WhatsApp*: +${cleanUserWa} (${state.data.wa})
 📧 *Gmail yang Diisi*: ${state.data.gmail || '-'}
 💬 *Nama Profile Telegram*: ${tgProfileName}
@@ -13677,6 +14244,7 @@ _Data member telah berhasil tersimpan dan akun otomatis aktif._`;
                   }
                 });
                 return;
+              }
             }
         }
         

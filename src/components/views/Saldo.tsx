@@ -510,55 +510,71 @@ export function Saldo({ onBack }: { onBack: () => void }) {
 
                   {/* Profil WhatsApp (Foto, Nama, LID, Nomor) */}
                   <td className="px-6 py-4">
-                    <div className="flex items-center gap-2.5">
-                      <div className="relative shrink-0">
-                        {m.photoUrl ? (
-                          <img
-                            src={m.photoUrl}
-                            alt={m.waProfileName || m.name}
-                            className="w-9 h-9 rounded-full object-cover border border-emerald-500/40 shadow-xs ring-1 ring-emerald-500/20"
-                            onError={(e) => {
-                              (e.currentTarget as HTMLElement).style.display = 'none';
-                              const fallback = (e.currentTarget.nextElementSibling as HTMLElement);
-                              if (fallback) fallback.style.display = 'flex';
-                            }}
-                          />
-                        ) : null}
-                        <div
-                          style={{ display: m.photoUrl ? 'none' : 'flex' }}
-                          className="w-9 h-9 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 items-center justify-center font-bold text-xs shadow-xs shrink-0 select-none"
-                          title="Foto WhatsApp tidak tersedia / privat"
-                        >
-                          {m.waProfileName && m.waProfileName.trim()
-                            ? m.waProfileName.trim().charAt(0).toUpperCase()
-                            : <User size={15} />}
-                        </div>
-                      </div>
-
-                      <div className="min-w-0 space-y-0.5">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs font-bold text-slate-200 truncate" title="Nama Profil WhatsApp">
-                            {m.waProfileName || m.name}
-                          </span>
-                        </div>
-                        <div className="text-[11px] font-mono text-emerald-400 flex items-center gap-1">
-                          <Phone size={10} className="text-emerald-500" />
-                          <span>{m.whatsapp || '-'}</span>
-                        </div>
-                        {m.lid ? (
-                          <div className="pt-0.5">
-                            <span 
-                              className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-sky-500/10 text-sky-400 border border-sky-500/30 text-[10px] font-mono select-all" 
-                              title="LID WhatsApp Resmi"
+                    {(() => {
+                      const validWaProfileName =
+                        m.waProfileName &&
+                        m.waProfileName !== '-' &&
+                        m.waProfileName.trim().toLowerCase() !== String(m.name || '').trim().toLowerCase()
+                          ? m.waProfileName.trim()
+                          : null;
+                      return (
+                        <div className="flex items-center gap-2.5">
+                          <div className="relative shrink-0">
+                            {m.photoUrl ? (
+                              <img
+                                src={m.photoUrl}
+                                alt={validWaProfileName || m.name}
+                                className="w-9 h-9 rounded-full object-cover border border-emerald-500/40 shadow-xs ring-1 ring-emerald-500/20"
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLElement).style.display = 'none';
+                                  const fallback = (e.currentTarget.nextElementSibling as HTMLElement);
+                                  if (fallback) fallback.style.display = 'flex';
+                                }}
+                              />
+                            ) : null}
+                            <div
+                              style={{ display: m.photoUrl ? 'none' : 'flex' }}
+                              className="w-9 h-9 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 items-center justify-center font-bold text-xs shadow-xs shrink-0 select-none"
+                              title="Foto WhatsApp tidak tersedia / privat"
                             >
-                              🆔 {m.lid.replace(/@.*$/, '')}
-                            </span>
+                              {validWaProfileName
+                                ? validWaProfileName.charAt(0).toUpperCase()
+                                : <User size={15} />}
+                            </div>
                           </div>
-                        ) : (
-                          <span className="text-[10px] text-slate-500 italic">LID belum ada</span>
-                        )}
-                      </div>
-                    </div>
+
+                          <div className="min-w-0 space-y-0.5">
+                            <div className="flex items-center gap-1.5">
+                              {validWaProfileName ? (
+                                <span className="text-xs font-bold text-emerald-300 truncate" title="Nama Profil WhatsApp Asli (~PushName)">
+                                  ~{validWaProfileName}
+                                </span>
+                              ) : (
+                                <span className="text-[11px] text-slate-500 italic" title="Nama profil WA akan otomatis terisi saat nomor ini mengirim chat ke Bot WA">
+                                  Belum terdeteksi
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] font-mono text-emerald-400 flex items-center gap-1">
+                              <Phone size={10} className="text-emerald-500" />
+                              <span>{m.whatsapp || '-'}</span>
+                            </div>
+                            {m.lid ? (
+                              <div className="pt-0.5">
+                                <span 
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-sky-500/10 text-sky-400 border border-sky-500/30 text-[10px] font-mono select-all" 
+                                  title="LID WhatsApp Resmi"
+                                >
+                                  🆔 {m.lid.replace(/@.*$/, '')}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-[10px] text-slate-500 italic">LID belum ada</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </td>
 
                   {/* Profil Telegram (Foto & Nama Display) */}
