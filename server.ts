@@ -3416,6 +3416,21 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
   });
   app.use("/api/", apiLimiter);
 
+  // RFC 9116 Security Policy Endpoint (Untuk Scanner Keamanan & White-hat Researchers)
+  const RFC9116_SECURITY_TXT = `# RFC 9116 Security Policy for E4 Store
+Contact: mailto:e4tstore@gmail.com
+Expires: 2027-12-31T23:59:59.000Z
+Preferred-Languages: id, en
+Canonical: https://e4-store.my.id/.well-known/security.txt
+Policy: https://e4-store.my.id
+`;
+
+  app.get(["/.well-known/security.txt", "/security.txt"], (_req, res) => {
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    return res.status(200).send(RFC9116_SECURITY_TXT);
+  });
+
   // =========================================================================
   // SERVER-SIDE ADMIN AUTHENTICATION & SESSION GUARD (ZERO-GAP API PROTECTION)
   // =========================================================================

@@ -1,0 +1,6 @@
+# RFC 9116 Security Policy for E4 Store
+Contact: mailto:e4tstore@gmail.com
+Expires: 2027-12-31T23:59:59.000Z
+Preferred-Languages: id, en
+Canonical: https://e4-store.my.id/.well-known/security.txt
+Policy: https://e4-store.my.id
