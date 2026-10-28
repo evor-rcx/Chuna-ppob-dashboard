@@ -7618,9 +7618,44 @@ async function generateGroupWelcomeVoiceNote(name: string): Promise<Buffer | nul
         console.log("Auto-reset old transactions finished.");
     }
   }
+
+  function cleanupTopupRequests() {
+    if (!db.topupRequests || !Array.isArray(db.topupRequests) || db.topupRequests.length === 0) return;
+
+    // Batas waktu pembersihan: 2 hari (2 * 24 * 60 * 60 * 1000 ms)
+    const now = new Date();
+    const twoDaysAgoTime = now.getTime() - (2 * 24 * 60 * 60 * 1000);
+    const initialCount = db.topupRequests.length;
+
+    const remainingRequests = db.topupRequests.filter((req: any) => {
+      let reqTime = 0;
+      if (req.createdAt) {
+        reqTime = new Date(req.createdAt).getTime();
+      } else if (req.id && typeof req.id === 'string' && req.id.startsWith('req-')) {
+        const idTimestamp = parseInt(req.id.replace('req-', ''), 10);
+        if (!isNaN(idTimestamp)) reqTime = idTimestamp;
+      }
+
+      // Hapus data yang berusia lebih dari 2 hari
+      if (reqTime > 0 && reqTime < twoDaysAgoTime) {
+        return false;
+      }
+      return true;
+    });
+
+    if (remainingRequests.length !== initialCount) {
+      db.topupRequests = remainingRequests;
+      writeDB(db);
+      console.log(`[Auto-Cleanup Saldo] Berhasil membersihkan ${initialCount - remainingRequests.length} riwayat permintaan isi saldo yang berusia lebih dari 2 hari.`);
+    }
+  }
   
   cleanupTransactions();
-  cron.schedule('0 0 * * *', cleanupTransactions, { timezone: "Asia/Makassar" });
+  cleanupTopupRequests();
+  cron.schedule('0 0 * * *', () => {
+    cleanupTransactions();
+    cleanupTopupRequests();
+  }, { timezone: "Asia/Makassar" });
 
 
   app.get("/api/debug-cache", (req, res) => {
