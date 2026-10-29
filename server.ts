@@ -3546,6 +3546,382 @@ Policy: https://e4-store.my.id
   });
 
   // =========================================================================
+  // LAUNDRY TANTE TIKA - DIGITAL INVOICE GENERATOR & WA SENDER API
+  // =========================================================================
+  app.options(["/api/laundry/kirim-nota", "/api/laundry/profile-picture"], (req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept");
+    return res.sendStatus(200);
+  });
+
+  // 1. Endpoint Cek Foto Profil Pelanggan WhatsApp
+  app.get("/api/laundry/profile-picture", async (req: any, res: any) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    try {
+      const { phone } = req.query;
+      if (!phone) {
+        return res.status(400).json({ success: false, message: "Nomor WhatsApp wajib diisi" });
+      }
+
+      let cleanPhone = String(phone).replace(/\D/g, "");
+      if (cleanPhone.startsWith("0")) cleanPhone = "62" + cleanPhone.slice(1);
+      else if (cleanPhone.startsWith("8")) cleanPhone = "62" + cleanPhone;
+
+      const jid = `${cleanPhone}@s.whatsapp.net`;
+      if (!waSocket) {
+        return res.status(503).json({ success: false, message: "Server Bot WhatsApp belum aktif" });
+      }
+
+      const ppUrl = await waSocket.profilePictureUrl(jid, "image").catch(() => null);
+      return res.json({
+        success: true,
+        phone: cleanPhone,
+        profileUrl: ppUrl || null,
+        hasCustomPhoto: !!ppUrl
+      });
+    } catch (err: any) {
+      return res.json({
+        success: false,
+        profileUrl: null,
+        message: err?.message || "Foto profil tidak ditemukan atau di-private"
+      });
+    }
+  });
+
+  // 2. Endpoint Pembuat Gambar Nota Canvas & Kirim ke WhatsApp Pelanggan
+  app.post("/api/laundry/kirim-nota", express.json({ limit: "50mb" }), async (req: any, res: any) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept");
+
+    try {
+      const {
+        no_nota,
+        nama_pelanggan,
+        nomor_wa,
+        alamat,
+        rincian,
+        total,
+        status_bayar,
+        pengiriman,
+        catatan_footer,
+        waktu,
+        caption
+      } = req.body || {};
+
+      if (!nomor_wa) {
+        return res.status(400).json({ success: false, message: "Nomor WhatsApp wajib diisi" });
+      }
+
+      if (!waSocket) {
+        return res.status(503).json({ success: false, message: "Server Bot WhatsApp belum tersambung" });
+      }
+
+      // 1. Format JID WhatsApp
+      let cleanNumber = String(nomor_wa).replace(/\D/g, "");
+      if (cleanNumber.startsWith("0")) cleanNumber = "62" + cleanNumber.slice(1);
+      else if (cleanNumber.startsWith("8")) cleanNumber = "62" + cleanNumber;
+
+      if (cleanNumber.length < 8) {
+        return res.status(400).json({ success: false, message: "Nomor WhatsApp tidak valid" });
+      }
+      const jid = `${cleanNumber}@s.whatsapp.net`;
+
+      // 2. Tarik Foto Profil WhatsApp Pelanggan
+      let ppImageBuffer: Buffer | null = null;
+      try {
+        const ppUrl = await waSocket.profilePictureUrl(jid, "image");
+        if (ppUrl) {
+          const fetchResp = await fetch(ppUrl);
+          if (fetchResp.ok) {
+            const arrBuf = await fetchResp.arrayBuffer();
+            ppImageBuffer = Buffer.from(arrBuf);
+          }
+        }
+      } catch (e) {
+        ppImageBuffer = null;
+      }
+
+      // 3. Normalisasi Rincian Item (Bisa array objek, array string, atau default)
+      let itemsList: Array<{ name: string; detail: string }> = [];
+      if (Array.isArray(rincian) && rincian.length > 0) {
+        itemsList = rincian.map((item: any) => {
+          if (typeof item === "string") {
+            return { name: item, detail: "" };
+          }
+          const nama = item.nama_layanan || item.name || item.layanan || "Layanan Laundry";
+          const qty = item.qty || item.berat || item.jumlah || "";
+          const hrg = item.harga_satuan ? `Rp ${Number(item.harga_satuan).toLocaleString("id-ID")}` : "";
+          const sub = item.subtotal ? `Rp ${Number(item.subtotal).toLocaleString("id-ID")}` : "";
+          const detail = [qty, hrg ? `x ${hrg}` : "", sub ? `= ${sub}` : ""].filter(Boolean).join(" ");
+          return { name: nama, detail: detail || sub || "" };
+        });
+      } else {
+        itemsList = [{
+          name: "SETRIKA (KILOAN)",
+          detail: "4.45 KG x Rp 5.000 = Rp 22.250"
+        }];
+      }
+
+      // 4. Hitung Dimensi Canvas Dinamis Berdasarkan Jumlah Item
+      const width = 850;
+      const baseHeight = 980;
+      const extraHeight = Math.max(0, (itemsList.length - 1) * 65);
+      const height = baseHeight + extraHeight;
+
+      const canvas = createCanvas(width, height);
+      const ctx = canvas.getContext("2d");
+
+      // Background Putih Bersih
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(0, 0, width, height);
+
+      // Bingkai Vintage Luar (#003B5C)
+      ctx.strokeStyle = "#003B5C";
+      ctx.lineWidth = 4;
+      ctx.strokeRect(30, 30, width - 60, height - 60);
+
+      // Bingkai Garis Halus Dalam
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(38, 38, width - 76, height - 76);
+
+      // Aksen Sudut Vintage Ornate
+      const drawVintageCorner = (cx: number, cy: number, flipX: number, flipY: number) => {
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.scale(flipX, flipY);
+        ctx.strokeStyle = "#003B5C";
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(0, 0, 18, 0, Math.PI / 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(0, 0, 24, 0, Math.PI / 2);
+        ctx.stroke();
+        ctx.restore();
+      };
+      drawVintageCorner(45, 45, 1, 1);
+      drawVintageCorner(width - 45, 45, -1, 1);
+      drawVintageCorner(45, height - 45, 1, -1);
+      drawVintageCorner(width - 45, height - 45, -1, -1);
+
+      // A. Tempel Banner Header Laundry Tante Tika
+      const possibleBannerPaths = [
+        path.join(process.cwd(), "public", "assets", "aistudio", "Bener atas.jpg"),
+        path.join(process.cwd(), "laundry-tante-tika", "Bener atas.jpg"),
+        path.join(process.cwd(), "Bener atas.jpg")
+      ];
+      const bannerPath = possibleBannerPaths.find(p => fs.existsSync(p));
+      if (bannerPath) {
+        try {
+          const bannerImg = await loadImage(bannerPath);
+          ctx.drawImage(bannerImg, 50, 48, width - 100, 135);
+        } catch (e) {
+          console.warn("[Laundry] Gagal memuat file banner, memakai teks fallback");
+        }
+      }
+
+      // B. Nomor Nota & Waktu
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#003B5C";
+      ctx.font = "italic bold 32px sans-serif";
+      const displayNota = no_nota ? (no_nota.startsWith("#") ? no_nota : `#${no_nota}`) : "#LT-4818";
+      ctx.fillText(`Nota ${displayNota}`, width / 2, 230);
+
+      ctx.fillStyle = "#1E293B";
+      ctx.font = "bold 23px sans-serif";
+      const displayWaktu = waktu || new Date().toLocaleDateString("id-ID", {
+        day: "numeric",
+        month: "long",
+        year: "numeric"
+      }) + " " + new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+      ctx.fillText(`📅 Waktu: ${displayWaktu}`, width / 2, 268);
+
+      // C. Foto Profil Pelanggan (Bentuk Lingkaran)
+      const avatarX = 85;
+      const avatarY = 305;
+      const radius = 55;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(avatarX + radius, avatarY + radius, radius, 0, Math.PI * 2, true);
+      ctx.closePath();
+      ctx.clip();
+
+      if (ppImageBuffer) {
+        try {
+          const ppImg = await loadImage(ppImageBuffer);
+          ctx.drawImage(ppImg, avatarX, avatarY, radius * 2, radius * 2);
+        } catch (e) {
+          ctx.fillStyle = "#E2E8F0";
+          ctx.fillRect(avatarX, avatarY, radius * 2, radius * 2);
+        }
+      } else {
+        // Fallback siluet / inisial jika foto profil WA disembunyikan
+        ctx.fillStyle = "#E2E8F0";
+        ctx.fillRect(avatarX, avatarY, radius * 2, radius * 2);
+        ctx.fillStyle = "#0284C7";
+        ctx.font = "bold 44px sans-serif";
+        ctx.textAlign = "center";
+        const initial = nama_pelanggan ? String(nama_pelanggan).trim().charAt(0).toUpperCase() : "U";
+        ctx.fillText(initial, avatarX + radius, avatarY + radius + 15);
+      }
+      ctx.restore();
+
+      // Border Lingkaran Foto
+      ctx.beginPath();
+      ctx.arc(avatarX + radius, avatarY + radius, radius, 0, Math.PI * 2, true);
+      ctx.lineWidth = 3.5;
+      ctx.strokeStyle = "#003B5C";
+      ctx.stroke();
+
+      // D. Nama & Alamat Pelanggan
+      ctx.textAlign = "left";
+      ctx.fillStyle = "#003B5C";
+      ctx.font = "bold 26px sans-serif";
+      ctx.fillText(`👤 Nama: ${(nama_pelanggan || "PELANGGAN").toUpperCase()}`, 225, 350);
+      ctx.fillText(`📍 Alamat: ${(alamat || "-").toUpperCase()}`, 225, 400);
+
+      // Garis Pemisah Biru Toska
+      ctx.strokeStyle = "#008080";
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(60, 440);
+      ctx.lineTo(width - 60, 440);
+      ctx.stroke();
+
+      // E. Kotak Rincian Pesanan (Soft Teal/Cyan #E0F2F1)
+      const boxY = 460;
+      const boxHeight = 85 + (itemsList.length * 60);
+      ctx.fillStyle = "#E0F2F1";
+      ctx.fillRect(60, boxY, width - 120, boxHeight);
+
+      ctx.fillStyle = "#003B5C";
+      ctx.font = "bold 25px sans-serif";
+      ctx.fillText("📦 RINCIAN PESANAN:", 85, boxY + 40);
+
+      let itemY = boxY + 80;
+      for (const it of itemsList) {
+        ctx.fillStyle = "#0F172A";
+        ctx.font = "bold 22px sans-serif";
+        ctx.fillText(`▪ ${it.name.toUpperCase()}`, 100, itemY);
+        if (it.detail) {
+          ctx.font = "bold 21px sans-serif";
+          ctx.fillStyle = "#1E293B";
+          ctx.fillText(`   ${it.detail}`, 100, itemY + 28);
+        }
+        itemY += 60;
+      }
+
+      // F. Garis Putus-putus
+      const dash1Y = boxY + boxHeight + 25;
+      ctx.setLineDash([14, 8]);
+      ctx.strokeStyle = "#008080";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(60, dash1Y);
+      ctx.lineTo(width - 60, dash1Y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // G. Total Highlight Box (#B2DFDB)
+      const totalBoxY = dash1Y + 22;
+      ctx.fillStyle = "#B2DFDB";
+      ctx.fillRect(80, totalBoxY, 460, 50);
+      ctx.fillStyle = "#003B5C";
+      ctx.font = "bold 28px sans-serif";
+      const totalFormatted = typeof total === "number" 
+        ? `Rp ${total.toLocaleString("id-ID")}` 
+        : (String(total).includes("Rp") ? total : `Rp ${Number(total || 0).toLocaleString("id-ID")}`);
+      ctx.fillText(`💳 TOTAL: ${totalFormatted}`, 95, totalBoxY + 36);
+
+      // H. Status & Pengiriman
+      const statusY = totalBoxY + 88;
+      ctx.font = "bold 27px sans-serif";
+      ctx.fillStyle = "#003B5C";
+      ctx.fillText("🏷️ STATUS:", 85, statusY);
+
+      const isLunas = String(status_bayar || "").toUpperCase().includes("LUNAS") && 
+                     !String(status_bayar || "").toUpperCase().includes("BELUM");
+      ctx.fillStyle = isLunas ? "#16A34A" : "#E11D48";
+      ctx.fillText(status_bayar || (isLunas ? "LUNAS" : "BELUM LUNAS"), 260, statusY);
+
+      ctx.fillStyle = "#003B5C";
+      ctx.fillText(`🚚 PENGIRIMAN: ${(pengiriman || "ANTAR JEMPUT").toUpperCase()}`, 85, statusY + 45);
+
+      // Garis Putus-putus Bawah
+      const dash2Y = statusY + 80;
+      ctx.setLineDash([14, 8]);
+      ctx.strokeStyle = "#008080";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(60, dash2Y);
+      ctx.lineTo(width - 60, dash2Y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // I. Slogan & Footer
+      ctx.textAlign = "center";
+      ctx.font = "italic bold 25px sans-serif";
+      ctx.fillStyle = "#003B5C";
+      ctx.fillText('“PAKAIAN BERSIH, HATI SENANG”', width / 2, dash2Y + 42);
+
+      ctx.font = "normal 21px sans-serif";
+      ctx.fillStyle = "#334155";
+      ctx.fillText(catatan_footer || "Hari Sumpah Pemuda (1 hari lagi)", width / 2, dash2Y + 75);
+
+      // 5. Render Buffer Gambar JPEG Kualitas Tinggi
+      const imageBuffer = canvas.toBuffer("image/jpeg");
+
+      // 6. Tentukan Caption Gambar WhatsApp Sesuai Tipe Pengiriman & Waktu
+      // Format Waktu: pagi (05-11), siang (11-15), sore (15-18), malam (18-05) (WITA / GMT+8 Bontang)
+      const now = new Date();
+      const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+      const witaDate = new Date(utc + (3600000 * 8));
+      const hour = witaDate.getHours();
+      let salamWaktu = "malam";
+      if (hour >= 5 && hour < 11) salamWaktu = "pagi";
+      else if (hour >= 11 && hour < 15) salamWaktu = "siang";
+      else if (hour >= 15 && hour < 18) salamWaktu = "sore";
+
+      const deliveryNorm = String(pengiriman || "").trim().toUpperCase();
+      let defaultCaption = "";
+      if (deliveryNorm === "AMBIL SENDIRI") {
+        defaultCaption = `Selamat ${salamWaktu}, Kak. Mohon izin menginfokan bahwa cucian laundry Kakak sudah selesai diproses dan siap untuk diambil. Terima kasih.`;
+      } else {
+        defaultCaption = `Selamat ${salamWaktu}, Kak. Mohon izin, apakah ada orang di rumah saat ini? Saya ingin mengantar laundry pesanan Kakak. Terima kasih.`;
+      }
+
+      const captionText = (caption && typeof caption === "string" && caption.trim().length > 0)
+        ? caption.trim()
+        : defaultCaption;
+
+      await waSocket.sendMessage(jid, {
+        image: imageBuffer,
+        caption: captionText
+      });
+
+      console.log(`[Laundry API] Sukses generate & kirim nota ke WhatsApp +${cleanNumber} (${displayNota})`);
+
+      return res.json({
+        success: true,
+        message: "Nota berhasil dibuat dan langsung terkirim ke WhatsApp pelanggan!",
+        nota: displayNota,
+        phone: cleanNumber,
+        hasProfilePic: !!ppImageBuffer
+      });
+
+    } catch (error: any) {
+      console.error("[Laundry API] Error kirim nota laundry:", error);
+      return res.status(500).json({
+        success: false,
+        message: error?.message || "Terjadi kesalahan saat memproses nota"
+      });
+    }
+  });
+
+  // =========================================================================
   // SERVER-SIDE ADMIN AUTHENTICATION & SESSION GUARD (ZERO-GAP API PROTECTION)
   // =========================================================================
   interface AdminSessionInfo {
