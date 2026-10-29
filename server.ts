@@ -2423,6 +2423,7 @@ export let waSocket: ReturnType<typeof makeWASocket> | null = null;
 let waStatus = "Disconnected";
 let waPairingCode = "";
 let isRequestingPairingCode = false;
+const forwardedCustomerMsgIds = new Set<string>();
 
 export async function generateCanvasDebtReceipt(member: any, utangTxs: any[]): Promise<Buffer | null> {
     try {
@@ -3411,7 +3412,13 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
     max: 300,
     message: { success: false, error: "Limit request API tercapai. (Anti-DDoS Protection)" },
     skip: (req) => {
-      return req.path.includes('/webhook') || req.path.includes('/api/digiflazz-webhook') || req.path.includes('/api/digiflazz/webhook');
+      return req.path.includes('/webhook') || 
+             req.path.includes('/api/digiflazz-webhook') || 
+             req.path.includes('/api/digiflazz/webhook') ||
+             req.path === '/status' ||
+             req.path === '/api/status' ||
+             req.path === '/send' ||
+             req.path === '/api/send';
     }
   });
   app.use("/api/", apiLimiter);
@@ -3429,6 +3436,113 @@ Policy: https://e4-store.my.id
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=86400");
     return res.status(200).send(RFC9116_SECURITY_TXT);
+  });
+
+  // =========================================================================
+  // 🧺 ENDPOINT INTEGRASI APLIKASI LAUNDRY (CORS ENABLED FOR ALL ORIGINS)
+  // =========================================================================
+  app.options(["/status", "/api/status", "/send", "/api/send"], (_req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept");
+    return res.sendStatus(204);
+  });
+
+  app.get(["/status", "/api/status"], (_req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept");
+
+    const isConnected = Boolean(waSocket && (waStatus.includes("Connected") || waStatus.includes("connected") || (waSocket as any)?.user?.id));
+
+    let botNum = "085169949219";
+    if (globalWaPhoneNumber) {
+      const clean = globalWaPhoneNumber.replace(/\D/g, "");
+      botNum = clean.startsWith("62") ? "0" + clean.slice(2) : (clean.startsWith("0") ? clean : "0" + clean);
+    } else if ((waSocket as any)?.user?.id) {
+      const clean = normalizeWaNumber((waSocket as any).user.id);
+      if (clean) {
+        botNum = clean.startsWith("62") ? "0" + clean.slice(2) : (clean.startsWith("0") ? clean : "0" + clean);
+      }
+    }
+
+    return res.json({
+      connected: true,
+      botNumber: botNum,
+      name: "Bot WA E4 & Laundry",
+      isBaileysOnline: isConnected
+    });
+  });
+
+  app.post(["/send", "/api/send"], express.json({ limit: "50mb" }), async (req: any, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept");
+
+    try {
+      const { phone, message, image, imageBase64, caption } = req.body || {};
+      if (!phone) {
+        return res.status(400).json({ success: false, error: "Nomor WhatsApp (phone) wajib diisi" });
+      }
+
+      let cleanPhone = String(phone).replace(/\D/g, "");
+      if (cleanPhone.startsWith("0")) {
+        cleanPhone = "62" + cleanPhone.slice(1);
+      } else if (cleanPhone.startsWith("8")) {
+        cleanPhone = "62" + cleanPhone;
+      }
+
+      if (cleanPhone.length < 8) {
+        return res.status(400).json({ success: false, error: "Nomor WhatsApp tidak valid (terlalu pendek)" });
+      }
+
+      const targetJid = `${cleanPhone}@s.whatsapp.net`;
+
+      if (!waSocket) {
+        return res.status(503).json({ success: false, error: "Bot WhatsApp belum aktif di server" });
+      }
+
+      const rawImg = imageBase64 || image;
+      let hasImage = false;
+
+      if (rawImg && typeof rawImg === "string") {
+        let buffer: Buffer | null = null;
+        if (rawImg.startsWith("data:image") || /^[A-Za-z0-9+/=]+$/.test(rawImg.substring(0, 100))) {
+          const base64Data = rawImg.replace(/^data:image\/\w+;base64,/, "");
+          buffer = Buffer.from(base64Data, "base64");
+        } else if (rawImg.startsWith("http://") || rawImg.startsWith("https://")) {
+          const axios = require("axios");
+          const resp = await axios.get(rawImg, { responseType: "arraybuffer", timeout: 10000 });
+          if (resp.data) buffer = Buffer.from(resp.data);
+        }
+
+        if (buffer && buffer.length > 0) {
+          hasImage = true;
+          const imgCaption = caption || message || "";
+          await waSocket.sendMessage(targetJid, {
+            image: buffer,
+            caption: imgCaption
+          });
+          console.log(`[Laundry API] Nota gambar berhasil dikirim ke +${cleanPhone}`);
+          return res.json({ success: true, hasImage: true, phone: cleanPhone });
+        }
+      }
+
+      const textMsg = message || caption || "";
+      if (!textMsg) {
+        return res.status(400).json({ success: false, error: "Pesan (message) atau gambar wajib diisi" });
+      }
+
+      await waSocket.sendMessage(targetJid, { text: String(textMsg) });
+      console.log(`[Laundry API] Pesan teks berhasil dikirim ke +${cleanPhone}`);
+      return res.json({ success: true, hasImage: false, phone: cleanPhone });
+    } catch (err: any) {
+      console.error("[Laundry API] Gagal mengirim pesan via WhatsApp:", err);
+      return res.status(500).json({
+        success: false,
+        error: err?.message || "Gagal mengirim pesan WhatsApp"
+      });
+    }
   });
 
   // =========================================================================
@@ -6369,6 +6483,77 @@ function registerMessageForBlockCheck(msgId: string, jid: string, type: "utang" 
             { text: wrongMsg },
             { quoted: msg }
           ).catch(() => {});
+          return;
+        }
+
+        // ==========================================
+        // 📩 FITUR MENERUSKAN PESAN PELANGGAN KE OWNER WHATSAPP (SILENT FORWARD)
+        // ==========================================
+        if (!msg.key.fromMe && !isSenderOwner && text.trim() && !isSixDigitPin) {
+          const isDirectChat = !jid?.endsWith('@g.us') && !jid?.endsWith('@newsletter') && !jid?.includes('status@broadcast');
+          if (isDirectChat) {
+            const msgUniqueKey = String(msg.key?.id || `${senderJid}_${text.trim()}_${Math.floor(Date.now() / 5000)}`);
+            if (!forwardedCustomerMsgIds.has(msgUniqueKey)) {
+              forwardedCustomerMsgIds.add(msgUniqueKey);
+              if (forwardedCustomerMsgIds.size > 2000) {
+                const firstKey = forwardedCustomerMsgIds.values().next().value;
+                if (firstKey) forwardedCustomerMsgIds.delete(firstKey);
+              }
+
+              const resolvedPhone = resolveSenderWaPhone(senderJid, cleanSenderNum);
+              const targetCustNum = resolvedPhone || cleanSenderNum;
+              let intlCustNum = targetCustNum.replace(/\D/g, "");
+              if (intlCustNum.startsWith("0")) intlCustNum = "62" + intlCustNum.slice(1);
+              else if (intlCustNum.startsWith("8")) intlCustNum = "62" + intlCustNum;
+
+              const customerProfileName = msg.pushName || 
+                (db.waProfiles && targetCustNum && db.waProfiles[targetCustNum]) || 
+                (db.waProfiles && cleanSenderNum && db.waProfiles[cleanSenderNum]) || 
+                "Pelanggan";
+
+              const waLink = intlCustNum ? `https://wa.me/${intlCustNum}` : "Tidak diketahui";
+
+              const now = new Date();
+              const pad2 = (n: number) => String(n).padStart(2, '0');
+              const waktuStr = `${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())} WIB (${pad2(now.getDate())}/${pad2(now.getMonth() + 1)}/${now.getFullYear()})`;
+
+              const forwardText = 
+`--------------------------------------
+📩 *PESAN MASUK DARI PELANGGAN*
+• *Nama Profil WA:* ${customerProfileName}
+• *Nomor WA:* ${waLink}
+• *JID:* ${senderJid || jid}
+• *Waktu:* ${waktuStr}
+--------------------------------------
+💬 *Isi Pesan:*
+"${text.trim()}"
+--------------------------------------`;
+
+              const targetOwners = (db.ownerWhatsapps && db.ownerWhatsapps.length > 0) ? db.ownerWhatsapps : ["6285169949218"];
+              if (waSocket) {
+                for (const owPhone of targetOwners) {
+                  const cleanOw = normalizeWaNumber(owPhone);
+                  if (cleanOw && cleanOw !== intlCustNum && cleanOw !== cleanSenderNum) {
+                    const owJid = `${cleanOw}@s.whatsapp.net`;
+                    waSocket.sendMessage(owJid, { text: forwardText }).catch(err => {
+                      console.error(`[Silent Forward] Gagal forward ke Owner WA (${cleanOw}):`, err?.message || err);
+                    });
+                  }
+                }
+              }
+
+              if (bot && db.owners && Array.isArray(db.owners)) {
+                for (const ownerId of db.owners) {
+                  bot.telegram.sendMessage(ownerId, forwardText, { disable_web_page_preview: true }).catch(() => {});
+                }
+              }
+            }
+          }
+        }
+
+        // Jika pesan mengenai laundry, jangan kirim balasan otomatis toko agar tidak membocorkan forward
+        const isLaundryChat = /(laundry|loundry|cuci|ambal|setrika|antar|jemput|baju|pakaian|kiloan|selimut|karpet|sprei|kasur|lunas|titip|eka)/i.test(text);
+        if (isLaundryChat && !isSenderOwner) {
           return;
         }
 
